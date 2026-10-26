@@ -43,7 +43,11 @@ jobs:
               s = re.sub(r'(VALUE "%s",\s*)"[^"]*"' % key, r'\1"%s"' % val, s)
           open(path, 'w', encoding='utf-8').write(s)
           # آیکون برنامه
-          shutil.copyfile('windows_assets/app_icon.ico', 'windows/runner/resources/app_icon.ico')
+          import os
+          if os.path.exists('windows_assets/app_icon.ico'):
+              shutil.copyfile('windows_assets/app_icon.ico', 'windows/runner/resources/app_icon.ico')
+          else:
+              print('WARNING: windows_assets/app_icon.ico missing - default Flutter icon is used')
 
       - name: Start the window maximized (full screen of the work area)
         shell: python
