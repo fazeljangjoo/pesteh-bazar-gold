@@ -1,0 +1,43 @@
+name: pesteh_bazar
+description: پسته بازار — مدیریت خرید، موجودی و فروش پسته
+publish_to: 'none'
+version: 1.5.0+6
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  sqflite: ^2.3.3
+  path: ^1.9.0
+  path_provider: ^2.1.3
+  image_picker: ^1.1.2
+  flutter_local_notifications: ^18.0.1
+  timezone: ^0.9.4
+  pdf: ^3.11.1
+  printing: ^5.13.1
+  http: ^1.2.2
+  shared_preferences: ^2.3.2
+  url_launcher: ^6.3.1
+  barcode_widget: ^2.0.4
+  excel: ^4.0.6                # S13: Excel export/import (pure Dart)
+  share_plus: ^10.1.4          # S13: share xlsx on Android
+  file_selector: ^1.0.3        # S13: save dialog on Windows
+  # --- نسخهٔ ویندوز ---
+  sqflite_common_ffi: ^2.4.2   # SQLite روی دسکتاپ (همان دیتابیس و کدِ گوشی)
+  ed25519_edwards: ^0.3.1      # تأیید امضای مجوز اشتراک
+  crypto: ^3.0.3
+  ffi: ^2.1.0                  # DPAPI ویندوز برای رمزگذاری توکن
+  image: ^4.2.0                # کوچک‌کردن عکس خرید روی ویندوز
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/fonts/
+    - assets/images/

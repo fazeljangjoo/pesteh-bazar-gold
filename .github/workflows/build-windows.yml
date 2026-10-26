@@ -1,0 +1,132 @@
+name: Build Windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'win-*'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      # اختیاری: گواهی امضای کد (PFX به‌صورت base64) و رمزش در Secrets مخزن
+      WIN_CERT: ${{ secrets.WIN_CERT_PFX_BASE64 }}
+      WIN_CERT_PASSWORD: ${{ secrets.WIN_CERT_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - run: flutter config --enable-windows-desktop
+
+      - name: Generate Windows runner
+        run: flutter create --platforms=windows --project-name pesteh_bazar --org com.pestehbazar .
+
+      - name: Brand the Windows runner (name, window title, icon)
+        shell: python
+        run: |
+          import re, shutil
+          # عنوان پنجره: «پسته بازار» (با escape یونیکد تا به encoding فایل وابسته نباشد)
+          title = ''.join('\\u%04x' % ord(c) for c in '\u067e\u0633\u062a\u0647 \u0628\u0627\u0632\u0627\u0631')
+          path = 'windows/runner/main.cpp'
+          s = open(path, encoding='utf-8').read()
+          s2 = re.sub(r'L"pesteh_bazar"', lambda m: 'L"%s"' % title, s, count=1)
+          assert s2 != s, 'window title not found in main.cpp'
+          open(path, 'w', encoding='utf-8').write(s2)
+          # اطلاعات فایل exe
+          path = 'windows/runner/Runner.rc'
+          s = open(path, encoding='utf-8', errors='replace').read()
+          for key, val in (('FileDescription', 'Pesteh Bazar'), ('ProductName', 'Pesteh Bazar'), ('CompanyName', 'Pesteh Bazar')):
+              s = re.sub(r'(VALUE "%s",\s*)"[^"]*"' % key, r'\1"%s"' % val, s)
+          open(path, 'w', encoding='utf-8').write(s)
+          # آیکون برنامه
+          shutil.copyfile('windows_assets/app_icon.ico', 'windows/runner/resources/app_icon.ico')
+
+      - name: Start the window maximized (full screen of the work area)
+        shell: python
+        run: |
+          path = 'windows/runner/win32_window.cpp'
+          s = open(path, encoding='utf-8').read()
+          assert 'SW_SHOWNORMAL' in s, 'SW_SHOWNORMAL not found in win32_window.cpp'
+          s = s.replace('SW_SHOWNORMAL', 'SW_SHOWMAXIMIZED', 1)
+          open(path, 'w', encoding='utf-8').write(s)
+
+      - name: Enable encrypted database engine (SQLite3 Multiple Ciphers) for Windows
+        shell: python
+        run: |
+          with open('pubspec.yaml', 'a', encoding='utf-8') as f:
+              f.write('\nhooks:\n  user_defines:\n    sqlite3:\n      source: sqlite3mc\n')
+
+      - run: flutter pub get
+
+      - name: Analyze (informational)
+        continue-on-error: true
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Build release
+        run: flutter build windows --release --obfuscate --split-debug-info=build/debug-symbols
+
+      - name: Bundle Visual C++ runtime (so the app opens on PCs without the Redistributable)
+        shell: pwsh
+        run: |
+          $dest = 'build/windows/x64/runner/Release'
+          foreach ($n in 'msvcp140.dll','vcruntime140.dll','vcruntime140_1.dll','msvcp140_1.dll','msvcp140_2.dll','concrt140.dll') {
+            $src = Join-Path $env:WINDIR "System32\$n"
+            if (Test-Path $src) { Copy-Item $src $dest -Force; Write-Host "bundled $n" }
+            elseif ($n -in 'msvcp140.dll','vcruntime140.dll','vcruntime140_1.dll') { throw "$n not found on runner" }
+          }
+
+      - name: Verify the encryption engine is bundled (fail the build if not)
+        shell: pwsh
+        run: |
+          $found = $false
+          Get-ChildItem build/windows/x64/runner/Release -Recurse -File | ForEach-Object {
+            $s = [Text.Encoding]::ASCII.GetString([IO.File]::ReadAllBytes($_.FullName))
+            if ($s.Contains('sqlite3mc')) { Write-Host "encryption engine found in $($_.Name)"; $found = $true }
+          }
+          if (-not $found) { throw "SQLite3MultipleCiphers was not found in the build output - database encryption would be disabled" }
+
+      - name: Sign app (optional, needs WIN_CERT_PFX_BASE64)
+        if: env.WIN_CERT != ''
+        shell: pwsh
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'cert.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WIN_CERT))
+          $st = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1).FullName
+          & $st sign /f $pfx /p $env:WIN_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 build/windows/x64/runner/Release/pesteh_bazar.exe
+          if ($LASTEXITCODE -ne 0) { throw "signtool failed" }
+
+      - name: Portable zip
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Compress-Archive -Path build/windows/x64/runner/Release/* -DestinationPath dist/PestehBazar-Windows-portable.zip -Force
+
+      - name: Installer (Inno Setup)
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          $ver = (Select-String -Path pubspec.yaml -Pattern '^version:\s*([0-9.]+)').Matches[0].Groups[1].Value
+          & $iscc "/DAppVersion=$ver" installer/pesteh_bazar.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+
+      - name: Sign installer (optional)
+        if: env.WIN_CERT != ''
+        shell: pwsh
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP 'cert.pfx'
+          $st = (Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\signtool.exe" | Sort-Object FullName | Select-Object -Last 1).FullName
+          & $st sign /f $pfx /p $env:WIN_CERT_PASSWORD /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 dist/PestehBazar-Setup.exe
+          if ($LASTEXITCODE -ne 0) { throw "signtool failed" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pesteh-windows
+          path: |
+            dist/PestehBazar-Setup.exe
+            dist/PestehBazar-Windows-portable.zip
+            retention-days: 1
