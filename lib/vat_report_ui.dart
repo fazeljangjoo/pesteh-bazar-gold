@@ -228,7 +228,7 @@ class _VatReportScreenState extends State<VatReportScreen> {
     try {
       final Map<String, dynamic> r = await StockApi.call('vat.settle', p);
       if (!mounted) return;
-      snack(context, 'سند تسویه ثبت شد — مبلغ ${_m(r['amount'])} ریال');
+      snack(context, 'سند تسویه ثبت شد — مبلغ ${faNum(_d(r['amount']), dec: 0)} ریال');
       _load();
     } on StockApiException catch (e) {
       if (mounted) snack(context, e.message);

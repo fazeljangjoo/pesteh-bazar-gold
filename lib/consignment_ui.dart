@@ -297,7 +297,7 @@ class _ConsignmentsScreenState extends State<ConsignmentsScreen> {
   }
 
   Future<void> _open(Widget page) async {
-    final Object? changed = await Navigator.push(context, MaterialPageRoute<Object?>(builder: (_) => page));
+    final Object? changed = await Navigator.push(context, MaterialPageRoute<Object>(builder: (_) => page));
     if (changed != null) _load();
   }
 

@@ -204,7 +204,7 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
   }
 
   Future<void> _open(Widget page) async {
-    final Object? changed = await Navigator.push(context, MaterialPageRoute<Object?>(builder: (_) => page));
+    final Object? changed = await Navigator.push(context, MaterialPageRoute<Object>(builder: (_) => page));
     if (changed != null) _load();
   }
 

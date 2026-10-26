@@ -181,7 +181,7 @@ class _OrchardsScreenState extends State<OrchardsScreen> {
   }
 
   Future<void> _open(Widget page) async {
-    final Object? changed = await Navigator.push(context, MaterialPageRoute<Object?>(builder: (_) => page));
+    final Object? changed = await Navigator.push(context, MaterialPageRoute<Object>(builder: (_) => page));
     if (changed != null) _load();
   }
 
@@ -518,7 +518,7 @@ class _OrchardDetailScreenState extends State<OrchardDetailScreen> {
                 tooltip: 'ویرایش باغ',
                 icon: const Icon(Icons.edit_outlined),
                 onPressed: () async {
-                  final Object? ok = await Navigator.push(context, MaterialPageRoute<Object?>(builder: (_) => OrchardFormScreen(orchard: _d)));
+                  final Object? ok = await Navigator.push(context, MaterialPageRoute<Object>(builder: (_) => OrchardFormScreen(orchard: _d)));
                   if (ok != null) {
                     _changed = true;
                     _load();

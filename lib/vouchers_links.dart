@@ -7,6 +7,7 @@ import 'db.dart';
 import 'edition.dart';
 import 'perms.dart';
 import 'utils.dart';
+import 'widgets.dart';
 import 'vouchers_ui.dart';
 import 'warehouse_ui.dart' show StockApi;
 
