@@ -71,7 +71,7 @@ Future<List<DueItem>> loadDues({bool includePaid = false}) async {
   await add(
       'SELECT x.id AS id, x.amount AS amount, x.date AS date, x.paid AS paid, '
       'p.seller AS party, p.type_name AS label, NULL AS ref, NULL AS bank '
-      '${payBase.replaceAll('%T%', 'lump_tx')} WHERE pay.pay_type = \'lump\'',
+      '${payBase.replaceAll('%T%', 'lump_tx')} WHERE pay.pay_type IN (\'lump\', \'mixed\')',
       'lump_tx',
       false,
       'یکجا');
@@ -79,7 +79,7 @@ Future<List<DueItem>> loadDues({bool includePaid = false}) async {
       'SELECT x.id AS id, x.amount AS amount, x.due_date AS date, x.paid AS paid, '
       'p.seller AS party, p.type_name AS label, NULL AS ref, NULL AS bank '
       '${payBase.replaceAll('%T%', 'credit_inst')} '
-      'WHERE pay.pay_type = \'staged\' AND pay.staged_type = \'credit\'',
+      'WHERE (pay.pay_type = \'mixed\' OR (pay.pay_type = \'staged\' AND pay.staged_type = \'credit\'))',
       'credit_inst',
       false,
       'قسط');
@@ -87,7 +87,7 @@ Future<List<DueItem>> loadDues({bool includePaid = false}) async {
       'SELECT x.id AS id, x.amount AS amount, x.due_date AS date, x.paid AS paid, '
       'p.seller AS party, p.type_name AS label, x.cheque_no AS ref, x.bank_name AS bank '
       '${payBase.replaceAll('%T%', 'cheque_inst')} '
-      'WHERE pay.pay_type = \'staged\' AND pay.staged_type = \'cheque\'',
+      'WHERE (pay.pay_type = \'mixed\' OR (pay.pay_type = \'staged\' AND pay.staged_type = \'cheque\'))',
       'cheque_inst',
       false,
       'چک');

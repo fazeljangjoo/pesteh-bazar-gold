@@ -1,5 +1,8 @@
 import 'dart:convert';
 import 'stock_count_local.dart';
+import 'form_settings.dart' show FormSettingsLocal;
+import 'grade_lines_ui.dart' show GradeLinesLocal;
+import 'fx_local.dart'; // S26.T26.1
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
@@ -9,6 +12,8 @@ import 'package:sqflite/sqflite.dart';
 
 import 'barcode_utils.dart';
 import 'entity_store.dart';
+import 'money_unit.dart'; // S29.T29.3
+import 'fx_doc_field.dart' show kFxRialPerStoredUnit;
 
 
 const List<String> kPresetTypesNormal = ['اکبری', 'احمدآقایی', 'فندقی', 'کله‌قوچی'];
@@ -30,52 +35,57 @@ const List<(String, List<String>)> _kSnapshot = [
       'small_sack_count', 'large_sack_count', 'small_sacks_remaining', 'large_sacks_remaining',
       'net_weight', 'remaining', 'gram', 'pct_dombest',
       'pct_tuchin', 'pct_crooked', 'pct_khandan', 'custom_specs', 'photo', 'seller', 'note',
-      'is_mix', 'created_at', 'usd_rate', 'price_usd', 'waste', 'base_type', 'labor_cost', 'transport_cost',
-      'warehouse_uid', 'ounce_uid', 'tax_status', 'tax_rate_milli'
+      'is_mix', 'created_at', 'usd_rate', 'price_usd', 'ccy', 'fx_rate', 'fx_rate_source', 'fx_rate_entered_at', 'price_ccy', 'waste', 'base_type', 'labor_cost', 'transport_cost',
+      'warehouse_uid', 'ounce_uid', 'tax_status', 'tax_rate_milli',
+      'gross_kg', 'tare_kg', 'quality_deduct_kg', 'weigh_ticket_no', 'vehicle_plate', 'driver_name', // S35.T35.2
+      'discount_amount', 'weighbridge_cost', 'side_cost_payer', 'taxable' // S35.T35.6b
     ]
   ),
   ('mix_sources', ['id', 'mix_purchase_id', 'source_purchase_id', 'weight', 'small_sacks', 'large_sacks']),
   ('payments', ['id', 'purchase_id', 'pay_type', 'staged_type']),
   (
     'lump_tx',
-    ['id', 'payment_id', 'from_account', 'payer_name', 'to_account', 'seller_name', 'amount', 'date', 'paid']
+    ['id', 'payment_id', 'from_account', 'payer_name', 'to_account', 'seller_name', 'amount', 'date', 'paid', 'ccy', 'ccy_amount', 'fx_rate']
   ),
   (
     'credit_inst',
-    ['id', 'payment_id', 'due_date', 'amount', 'from_account', 'payer_name', 'to_account', 'seller_name', 'paid']
+    ['id', 'payment_id', 'due_date', 'amount', 'from_account', 'payer_name', 'to_account', 'seller_name', 'paid', 'ccy', 'ccy_amount', 'fx_rate']
   ),
   (
     'cheque_inst',
     [
       'id', 'payment_id', 'due_date', 'amount', 'cheque_no', 'bank_name', 'from_account', 'payer_name',
-      'to_account', 'seller_name', 'paid'
+      'to_account', 'seller_name', 'paid', 'ccy', 'ccy_amount', 'fx_rate', 'sayad_id' // S35.T35.7c
     ]
   ),
   (
     'sales',
     [
       'id', 'date', 'price', 'total_weight', 'small_sack_count', 'large_sack_count', 'net_weight',
-      'buyer', 'note', 'created_at', 'usd_rate', 'labor_cost', 'transport_cost', 'tax_status', 'tax_rate_milli'
+      'buyer', 'note', 'created_at', 'usd_rate', 'ccy', 'fx_rate', 'fx_rate_source', 'fx_rate_entered_at', 'total_ccy',
+      'labor_cost', 'transport_cost', 'tax_status', 'tax_rate_milli',
+      'gross_kg', 'tare_kg', 'quality_deduct_kg', 'weigh_ticket_no', 'vehicle_plate', 'driver_name', // S35.T35.2
+      'discount_amount', 'weighbridge_cost', 'side_cost_payer', 'taxable' // S35.T35.6b
     ]
   ),
   ('sale_items', ['id', 'sale_id', 'purchase_id', 'weight', 'item_price', 'small_sacks', 'large_sacks']),
   ('receipts', ['id', 'sale_id', 'recv_type', 'staged_type']),
   (
     'receipt_lump_tx',
-    ['id', 'receipt_id', 'from_account', 'payer_name', 'to_account', 'receiver_name', 'amount', 'date', 'paid']
+    ['id', 'receipt_id', 'from_account', 'payer_name', 'to_account', 'receiver_name', 'amount', 'date', 'paid', 'ccy', 'ccy_amount', 'fx_rate']
   ),
   (
     'receipt_credit_inst',
     [
       'id', 'receipt_id', 'due_date', 'amount', 'from_account', 'payer_name', 'to_account',
-      'receiver_name', 'paid'
+      'receiver_name', 'paid', 'ccy', 'ccy_amount', 'fx_rate'
     ]
   ),
   (
     'receipt_cheque_inst',
     [
       'id', 'receipt_id', 'due_date', 'amount', 'cheque_no', 'bank_name', 'from_account', 'payer_name',
-      'to_account', 'receiver_name', 'paid'
+      'to_account', 'receiver_name', 'paid', 'ccy', 'ccy_amount', 'fx_rate', 'sayad_id' // S35.T35.7c
     ]
   ),
   // طرف‌حساب‌های تعریف‌شده‌ی دستی و دفتر قرض/وام (در سود و زیان حساب نمی‌شوند)
@@ -87,6 +97,7 @@ const List<(String, List<String>)> _kSnapshot = [
   ('purchase_return_items', ['id', 'return_id', 'lot_id', 'warehouse_uid', 'kg', 'small_sacks', 'large_sacks', 'unit_price']),
   ('sale_returns', ['id', 'uid', 'number', 'party', 'date', 'refund_mode', 'refund_amount', 'cheque_no', 'cheque_due', 'note', 'tax_amount', 'created_at']),
   ('sale_return_items', ['id', 'return_id', 'sale_id', 'lot_id', 'warehouse_uid', 'kg', 'small_sacks', 'large_sacks', 'unit_price']),
+  ('doc_grade_lines', ['id', 'doc_type', 'doc_id', 'grade_key', 'kg', 'unit_price']), // S35.T35.3b
 ];
 
 /// پیش‌فاکتورها در backup.export نیستند؛ سرور آن‌ها را در کلید افزودنیِ `docs` می‌فرستد.
@@ -98,7 +109,7 @@ const List<(String, List<String>)> _kDocTables = [
 /// جدول‌هایی که اگر سرور هنوز نفرستاد (سرور قدیمی)، داده‌ی محلی‌شان پاک نمی‌شود
 const Set<String> _kOptionalTables = {
   'parties', 'loan_entries', 'loan_dues',
-  'purchase_returns', 'purchase_return_items', 'sale_returns', 'sale_return_items',
+  'purchase_returns', 'purchase_return_items', 'sale_returns', 'sale_return_items', 'doc_grade_lines',
 };
 
 /// انواع تراکنش دفتر قرض/وام
@@ -117,12 +128,12 @@ const Set<String> _kRealCols = {
   'ounce', 'price', 'total_weight', 'small_sack_count', 'large_sack_count', 'small_sacks_remaining',
   'large_sacks_remaining', 'net_weight', 'remaining',
   'gram', 'pct_dombest', 'pct_tuchin', 'pct_crooked', 'pct_khandan', 'weight', 'small_sacks',
-  'large_sacks', 'item_price', 'amount', 'usd_rate', 'price_usd', 'waste',
-  'kg', 'unit_price', 'refund_amount', 'discount', 'tax_amount',
+  'large_sacks', 'item_price', 'amount', 'usd_rate', 'price_usd', 'fx_rate', 'ccy_amount', 'price_ccy', 'total_ccy', 'waste',
+  'kg', 'unit_price', 'refund_amount', 'discount', 'tax_amount', 'gross_kg', 'tare_kg', 'quality_deduct_kg',
 };
 const Set<String> _kIntCols = {
   'id', 'category_id', 'mix_purchase_id', 'source_purchase_id', 'purchase_id', 'payment_id', 'sale_id',
-  'receipt_id', 'is_mix', 'paid', 'return_id', 'lot_id', 'reserve', 'proforma_id',
+  'receipt_id', 'is_mix', 'paid', 'return_id', 'lot_id', 'reserve', 'proforma_id', 'doc_id',
 };
 
 /// ستون‌های خرید برای لیست‌ها: عکس (base64 سنگین) عمداً انتخاب نمی‌شود؛ فقط has_photo.
@@ -130,7 +141,7 @@ const String _pSel = 'p.id, p.code, p.category_id, p.type_name, p.date, p.ounce,
     'p.small_sack_count, p.large_sack_count, p.small_sacks_remaining, p.large_sacks_remaining, '
     'p.net_weight, p.remaining, p.gram, p.pct_dombest, '
     'p.pct_tuchin, p.pct_crooked, p.pct_khandan, p.custom_specs, p.seller, p.note, p.is_mix, '
-    'p.usd_rate, p.price_usd, p.waste, p.base_type, p.labor_cost, p.transport_cost, p.warehouse_uid, p.ounce_uid, p.created_at, p.ord, (p.photo IS NOT NULL OR p.photo_pending = 1) AS has_photo';
+    'p.usd_rate, p.price_usd, p.ccy, p.fx_rate, p.price_ccy, p.fx_rate_source, p.waste, p.base_type, p.labor_cost, p.transport_cost, p.warehouse_uid, p.ounce_uid, p.created_at, p.ord, (p.photo IS NOT NULL OR p.photo_pending = 1) AS has_photo';
 
 class _SaleV {
   final Map<String, dynamic> row;
@@ -154,10 +165,13 @@ class AppDb {
   /// با هر تغییر داده زیاد می‌شود تا صفحه‌ها بازخوانی شوند
   final ValueNotifier<int> version = ValueNotifier<int>(0);
 
-  static const int schemaVersion = 19;
+  static const int schemaVersion = 28;
 
   String? _phone;
   Database? _db;
+
+  /// S29.T29.3: unit of the local mirror ('toman' legacy | 'rial'); sent as `unit` on every API call
+  String moneyUnit = MoneyUnit.toman;
   Future<Database>? _opening;
 
   String? get phone => _phone;
@@ -178,8 +192,26 @@ class AppDb {
 
   Future<Database> _open(String phone) async {
     final path = join(await getDatabasesPath(), 'pesteh_$phone.db');
-    return openDatabase(path,
+    final Database d = await openDatabase(path,
         version: schemaVersion, onConfigure: DbCrypto.configure, onCreate: _onCreate, onUpgrade: _onUpgrade);
+    moneyUnit = await MoneyUnit.localUnit(d);
+    return d;
+  }
+
+  /// S29.T29.3: records the unit of the data now in the mirror (set after every full pull from the server)
+  Future<void> setMoneyUnit(String unit) async {
+    moneyUnit = MoneyUnit.normalize(unit);
+    await metaSet(MoneyUnit.kMetaKey, moneyUnit);
+  }
+
+  /// S29.T29.3: x10 on local money columns (only when sync_ops is empty); true = migrated now
+  Future<bool> migrateMoneyToRial() async {
+    final bool ok = await MoneyUnit.migrateLocal(await db);
+    if (ok) {
+      moneyUnit = MoneyUnit.rial;
+      version.value++;
+    }
+    return ok;
   }
 
   /// حساب فعال را تعیین می‌کند (دیتابیس همان حساب باز می‌شود)
@@ -283,6 +315,50 @@ class AppDb {
       // انبارگردانی آفلاین (S19.T19.1b): پیش‌نویس محلی + کش برگهٔ شمارش؛ فقط جدول‌های جدید
       await StockCountLocal.createTables(d);
     }
+    if (oldV < 20) {
+      // S26.T26.1: کش محلی ارزها و نرخ‌های روزانه (فقط جدول‌های جدید)
+      await FxLocal.createTables(d);
+    }
+    if (oldV < 21) {
+      // S27c: ستون‌های سند ارزی (ccy، نرخ سند، منبع نرخ). اسناد قدیمی null می‌مانند.
+      for (final String t in <String>['sales', 'purchases']) {
+        for (final String c in <String>['ccy TEXT', 'fx_rate REAL', 'fx_rate_source TEXT', 'fx_rate_entered_at TEXT']) {
+          try {
+            await d.execute('ALTER TABLE $t ADD COLUMN $c');
+          } catch (_) {/* ستون از قبل هست */}
+        }
+      }
+      try {
+        await d.execute('ALTER TABLE sales ADD COLUMN total_ccy REAL');
+      } catch (_) {}
+      try {
+        await d.execute('ALTER TABLE purchases ADD COLUMN price_ccy REAL');
+      } catch (_) {}
+    }
+    if (oldV < 22) {
+      await _addTxFxCols(d); // S28.T28.2b
+    }
+    if (oldV < 23) {
+      // S29.T29.3: no data change here. The x10 happens in MoneyUnit.migrateLocal, only once the server
+      // reports money_unit=rial AND sync_ops is empty (queued ops hold toman amounts). Legacy = toman.
+      await d.insert('meta', <String, Object?>{'k': MoneyUnit.kMetaKey, 'v': MoneyUnit.toman},
+          conflictAlgorithm: ConflictAlgorithm.ignore);
+    }
+    if (oldV < 24) {
+      await FormSettingsLocal.createTables(d); // S35.T35.1: form feature switches mirror
+    }
+    if (oldV < 25) {
+      await _addWeighCols(d); // S35.T35.2: weighing block columns on purchases
+    }
+    if (oldV < 26) {
+      await GradeLinesLocal.createTables(d); // S35.T35.3b: grade lines mirror
+    }
+    if (oldV < 27) {
+      await _addFinCols(d); // S35.T35.6b: financial block columns (purchases, sales)
+    }
+    if (oldV < 28) {
+      await _addSayadCols(d); // S35.T35.7c: sayad id on cheque lines (local mirror)
+    }
   }
 
   /// جدول‌های آینهٔ برگشت‌ها و پیش‌فاکتورها (IF NOT EXISTS ⇒ اجرای دوباره بی‌خطر)
@@ -377,6 +453,24 @@ class AppDb {
         large_sacks_remaining = MAX(0, ROUND(large_sack_count - ${sum('large_sacks')} - large_sack_count * ($ratio)))''');
   }
 
+  /// S28.T28.2b: foreign-currency columns on the six receipt/payment line tables (NULL = rial line).
+  static Future<void> _addTxFxCols(Database d) async {
+    for (final String t in <String>[
+      'lump_tx',
+      'credit_inst',
+      'cheque_inst',
+      'receipt_lump_tx',
+      'receipt_credit_inst',
+      'receipt_cheque_inst'
+    ]) {
+      for (final String c in <String>['ccy TEXT', 'ccy_amount REAL', 'fx_rate REAL']) {
+        try {
+          await d.execute('ALTER TABLE $t ADD COLUMN $c');
+        } catch (_) {/* column already exists */}
+      }
+    }
+  }
+
   Future<void> _onCreate(Database d, int v) async {
     await d.execute('''
       CREATE TABLE categories(
@@ -420,6 +514,7 @@ class AppDb {
         created_at TEXT,
         usd_rate REAL,
         price_usd REAL,
+        ccy TEXT, fx_rate REAL, fx_rate_source TEXT, fx_rate_entered_at TEXT, price_ccy REAL,
         waste REAL,
         base_type TEXT,
         labor_cost REAL,
@@ -477,6 +572,7 @@ class AppDb {
         due_date TEXT NOT NULL,
         amount REAL NOT NULL,
         cheque_no TEXT,
+        sayad_id TEXT,
         bank_name TEXT,
         from_account TEXT,
         payer_name TEXT,
@@ -497,6 +593,7 @@ class AppDb {
         note TEXT,
         created_at TEXT,
         usd_rate REAL,
+        ccy TEXT, fx_rate REAL, fx_rate_source TEXT, fx_rate_entered_at TEXT, total_ccy REAL,
         labor_cost REAL,
         transport_cost REAL,
         tax_status TEXT,
@@ -551,6 +648,7 @@ class AppDb {
         due_date TEXT NOT NULL,
         amount REAL NOT NULL,
         cheque_no TEXT,
+        sayad_id TEXT,
         bank_name TEXT,
         from_account TEXT,
         payer_name TEXT,
@@ -587,6 +685,12 @@ class AppDb {
     await _createLoanTables(d);
     await createDocTables(d);
     await StockCountLocal.createTables(d);
+    await FxLocal.createTables(d); // S26.T26.1
+    await FormSettingsLocal.createTables(d); // S35.T35.1
+    await _addWeighCols(d); // S35.T35.2
+    await _addFinCols(d); // S35.T35.6b
+    await GradeLinesLocal.createTables(d); // S35.T35.3b
+    await _addTxFxCols(d); // S28.T28.2b
     await _createIndexes(d);
     // نکته: دسته‌ها و انواع پیش‌فرض را سرور می‌سازد (bootstrap) و هنگام ورود دریافت می‌شوند.
   }
@@ -1142,6 +1246,23 @@ class AppDb {
     await (await db).update('sync_ops', {'state': 'failed', 'err': err}, where: 'seq=?', whereArgs: [seq]);
   }
 
+  /// S27c: سند ارزیِ صف‌شده که نرخش در سرور نبود؛ از صف جدا (failed) می‌شود تا بقیه صف بماند،
+  /// با پیشوند ثابت تا بعد از ثبت نرخ خودکار دوباره تلاش شود.
+  static const String rateMissingPrefix = 'نرخ ثبت نشده';
+
+  Future<void> failOpRateMissing(int seq, String ccy, String date) async {
+    await failOp(seq, '$rateMissingPrefix: نرخ $ccy برای $date در سرور ثبت نشده؛ بعد از ثبت نرخ خودکار دوباره ارسال می‌شود');
+  }
+
+  /// بعد از ثبت/همگام‌سازی نرخ‌ها: فقط عملیات «نرخ ثبت نشده» دوباره در صف قرار می‌گیرند
+  Future<int> retryRateMissingOps() async {
+    final int n = await (await db).rawUpdate(
+        "UPDATE sync_ops SET state='pending', attempts=0, err=NULL WHERE state='failed' AND err LIKE ?",
+        <Object?>['$rateMissingPrefix%']);
+    if (n > 0) version.value++;
+    return n;
+  }
+
   Future<void> bumpAttempt(int seq, String err) async {
     await (await db).rawUpdate('UPDATE sync_ops SET attempts=attempts+1, err=? WHERE seq=?', [err, seq]);
   }
@@ -1242,14 +1363,56 @@ class AppDb {
     return rows.isEmpty ? null : rows.first;
   }
 
+  /// S35.T35.6b: financial block columns (nullable; additive). Mirrors server v50/v51 + side_cost_payer/taxable.
+  Future<void> _addFinCols(DatabaseExecutor d) async {
+    for (final String t in <String>['purchases', 'sales']) {
+      for (final String c in <String>['discount_amount REAL', 'weighbridge_cost REAL', 'side_cost_payer TEXT', 'taxable INTEGER']) {
+        try {
+          await d.execute('ALTER TABLE $t ADD COLUMN $c');
+        } catch (_) {}
+      }
+    }
+  }
+
+  /// S35.T35.7c: sayad_id column on the local cheque-line mirrors (nullable; server v52).
+  Future<void> _addSayadCols(DatabaseExecutor d) async {
+    for (final String t in <String>['cheque_inst', 'receipt_cheque_inst']) {
+      try {
+        await d.execute('ALTER TABLE $t ADD COLUMN sayad_id TEXT');
+      } catch (_) {}
+    }
+  }
+
   /// اعتبارسنجی و گرد کردن مقادیر خرید (همان قواعد purchases.create در app.php)
+  /// S35.T35.2: provenance columns of the weighing block (nullable; only filled when the form's «توزین» switch is on).
+  Future<void> _addWeighCols(DatabaseExecutor d) async {
+    for (final String t in <String>['purchases', 'sales']) {
+      for (final String c in <String>['gross_kg REAL', 'tare_kg REAL', 'quality_deduct_kg REAL', 'weigh_ticket_no TEXT', 'vehicle_plate TEXT', 'driver_name TEXT']) {
+        try {
+          await d.execute('ALTER TABLE $t ADD COLUMN $c');
+        } catch (_) {}
+      }
+    }
+  }
+
   Map<String, dynamic> _purchaseValues(Map<String, dynamic> p) {
     final total = _n(p['total_weight']);
     final small = _n(p['small_sack_count']);
     final large = _n(p['large_sack_count']);
     if (total <= 0 || total > 1e9) throw Exception('وزن باید بزرگ‌تر از صفر باشد');
     if (small < 0 || large < 0 || small > 1e7 || large > 1e7) throw Exception('تعداد گونی نامعتبر است');
-    final net = _r(total - (small * 0.1 + large * 0.2), 3);
+    // S35.T35.2: with a weighing block, net = gross - tare - quality deduction (tare may be a manual value)
+    final double? grossKg = _nn(p['gross_kg']);
+    double? tareKg;
+    double? deductKg;
+    double net = _r(total - (small * 0.1 + large * 0.2), 3);
+    if (grossKg != null) {
+      if (grossKg <= 0 || grossKg > 1e9) throw Exception('وزن کل باید بزرگ‌تر از صفر باشد');
+      tareKg = _nn(p['tare_kg']) ?? (small * 0.1 + large * 0.2);
+      deductKg = _nn(p['quality_deduct_kg']) ?? 0.0;
+      if (tareKg < 0 || deductKg < 0) throw Exception('تارا و کسر کیفیت نمی‌توانند منفی باشند');
+      net = _r(grossKg - tareKg - deductKg, 3);
+    }
     if (net <= 0) throw Exception('وزن خالص باید بزرگ‌تر از صفر باشد');
     final catId = (p['category_id'] as num?)?.toInt() ?? 0;
     if (catId == 0) throw Exception('دسته را انتخاب کنید');
@@ -1272,20 +1435,31 @@ class AppDb {
     }
     if (specsJson != null && specsJson.length > 4000) throw Exception('مشخصات دلخواه بیش از حد بزرگ است');
     // پلن ارزی: قیمت دلار (تومان) و فی دلاری هر کیلو = فی تومانی ÷ قیمت دلار
-    final usdRate = _usdRate(p['usd_rate']);
+    final fx = _fxDoc(p, 'price_ccy');
+    // نرخ دستی دلار حذف شده؛ برای دلار، usd_rate قدیمی از نرخ سند (تومان = ریال/۱۰) پر می‌شود
+    final double? usdRate = fx.local['ccy'] == 'USD'
+        ? _r((fx.local['fx_rate'] as double) / kFxRialPerStoredUnit, 2)
+        : (fx.local.isEmpty ? _usdRate(p['usd_rate']) : null);
     final priceR = _r(price, 2);
     return {
       'usd_rate': usdRate,
       'price_usd': usdRate == null ? null : _r(priceR / usdRate, 4),
+      ...fx.local,
       'category_id': catId,
       'type_name': _s(p['type_name'], 100) ?? '',
       'date': _dateOnly(p['date']),
       'ounce': _rn(spec('ounce'), 3),
       'price': _r(price, 2),
-      'total_weight': _r(total, 3),
+      'total_weight': grossKg != null ? _r(grossKg, 3) : _r(total, 3),
       'small_sack_count': _r(small, 2),
       'large_sack_count': _r(large, 2),
       'net_weight': net,
+      'gross_kg': grossKg == null ? null : _r(grossKg, 3),
+      'tare_kg': tareKg == null ? null : _r(tareKg, 3),
+      'quality_deduct_kg': deductKg == null ? null : _r(deductKg, 3),
+      'weigh_ticket_no': grossKg == null ? null : _s(p['weigh_ticket_no'], 40),
+      'vehicle_plate': grossKg == null ? null : _s(p['vehicle_plate'], 20),
+      'driver_name': grossKg == null ? null : _s(p['driver_name'], 80),
       'gram': _rn(spec('gram'), 2),
       'pct_dombest': _rn(spec('pct_dombest', pct: true), 2),
       'pct_tuchin': _rn(spec('pct_tuchin', pct: true), 2),
@@ -1300,6 +1474,7 @@ class AppDb {
       if (p.containsKey('tax_status')) 'tax_rate_milli': _taxStatus(p['tax_status']) == null ? null : _taxRate(p['tax_rate_milli']),
       if (p.containsKey('warehouse_uid')) 'warehouse_uid': _uidOrNull(p['warehouse_uid']),
       if (p.containsKey('ounce_uid')) 'ounce_uid': _uidOrNull(p['ounce_uid']),
+      ..._finCols(p), // S35.T35.6b
     };
   }
 
@@ -1318,6 +1493,30 @@ class AppDb {
     if (v == null || v == 0) return null;
     if (v < 0 || v > 1e13) throw Exception('مبلغ هزینه نامعتبر است');
     return _r(v, 2);
+  }
+
+  /// S35.T35.6b: پرداخت‌کنندهٔ هزینه‌های جانبی (us|party)؛ خالی/نامعتبر = null
+  String? _payer(dynamic raw) {
+    final String s = raw is String ? raw.trim() : '';
+    return (s == 'us' || s == 'party') ? s : null;
+  }
+
+  /// S35.T35.6b: مشمول مالیات بودن سند → 1 / 0؛ نامشخص = null
+  int? _taxableFlag(dynamic raw) {
+    if (raw == null || raw == '') return null;
+    return (raw == true || raw == 1 || raw == '1') ? 1 : 0;
+  }
+
+  /// S35.T35.6b: ستون‌های بلوک مالی. فقط وقتی یکی از کلیدها در ورودی باشد؛ وگرنه خالی (ویرایش‌های قدیمی دست‌نخورده).
+  Map<String, dynamic> _finCols(Map<String, dynamic> p) {
+    const keys = ['discount_amount', 'weighbridge_cost', 'side_cost_payer', 'taxable'];
+    if (!keys.any(p.containsKey)) return <String, dynamic>{};
+    return <String, dynamic>{
+      'discount_amount': _cost(p['discount_amount']),
+      'weighbridge_cost': _cost(p['weighbridge_cost']),
+      'side_cost_payer': _payer(p['side_cost_payer']),
+      'taxable': _taxableFlag(p['taxable']),
+    };
   }
 
   /// S17.T17.1b: وضعیت مالیاتی سند (taxable|exempt|zero)؛ خالی/نامعتبر = null (رفتار قبلی)
@@ -1341,11 +1540,64 @@ class AppDb {
     return <String, dynamic>{'status': st, if (r != null) 'rate_milli': r};
   }
 
+  /// S27c: فیلدهای سند ارزی از ورودی فرم. فقط وقتی ccy داده شده باشد؛ نرخ دستی دلار وجود ندارد.
+  /// نرخ (`offline_rate`) = ریال به‌ازای یک واحد ارز، از کش دستگاه؛ سرور آن را بی‌صدا عوض نمی‌کند.
+  /// [fxLocal]: ستون‌های محلی؛ [fxPayload]: کلیدهای ارسال به سرور.
+  ({Map<String, dynamic> local, Map<String, dynamic> payload}) _fxDoc(Map<String, dynamic> src, String priceKey) {
+    final String ccy = ((src['ccy'] as String?) ?? '').trim().toUpperCase();
+    if (ccy.isEmpty || ccy == 'IRT') {
+      return (local: <String, dynamic>{}, payload: <String, dynamic>{});
+    }
+    final double? pc = _nn(src['price_ccy']);
+    if (pc == null || pc <= 0 || pc > 1e9) throw Exception('فی ارزی نامعتبر است');
+    final double? rate = _nn(src['offline_rate']);
+    if (rate == null || rate <= 0 || rate > 1e12) throw Exception('نرخ این ارز در دستگاه ثبت نشده؛ ابتدا نرخ‌ها را همگام کنید');
+    final String at = ((src['offline_rate_at'] as String?) ?? DateTime.now().toIso8601String());
+    final Map<String, dynamic> local = <String, dynamic>{
+      'ccy': ccy,
+      'fx_rate': rate,
+      'fx_rate_source': 'offline',
+      'fx_rate_entered_at': at,
+      priceKey: pc,
+    };
+    final Map<String, dynamic> payload = <String, dynamic>{
+      'ccy': ccy,
+      'price_ccy': pc,
+      'offline_rate': rate,
+      'offline_rate_at': at,
+    };
+    return (local: local, payload: payload);
+  }
+
   double? _usdRate(dynamic raw) {
     final u = _nn(raw);
     if (u == null) return null;
     if (u <= 0 || u > 1e9) throw Exception('قیمت دلار نامعتبر است');
     return _r(u, 2);
+  }
+
+  /// S35.T35.3b: clean grade lines [{grade_key,kg,unit_price}] from a form list; null = key absent (feature off => leave untouched).
+  List<Map<String, dynamic>>? _gradePayload(dynamic lines) {
+    if (lines is! List) return null;
+    final List<Map<String, dynamic>> o = <Map<String, dynamic>>[];
+    for (final dynamic l in lines) {
+      if (l is! Map) continue;
+      final String k = '${l['grade_key'] ?? ''}'.trim();
+      final double? kg = _nn(l['kg']);
+      final double? up = _nn(l['unit_price']);
+      if (k.isEmpty || kg == null || kg <= 0 || up == null || up < 0) throw Exception('ردیف درجه نامعتبر است');
+      o.add(<String, dynamic>{'grade_key': k, 'kg': _r(kg, 3), 'unit_price': up.round()});
+    }
+    return o;
+  }
+
+  Future<void> _saveGradeLocal(DatabaseExecutor t, String docType, int docId, List<Map<String, dynamic>>? lines) async {
+    if (lines == null) return;
+    await t.delete('doc_grade_lines', where: 'doc_type=? AND doc_id=?', whereArgs: <Object?>[docType, docId]);
+    for (final Map<String, dynamic> l in lines) {
+      final int id = await _tempId(t, 'doc_grade_lines');
+      await t.insert('doc_grade_lines', <String, Object?>{'id': id, 'doc_type': docType, 'doc_id': docId, ...l});
+    }
   }
 
   Map<String, dynamic> _purchasePayload(Map<String, dynamic> v) {
@@ -1373,12 +1625,31 @@ class AppDb {
       'custom_specs': specs,
       'seller': v['seller'],
       'note': v['note'],
-      'usd_rate': v['usd_rate'],
+      if (v['ccy'] == null) 'usd_rate': v['usd_rate'],
+      if (v['ccy'] != null) ...<String, dynamic>{
+        'ccy': v['ccy'],
+        'price_ccy': v['price_ccy'],
+        'offline_rate': v['fx_rate'],
+        'offline_rate_at': v['fx_rate_entered_at'],
+      },
       'labor_cost': v['labor_cost'],
       'transport_cost': v['transport_cost'],
+      if (v['gross_kg'] != null) ...<String, dynamic>{ // S35.T35.2: weighing block (server recomputes and verifies the net)
+        'gross_kg': v['gross_kg'],
+        'tare_kg': v['tare_kg'],
+        'quality_deduct_kg': v['quality_deduct_kg'],
+        'net_weight': v['net_weight'],
+        'weigh_ticket_no': v['weigh_ticket_no'],
+        'vehicle_plate': v['vehicle_plate'],
+        'driver_name': v['driver_name'],
+      },
       if (_taxPayload(v['tax_status'], v['tax_rate_milli']) != null) 'tax': _taxPayload(v['tax_status'], v['tax_rate_milli']),
       if (v['warehouse_uid'] is String) 'warehouse_uid': v['warehouse_uid'],
       if (v.containsKey('ounce_uid')) 'ounce_uid': v['ounce_uid'],
+      'discount_amount': v['discount_amount'], // S35.T35.6b: financial block (server ignores when form.fin_block is off)
+      'weighbridge_cost': v['weighbridge_cost'],
+      'side_cost_payer': v['side_cost_payer'],
+      'taxable': v['taxable'] == null ? null : v['taxable'] == 1,
     };
   }
 
@@ -1412,6 +1683,9 @@ class AppDb {
           });
           final payload = _purchasePayload(v);
           if (photo != null) payload['photo'] = photo;
+          final List<Map<String, dynamic>>? gl = _gradePayload(p['grade_lines']); // S35.T35.3b
+          if (gl != null) payload['grade_lines'] = gl;
+          await _saveGradeLocal(t, 'purchase', id, gl);
           await _enqueue(t, 'purchases.create', payload, refKind: 'pur', refId: id, mapKind: 'pur', localId: id);
           // تأیید قطعی (داخل همان تراکنش): خرید در لیست دیده می‌شود و در صف ارسال به سرور هم هست
           await _confirm(t, 'SELECT 1 FROM purchases p JOIN categories c ON c.id = p.category_id WHERE p.id = ?', [id],
@@ -1465,6 +1739,9 @@ class AppDb {
       final payload = _purchasePayload(v);
       payload['id'] = id;
       if (photoChanged) payload['photo'] = photo;
+      final List<Map<String, dynamic>>? gl = _gradePayload(p['grade_lines']); // S35.T35.3b
+      if (gl != null) payload['grade_lines'] = gl;
+      await _saveGradeLocal(t, 'purchase', id, gl);
       await _enqueue(t, 'purchases.create', payload, refKind: 'pur', refId: id);
     }));
     version.value++;
@@ -1506,6 +1783,7 @@ class AppDb {
         await t.delete('cheque_inst', where: 'payment_id=?', whereArgs: [payId]);
         await t.delete('payments', where: 'id=?', whereArgs: [payId]);
       }
+      await t.delete('doc_grade_lines', where: 'doc_type=? AND doc_id=?', whereArgs: <Object?>['purchase', id]); // S35.T35.3b
       await t.delete('purchases', where: 'id=?', whereArgs: [id]);
       if (id < 0) {
         await _purgeOps(t, 'pur', id); // هرگز به سرور نرسیده بود
@@ -2165,6 +2443,7 @@ class AppDb {
     }
     if (out.containsKey('cheque_no')) out['cheque_no'] = _s(out['cheque_no'], 60);
     if (out.containsKey('bank_name')) out['bank_name'] = _s(out['bank_name'], 100);
+    if (out.containsKey('sayad_id')) out['sayad_id'] = _s(out['sayad_id'], 16); // S35.T35.7c
     if (out.containsKey('paid')) out['paid'] = (out['paid'] == true || out['paid'] == 1) ? 1 : 0;
     return out;
   }
@@ -2187,7 +2466,12 @@ class AppDb {
       final staged = pay.first['staged_type'] as String?;
       payment['pay_type'] = type;
       payment['staged_type'] = staged;
-      if (type == 'lump') {
+      if (type == 'mixed') {
+        // S35.T35.7h: three line kinds of one document (server payments.save pay_type 'mixed')
+        payment['lump_lines'] = (await t.query('lump_tx', where: 'payment_id=?', whereArgs: [pid], orderBy: 'id')).map(_txPayload).toList();
+        payment['credit_lines'] = (await t.query('credit_inst', where: 'payment_id=?', whereArgs: [pid], orderBy: 'id')).map(_txPayload).toList();
+        payment['cheque_lines'] = (await t.query('cheque_inst', where: 'payment_id=?', whereArgs: [pid], orderBy: 'id')).map(_txPayload).toList();
+      } else if (type == 'lump') {
         payment['lump'] = (await t.query('lump_tx', where: 'payment_id=?', whereArgs: [pid], orderBy: 'id'))
             .map(_txPayload)
             .toList();
@@ -2272,7 +2556,7 @@ class AppDb {
   }
 
   Future<int> setPaymentType(int purchaseId, String payType, String? stagedType) async {
-    if (!const ['lump', 'staged'].contains(payType) || !const [null, 'credit', 'cheque'].contains(stagedType)) {
+    if (!const ['lump', 'staged', 'mixed'].contains(payType) || !const [null, 'credit', 'cheque'].contains(stagedType)) { // S35.T35.7h: mixed = cash+credit+cheque lines in one payment
       throw Exception('نوع پرداخت نامعتبر است');
     }
     late int payId;
@@ -2534,8 +2818,29 @@ class AppDb {
     final large = _n(sale['large_sack_count']);
     if (total <= 0 || total > 1e9) throw Exception('وزن باید بزرگ‌تر از صفر باشد');
     if (small < 0 || large < 0 || small > 1e7 || large > 1e7) throw Exception('تعداد گونی نامعتبر است');
-    final net = _r(total - (small * 0.1 + large * 0.2), 3);
+    // S35.T35.2b: weighing block: net = gross - tare - quality deduction
+    final double? grossKg = _nn(sale['gross_kg']);
+    double? tareKg;
+    double? deductKg;
+    double net = _r(total - (small * 0.1 + large * 0.2), 3);
+    if (grossKg != null) {
+      if (grossKg <= 0 || grossKg > 1e9) throw Exception('وزن کل باید بزرگ‌تر از صفر باشد');
+      tareKg = _nn(sale['tare_kg']) ?? (small * 0.1 + large * 0.2);
+      deductKg = _nn(sale['quality_deduct_kg']) ?? 0.0;
+      if (tareKg < 0 || deductKg < 0) throw Exception('تارا و کسر کیفیت نمی‌توانند منفی باشند');
+      net = _r(grossKg - tareKg - deductKg, 3);
+    }
     if (net <= 0) throw Exception('وزن خالص باید بزرگ‌تر از صفر باشد');
+    final Map<String, dynamic> weighCols = grossKg == null
+        ? <String, dynamic>{'gross_kg': null, 'tare_kg': null, 'quality_deduct_kg': null, 'weigh_ticket_no': null, 'vehicle_plate': null, 'driver_name': null}
+        : <String, dynamic>{
+            'gross_kg': _r(grossKg, 3),
+            'tare_kg': _r(tareKg!, 3),
+            'quality_deduct_kg': _r(deductKg!, 3),
+            'weigh_ticket_no': _s(sale['weigh_ticket_no'], 40),
+            'vehicle_plate': _s(sale['vehicle_plate'], 20),
+            'driver_name': _s(sale['driver_name'], 80),
+          };
     var sumW = 0.0;
     var sumVal = 0.0;
     for (final it in norm) {
@@ -2547,37 +2852,57 @@ class AppDb {
     final date = _dateOnly(sale['date']);
     final buyer = _s(sale['buyer'], 150);
     final note = _s(sale['note'], 500);
-    final usdRate = _usdRate(sale['usd_rate']); // قیمت دلار هنگام فروش (پلن ارزی)
+    final fx = _fxDoc(sale, 'price_ccy');
+    final Map<String, dynamic> fxLocal = Map<String, dynamic>.from(fx.local);
+    if (fxLocal.containsKey('price_ccy')) {
+      fxLocal['total_ccy'] = _r((fxLocal.remove('price_ccy') as double) * net, 4);
+    }
+    // نرخ دستی دلار حذف شده؛ برای دلار، usd_rate قدیمی از نرخ سند (تومان = ریال/۱۰) پر می‌شود تا گزارش‌های قبلی کار کنند
+    final double? usdRate = fx.local['ccy'] == 'USD'
+        ? _r((fx.local['fx_rate'] as double) / kFxRialPerStoredUnit, 2)
+        : (fx.local.isEmpty ? _usdRate(sale['usd_rate']) : null);
     final laborCost = _cost(sale['labor_cost']);
+    final Map<String, dynamic> finLocal = _finCols(sale); // S35.T35.6b
     final transportCost = _cost(sale['transport_cost']);
     final row = <String, dynamic>{
       'usd_rate': usdRate,
+      ...fxLocal,
       'date': date,
       'price': _r(avg, 2),
       'total_weight': _r(total, 3),
       'small_sack_count': _r(small, 2),
       'large_sack_count': _r(large, 2),
       'net_weight': net,
+      ...weighCols,
       'buyer': buyer,
       'note': note,
       'labor_cost': laborCost,
       'transport_cost': transportCost,
       if (sale.containsKey('tax_status')) 'tax_status': _taxStatus(sale['tax_status']),
       if (sale.containsKey('tax_status')) 'tax_rate_milli': _taxStatus(sale['tax_status']) == null ? null : _taxRate(sale['tax_rate_milli']),
+      ...finLocal, // S35.T35.6b
     };
     final payload = <String, dynamic>{
-      'usd_rate': usdRate,
+      if (fx.payload.isEmpty) 'usd_rate': usdRate,
+      ...fx.payload,
       'date': date,
       'price': fallback,
       'total_weight': _r(total, 3),
       'small_sack_count': _r(small, 2),
       'large_sack_count': _r(large, 2),
+      if (grossKg != null) ...<String, dynamic>{...weighCols, 'net_weight': net}, // S35.T35.2b (server verifies the net)
       'buyer': buyer,
       'note': note,
       'labor_cost': laborCost,
       'transport_cost': transportCost,
       if (_taxPayload(sale['tax_status'], sale['tax_rate_milli']) != null) 'tax': _taxPayload(sale['tax_status'], sale['tax_rate_milli']),
       if (_uidOrNull(sale['warehouse_uid']) != null) 'warehouse_uid': _uidOrNull(sale['warehouse_uid']),
+      if (finLocal.isNotEmpty) ...<String, dynamic>{ // S35.T35.6b
+        'discount_amount': finLocal['discount_amount'],
+        'weighbridge_cost': finLocal['weighbridge_cost'],
+        'side_cost_payer': finLocal['side_cost_payer'],
+        'taxable': finLocal['taxable'] == null ? null : finLocal['taxable'] == 1,
+      },
       'items': norm,
     };
     return _SaleV(row, payload, norm);
@@ -2705,6 +3030,9 @@ class AppDb {
           final ord = await _nextOrd(t, 'sales');
           await _applySaleItems(t, sid, v.items);
           await t.insert('sales', {...v.row, 'id': sid, 'created_at': _stamp(), 'ord': ord});
+          final List<Map<String, dynamic>>? gl = _gradePayload(sale['grade_lines']); // S35.T35.3b
+          if (gl != null) v.payload['grade_lines'] = gl;
+          await _saveGradeLocal(t, 'sale', sid, gl);
           await _enqueue(t, 'sales.create', v.payload, refKind: 'sale', refId: sid, mapKind: 'sale', localId: sid);
           // تأیید قطعی داخل همان تراکنش
           await _confirm(t, 'SELECT 1 FROM sales WHERE id = ?', [sid]);
@@ -2731,6 +3059,9 @@ class AppDb {
       await t.delete('sale_items', where: 'sale_id=?', whereArgs: [saleId]);
       await _applySaleItems(t, saleId, v.items);
       await t.update('sales', v.row, where: 'id=?', whereArgs: [saleId]);
+      final List<Map<String, dynamic>>? gl = _gradePayload(sale['grade_lines']); // S35.T35.3b
+      if (gl != null) v.payload['grade_lines'] = gl;
+      await _saveGradeLocal(t, 'sale', saleId, gl);
       await _enqueue(t, 'sales.update', {'id': saleId, ...v.payload}, refKind: 'sale', refId: saleId);
     }));
     version.value++;
@@ -2742,6 +3073,7 @@ class AppDb {
       if (await _hasReturns(t, 'sale_id', id)) throw Exception('این فروش برگشت ثبت‌شده دارد؛ ابتدا برگشت‌ها را حذف کنید');
       await _restoreSaleItems(t, id);
       await t.delete('sale_items', where: 'sale_id=?', whereArgs: [id]);
+      await t.delete('doc_grade_lines', where: 'doc_type=? AND doc_id=?', whereArgs: <Object?>['sale', id]); // S35.T35.3b
       await t.delete('sales', where: 'id=?', whereArgs: [id]);
       final r = await t.query('receipts', where: 'sale_id=?', whereArgs: [id]);
       if (r.isNotEmpty) {

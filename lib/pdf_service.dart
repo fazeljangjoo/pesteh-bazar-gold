@@ -11,6 +11,7 @@ import 'barcode_utils.dart';
 import 'company_profile.dart';
 import 'excel_io.dart';
 import 'invoice_templates_pdf.dart';
+import 'fx_doc_field.dart' show kFxRialPerStoredUnit;
 import 'utils.dart';
 
 /// برچسب‌های جهت تراکنش که در جدول PDF نشان داده می‌شود
@@ -228,7 +229,7 @@ class PdfService {
     List<List<String>> rows = [];
     if (payType == 'lump') {
       rows = [
-        ['وضعیت', 'تاریخ', directionLabels.toName, directionLabels.fromName, 'مبلغ (تومان)'],
+        ['وضعیت', 'تاریخ', directionLabels.toName, directionLabels.fromName, 'مبلغ (ریال)'],
         for (final r in lump)
           [
             (r['paid'] as int? ?? 1) == 1 ? 'تسویه شده' : 'ثبت‌شده',
@@ -238,9 +239,38 @@ class PdfService {
             faNum(r['amount'] as num, dec: 0),
           ],
       ];
+    } else if (payType == 'mixed') {
+      // ترکیبی: یک جدول واحد با ستون «نوع» برای هر سطر
+      rows = [
+        ['نوع', 'وضعیت', 'تاریخ / سررسید', 'جزئیات', 'مبلغ (ریال)'],
+        for (final r in lump)
+          [
+            'نقد',
+            (r['paid'] as int? ?? 1) == 1 ? 'تسویه شده' : 'ثبت‌شده',
+            jalaliDate(r['date'] as String),
+            '${r['bank_name'] ?? '-'}',
+            faNum(r['amount'] as num, dec: 0),
+          ],
+        for (final r in credit)
+          [
+            'قسط',
+            (r['paid'] as int) == 1 ? 'تسویه شده' : 'باقیمانده',
+            jalaliDate(r['due_date'] as String),
+            '-',
+            faNum(r['amount'] as num, dec: 0),
+          ],
+        for (final r in cheque)
+          [
+            'چک',
+            (r['paid'] as int) == 1 ? 'تسویه شده' : 'باقیمانده',
+            jalaliDate(r['due_date'] as String),
+            '${r['bank_name'] ?? '-'} — ${r['cheque_no'] ?? '-'}',
+            faNum(r['amount'] as num, dec: 0),
+          ],
+      ];
     } else if (payType == 'staged' && stagedType == 'credit') {
       rows = [
-        ['وضعیت', 'سررسید', directionLabels.toName, directionLabels.fromName, 'مبلغ (تومان)'],
+        ['وضعیت', 'سررسید', directionLabels.toName, directionLabels.fromName, 'مبلغ (ریال)'],
         for (final r in credit)
           [
             (r['paid'] as int) == 1 ? 'تسویه شده' : 'باقیمانده',
@@ -252,7 +282,7 @@ class PdfService {
       ];
     } else if (payType == 'staged' && stagedType == 'cheque') {
       rows = [
-        ['وضعیت', 'بانک', 'شماره چک', 'سررسید', 'مبلغ (تومان)'],
+        ['وضعیت', 'بانک', 'شماره چک', 'سررسید', 'مبلغ (ریال)'],
         for (final r in cheque)
           [
             (r['paid'] as int) == 1 ? 'تسویه شده' : 'باقیمانده',
@@ -280,9 +310,9 @@ class PdfService {
             decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.5), borderRadius: pw.BorderRadius.circular(6)),
             child: pw.Column(children: [
               _kv('کد پسته', pesteCode.isEmpty ? '-' : pesteCode, bold: true),
-              _kv(totalLabel, '${faNum(total, dec: 0)} تومان', bold: true),
-              _kv('تسویه شده', '${faNum(settled, dec: 0)} تومان'),
-              _kv(remaining >= 0 ? 'باقیمانده' : 'اضافه‌پرداخت', '${faNum(remaining.abs(), dec: 0)} تومان'),
+              _kv(totalLabel, '${faNum(total, dec: 0)} ریال', bold: true),
+              _kv('تسویه شده', '${faNum(settled, dec: 0)} ریال'),
+              _kv(remaining >= 0 ? 'باقیمانده' : 'اضافه‌پرداخت', '${faNum(remaining.abs(), dec: 0)} ریال'),
             ]),
           ),
           pw.SizedBox(height: 16),
@@ -423,7 +453,7 @@ class PdfService {
         ]),
         footer: (ctx) => _brandFooter(),
         build: (ctx) => [
-          _kv('جمع کل', '${faNum(grandTotal, dec: 0)} تومان', bold: true),
+          _kv('جمع کل', '${faNum(grandTotal, dec: 0)} ریال', bold: true),
           pw.SizedBox(height: 12),
           if (tableRows.length > 1)
             pw.Table.fromTextArray(
@@ -494,7 +524,7 @@ class PdfService {
     return xf;
   }
 
-  /// فاکتور خرید یا فروش (A4). [withUsd] = فاکتور «تومانی/ارزی» که فی و مبلغ دلاری و نرخ دلار را هم درج می‌کند.
+  /// فاکتور خرید یا فروش (A4). [withUsd] = فاکتور «ریالی/ارزی» که فی و مبلغ دلاری و نرخ دلار را هم درج می‌کند.
   static Future<File> buildInvoice({
     required bool isSale,
     required bool withUsd,
@@ -509,17 +539,32 @@ class PdfService {
     required double smallSacks,
     required double largeSacks,
     required double netWeight,
-    required double unitPrice, // تومان به‌ازای هر کیلو
+    required double unitPrice, // ریال به‌ازای هر کیلو
     required List<List<String>> specs, // [عنوان، مقدار]
-    double? usdRate, // تومان به‌ازای هر دلار
-    double? paidAmount, // مبلغ پرداخت‌شده/دریافت‌شده (تومان)؛ null = بدون بخش پرداخت (مثلاً بار مخلوط)
+    double? usdRate, // واحد ذخیره به‌ازای هر دلار (اسناد قدیمی)
+    String? ccy, // S27c: کد ارز سند (null = سند قدیمی دلاری)
+    String? ccySymbol,
+    int ccyDec = 2,
+    double? fxRate, // S27c: نرخ سند، ریال به‌ازای یک واحد ارز
+    List<List<String>> weighRows = const <List<String>>[], // S35.T35.2b: [عنوان، مقدار] — خالی = بدون بلوک توزین
+    double? paidAmount, // مبلغ پرداخت‌شده/دریافت‌شده (ریال)؛ null = بدون بخش پرداخت (مثلاً بار مخلوط)
     String? note,
   }) async {
     await _ensureFonts();
     final doc = pw.Document(theme: _theme());
     final now = DateTime.now();
     final amount = netWeight * unitPrice;
-    final unitUsd = (withUsd && usdRate != null && usdRate > 0) ? unitPrice / usdRate : null;
+    // S27c: برای سند ارزی، نرخ سند (fxRate) و کد ارز؛ فی ذخیره‌شده در واحد ذخیرهٔ محلی است (kFxRialPerStoredUnit)
+    final bool isCcy = ccy != null && ccy.isNotEmpty;
+    final String cl = isCcy ? ((ccySymbol ?? '').isEmpty ? ccy : ccySymbol!) : 'دلار';
+    final String rateLabel = isCcy ? 'نرخ سند (ریال)' : 'نرخ دلار (ریال)';
+    final double? rateVal = isCcy ? fxRate : usdRate;
+    String fmtFx(double v) => isCcy ? faCcy(cl, v, dec: ccyDec) : faUsd(v);
+    final unitUsd = !withUsd
+        ? null
+        : isCcy
+            ? ((fxRate != null && fxRate > 0) ? unitPrice * kFxRialPerStoredUnit / fxRate : null)
+            : ((usdRate != null && usdRate > 0) ? unitPrice / usdRate : null);
     final amountUsd = unitUsd == null ? null : netWeight * unitUsd;
 
     final barcodes = printableCodesIn(code);
@@ -536,17 +581,17 @@ class PdfService {
           <String>['تاریخ', dateLabel],
           <String>['فروشنده', sellerName.isEmpty ? '-' : sellerName],
           <String>['خریدار', buyerName.isEmpty ? '-' : buyerName],
-          if (withUsd && usdRate != null) <String>['نرخ دلار (تومان)', faNum(usdRate, dec: 0)],
+          if (withUsd && rateVal != null) <String>[rateLabel, faNum(rateVal, dec: 0)],
         ],
         columns: <String>[
-          'ردیف', 'دسته', 'نوع', 'کد پسته', 'وزن (خالص) کیلو', 'فی (تومان)', 'مبلغ (تومان)',
-          if (withUsd) ...<String>['فی (دلار)', 'مبلغ (دلار)'],
+          'ردیف', 'دسته', 'نوع', 'کد پسته', 'وزن (خالص) کیلو', 'فی (ریال)', 'مبلغ (ریال)',
+          if (withUsd) ...<String>['فی ($cl)', 'مبلغ ($cl)'],
         ],
         rows: <List<String>>[
           <String>[
             faNum(1, dec: 0), category, type, code, faNum(netWeight), faNum(unitPrice, dec: 0), faNum(amount, dec: 0),
             if (withUsd) ...<String>[
-              unitUsd == null ? '-' : faNum(unitUsd, dec: 4),
+              unitUsd == null ? '-' : faNum(unitUsd, dec: isCcy ? ccyDec : 4),
               amountUsd == null ? '-' : faNum(amountUsd),
             ],
           ],
@@ -555,14 +600,15 @@ class PdfService {
           <String>['وزن کل (ناخالص - با گونی)', '${faNum(totalWeight)} کیلو'],
           <String>['گونی کوچک', faNum(smallSacks)],
           <String>['گونی بزرگ', faNum(largeSacks)],
+          for (final List<String> w in weighRows) <String>[w[0], w[1]],
           <String>['وزن پسته (خالص)', '${faNum(netWeight)} کیلو'],
           for (final List<String> sp in specs) <String>[sp[0], sp[1]],
         ],
         totals: <List<String>>[
-          <String>['جمع کل (تومان)', '${faNum(amount, dec: 0)} تومان'],
-          if (withUsd) <String>['جمع کل (دلار)', amountUsd == null ? '-' : faUsd(amountUsd)],
-          if (paidAmount != null) <String>['مبلغ پرداخت‌شده (تومان)', '${faNum(paidAmount, dec: 0)} تومان'],
-          if (paidAmount != null) <String>['مانده حساب (تومان)', '${faNum(amount - paidAmount, dec: 0)} تومان'],
+          <String>['جمع کل (ریال)', '${faNum(amount, dec: 0)} ریال'],
+          if (withUsd) <String>['جمع کل ($cl)', amountUsd == null ? '-' : fmtFx(amountUsd)],
+          if (paidAmount != null) <String>['مبلغ پرداخت‌شده (ریال)', '${faNum(paidAmount, dec: 0)} ریال'],
+          if (paidAmount != null) <String>['مانده حساب (ریال)', '${faNum(amount - paidAmount, dec: 0)} ریال'],
         ],
         barcodes: printableCodesIn(code),
         note: note,
@@ -571,12 +617,12 @@ class PdfService {
       return InvoiceTemplatesPdf.render(d, tpl, prof);
     }
     final headers = <String>[
-      'ردیف', 'دسته', 'نوع', 'کد پسته', 'وزن (خالص) کیلو', 'فی (تومان)', 'مبلغ (تومان)',
-      if (withUsd) ...['فی (دلار)', 'مبلغ (دلار)'],
+      'ردیف', 'دسته', 'نوع', 'کد پسته', 'وزن (خالص) کیلو', 'فی (ریال)', 'مبلغ (ریال)',
+      if (withUsd) ...['فی ($cl)', 'مبلغ ($cl)'],
     ];
     final row = <String>[
       faNum(1, dec: 0), category, type, code, faNum(netWeight), faNum(unitPrice, dec: 0), faNum(amount, dec: 0),
-      if (withUsd) ...[unitUsd == null ? '-' : faNum(unitUsd, dec: 4), amountUsd == null ? '-' : faNum(amountUsd)],
+      if (withUsd) ...[unitUsd == null ? '-' : faNum(unitUsd, dec: isCcy ? ccyDec : 4), amountUsd == null ? '-' : faNum(amountUsd)],
     ];
 
     pw.Widget sign(String label) => pw.Expanded(
@@ -599,7 +645,7 @@ class PdfService {
           pw.Row(mainAxisAlignment: pw.MainAxisAlignment.spaceBetween, children: [
             pw.Text(pdfText(isSale ? 'فاکتور فروش' : 'فاکتور خرید'),
                 style: pw.TextStyle(fontSize: 20, fontWeight: pw.FontWeight.bold)),
-            pw.Text(pdfText(withUsd ? 'نوع فاکتور: تومانی / ارزی' : 'نوع فاکتور: تومانی'),
+            pw.Text(pdfText(withUsd ? 'نوع فاکتور: ریالی / ارزی' : 'نوع فاکتور: ریالی'),
                 style: const pw.TextStyle(fontSize: 10)),
           ]),
           pw.Divider(),
@@ -611,7 +657,7 @@ class PdfService {
               _kv('تاریخ', dateLabel),
               _kv('فروشنده', sellerName.isEmpty ? '-' : sellerName),
               _kv('خریدار', buyerName.isEmpty ? '-' : buyerName),
-              if (withUsd && usdRate != null) _kv('نرخ دلار (تومان)', faNum(usdRate, dec: 0)),
+              if (withUsd && rateVal != null) _kv(rateLabel, faNum(rateVal, dec: 0)),
             ]),
           ),
           pw.SizedBox(height: 14),
@@ -641,6 +687,7 @@ class PdfService {
               _kv('وزن کل (ناخالص - با گونی)', '${faNum(totalWeight)} کیلو'),
               _kv('گونی کوچک', faNum(smallSacks)),
               _kv('گونی بزرگ', faNum(largeSacks)),
+              for (final List<String> w in weighRows) _kv(w[0], w[1]),
               _kv('وزن پسته (خالص)', '${faNum(netWeight)} کیلو'),
             ]),
           ),
@@ -664,12 +711,12 @@ class PdfService {
             decoration: pw.BoxDecoration(
                 border: pw.Border.all(width: 1), borderRadius: pw.BorderRadius.circular(6)),
             child: pw.Column(children: [
-              _kv('جمع کل (تومان)', '${faNum(amount, dec: 0)} تومان', bold: true),
-              if (withUsd) _kv('جمع کل (دلار)', amountUsd == null ? '-' : faUsd(amountUsd), bold: true),
+              _kv('جمع کل (ریال)', '${faNum(amount, dec: 0)} ریال', bold: true),
+              if (withUsd) _kv('جمع کل ($cl)', amountUsd == null ? '-' : fmtFx(amountUsd), bold: true),
               if (paidAmount != null) ...[
                 pw.Divider(),
-                _kv('مبلغ پرداخت‌شده (تومان)', '${faNum(paidAmount, dec: 0)} تومان'),
-                _kv('مانده حساب (تومان)', '${faNum(amount - paidAmount, dec: 0)} تومان', bold: true),
+                _kv('مبلغ پرداخت‌شده (ریال)', '${faNum(paidAmount, dec: 0)} ریال'),
+                _kv('مانده حساب (ریال)', '${faNum(amount - paidAmount, dec: 0)} ریال', bold: true),
               ],
             ]),
           ),

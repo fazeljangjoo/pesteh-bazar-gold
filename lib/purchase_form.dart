@@ -3,12 +3,18 @@ import 'dart:io' show Platform;
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'fin_block_view.dart'; // S35.T35.6f
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 
 import 'db.dart';
+import 'fx_doc_field.dart';
+import 'form_settings.dart' show FormSettingsLocal;
+import 'grade_lines_ui.dart';
+import 'fx_local.dart';
 import 'license_service.dart';
 import 'party_field.dart';
+import 'price_table_ui.dart' show PriceSuggestionHint;
 import 'tax_choice.dart';
 import 'utils.dart';
 import 'warehouse_ui.dart';
@@ -45,10 +51,29 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
 
   final _ounce = TextEditingController();
   final _price = TextEditingController();
-  final _usdRate = TextEditingController(); // قیمت دلار هنگام خرید (فقط پلن ارزی)
+  final FxDocController _fxc = FxDocController(); // S27c: ارز سند (نرخ دستی دلار حذف شد)
+  bool _fxEditBlocked = false; // خرید ارزیِ ثبت‌شده فعلاً قابل ویرایش نیست (T27b.6)
   final _total = TextEditingController();
   final _smallSack = TextEditingController();
   final _largeSack = TextEditingController();
+  // S35.T35.2: weighing block (only when the «توزین» switch is on)
+  bool _weighOn = false;
+  bool _gradesOn = false; // S35.T35.3b
+  bool _priceTableOn = false; // S35.T35.4
+  final GradeLinesController _gc = GradeLinesController();
+  double _sackSmallKg = 0.1;
+  double _sackLargeKg = 0.2;
+  bool _deductPct = false; // quality deduction entered as percent of (gross - tare)
+  final _tareManual = TextEditingController();
+  final _deduct = TextEditingController();
+  final _ticket = TextEditingController();
+  final _plate = TextEditingController();
+  final _driver = TextEditingController();
+  // S35.T35.6c: بلوک مالی (فقط وقتی form.fin_block روشن است). وضعیت مالیاتی از TaxChoiceField می‌آید.
+  bool _finOn = false;
+  final _finDisc = TextEditingController();
+  final _finWb = TextEditingController();
+  String _finPayer = 'us';
 
   final _gram = TextEditingController();
   final _pctKhandan = TextEditingController(); // درصد خندان در دنبست
@@ -69,12 +94,43 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
 
   bool get _fx => LicenseService.I.isFx.value;
 
-  /// فی دلاری هر کیلو = فی تومانی ÷ قیمت دلار
-  double? get _usdPerKg {
-    final p = parseNum(_price.text);
-    final r = parseNum(_usdRate.text);
-    if (p == null || r == null || r <= 0) return null;
-    return p / r;
+  /// فی خرید (واحد ذخیره، تومان تا S29): در سند ارزی = فی ارزی × نرخ ÷ ۱۰
+  String get _suggestTypeName {
+    if (_isPreset) {
+      for (final Map<String, dynamic> t in _types) {
+        if (t['id'] == _typeId) return '${t['name']}';
+      }
+      return '';
+    }
+    return _customTypeCtrl.text.trim();
+  }
+
+  bool get _useGrades => _gradesOn && _gc.hasRows && !_fxc.active; // S35.T35.3b: price = weighted average of the grade lines
+  double get _priceVal => _fxc.active ? (_fxc.priceStored ?? 0) : (_useGrades ? _gc.weightedPrice : (parseNum(_price.text) ?? 0));
+
+  /// ارزهای فعال از کش دستگاه؛ سپس تازه‌سازی بی‌صدای کش (آنلاین) و دوباره‌خوانی نرخ.
+  Future<void> _initFx() async {
+    await _fxc.load();
+    if (mounted) setState(() {});
+    if (await FxLocal.refresh()) {
+      await _fxc.load();
+      await _fxc.resolveRate();
+      if (mounted) setState(() {});
+    }
+  }
+
+  @override
+  void dispose() {
+    _fxc.dispose();
+    _finDisc.dispose();
+    _finWb.dispose();
+    _gc.dispose();
+    _tareManual.dispose();
+    _deduct.dispose();
+    _ticket.dispose();
+    _plate.dispose();
+    _driver.dispose();
+    super.dispose();
   }
 
   /// اگر بخشی از این خرید قبلاً فروخته شده باشد، دسته/نوع/وزن قابل ویرایش نیست
@@ -89,14 +145,23 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
   @override
   void initState() {
     super.initState();
+    if (LicenseService.I.isFx.value) _initFx();
+    _loadWeighSettings();
     final e = widget.existing;
     if (e != null) {
+      if (e['gross_kg'] != null) { // S35.T35.2
+        _tareManual.text = e['tare_kg'] == null ? '' : plain(e['tare_kg'] as num);
+        _deduct.text = (e['quality_deduct_kg'] == null || (e['quality_deduct_kg'] as num) == 0) ? '' : plain(e['quality_deduct_kg'] as num);
+        _ticket.text = (e['weigh_ticket_no'] as String?) ?? '';
+        _plate.text = (e['vehicle_plate'] as String?) ?? '';
+        _driver.text = (e['driver_name'] as String?) ?? '';
+      }
       _loadExistingPhoto(e['id'] as int?);
       _ounce.text = e['ounce'] == null ? '' : plain(e['ounce'] as num);
       _warehouseUid = e['warehouse_uid'] as String?;
       _ounceUid = e['ounce_uid'] as String?;
       _price.text = plain(e['price'] as num);
-      _usdRate.text = e['usd_rate'] == null ? '' : plain(e['usd_rate'] as num);
+      if (e['ccy'] != null && (e['ccy'] as String).isNotEmpty) _fxEditBlocked = true;
       _total.text = plain(e['total_weight'] as num);
       final smallVal = (e['small_sack_count'] as num).toDouble();
       final largeVal = (e['large_sack_count'] as num).toDouble();
@@ -174,9 +239,46 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
     });
   }
 
-  double get _tare =>
-      (parseNum(_smallSack.text) ?? 0) * 0.1 + (parseNum(_largeSack.text) ?? 0) * 0.2;
-  double get _net => (parseNum(_total.text) ?? 0) - _tare;
+  Future<void> _loadWeighSettings() async {
+    final bool on = await FormSettingsLocal.isOn('weigh');
+    final bool gOn = await FormSettingsLocal.isOn('grades');
+    final bool ptOn = await FormSettingsLocal.isOn('price_table'); // S35.T35.4
+    final bool fin = await FormSettingsLocal.isOn('fin_block'); // S35.T35.6c
+    List<Map<String, dynamic>> gl = <Map<String, dynamic>>[];
+    final Map<String, dynamic>? ex = widget.existing;
+    if (gOn && ex != null && ex['id'] is int) gl = await GradeLinesLocal.load('purchase', ex['id'] as int);
+    final List<double> k = await FormSettingsLocal.sackKg();
+    if (!mounted) return;
+    setState(() {
+      _gradesOn = gOn;
+      _priceTableOn = ptOn;
+      if (gl.isNotEmpty) _gc.loadFrom(gl);
+      _weighOn = on;
+      _sackSmallKg = k[0];
+      _sackLargeKg = k[1];
+      _finOn = fin;
+      if (ex != null) {
+        final Object? d = ex['discount_amount'] ?? ex['discount']; // S35.T35.6c: prefill
+        final Object? w = ex['weighbridge_cost'];
+        if (d is num && d > 0) _finDisc.text = plain(d);
+        if (w is num && w > 0) _finWb.text = plain(w);
+        _finPayer = ex['side_cost_payer'] == 'party' ? 'party' : 'us';
+      }
+    });
+  }
+
+  double get _sackTare =>
+      (parseNum(_smallSack.text) ?? 0) * (_weighOn ? _sackSmallKg : 0.1) + (parseNum(_largeSack.text) ?? 0) * (_weighOn ? _sackLargeKg : 0.2);
+  /// tare = manual value when typed, else from sack counts (S35.T35.2)
+  double get _tare => (_weighOn && _tareManual.text.trim().isNotEmpty) ? (parseNum(_tareManual.text) ?? 0) : _sackTare;
+  double get _deductKg {
+    if (!_weighOn) return 0;
+    final double v = parseNum(_deduct.text) ?? 0;
+    if (!_deductPct) return v;
+    final double base = (parseNum(_total.text) ?? 0) - _tare;
+    return base <= 0 ? 0 : (base * v / 100 * 1000).round() / 1000;
+  }
+  double get _net => (parseNum(_total.text) ?? 0) - _tare - _deductKg;
 
   Future<void> _addCategory() async {
     final c = TextEditingController();
@@ -311,7 +413,6 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
       final lockedData = <String, dynamic>{
         if (_photoChanged) 'photo': _photo,
         'price': parseNum(_price.text),
-        if (_fx) 'usd_rate': parseNum(_usdRate.text),
         'seller': _seller.text.trim().isEmpty ? null : _seller.text.trim(),
         'note': _note.text.trim().isEmpty ? null : _note.text.trim(),
         'labor_cost': parseNum(_laborCost.text),
@@ -350,12 +451,20 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
       snack(context, 'وزن (خالص) باید بیشتر از صفر باشد');
       return;
     }
-    if ((parseNum(_price.text) ?? 0) <= 0) {
-      snack(context, 'فی خرید را وارد کنید');
+    final String? fxErr = _fxc.validate();
+    if (fxErr != null) {
+      snack(context, fxErr);
       return;
     }
-    if (_fx && (parseNum(_usdRate.text) ?? 0) <= 0) {
-      snack(context, 'قیمت دلار روز خرید را وارد کنید');
+    if (_gradesOn) {
+      final String? ge = _gc.validate(_net);
+      if (ge != null) {
+        snack(context, ge);
+        return;
+      }
+    }
+    if (_priceVal <= 0) {
+      snack(context, 'فی خرید را وارد کنید');
       return;
     }
 
@@ -382,12 +491,25 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
       'ounce': parseNum(_ounce.text),
       'warehouse_uid': _warehouseUid,
       'ounce_uid': _ounceUid,
-      'price': parseNum(_price.text),
-      if (_fx) 'usd_rate': parseNum(_usdRate.text),
+      'price': _priceVal,
+      ..._fxc.fields(),
       'total_weight': parseNum(_total.text),
       'small_sack_count': parseNum(_smallSack.text) ?? 0,
       'large_sack_count': parseNum(_largeSack.text) ?? 0,
       'net_weight': _net,
+      if (_gradesOn) 'grade_lines': _gc.toPayload(), // S35.T35.3b (empty list = single-price document)
+      // S35.T35.2: weighing block (null when the switch is off so an edit never keeps stale values)
+      'gross_kg': _weighOn ? parseNum(_total.text) : null,
+      'tare_kg': _weighOn ? _tare : null,
+      'quality_deduct_kg': _weighOn ? _deductKg : null,
+      'weigh_ticket_no': _weighOn && _ticket.text.trim().isNotEmpty ? _ticket.text.trim() : null,
+      'vehicle_plate': _weighOn && _plate.text.trim().isNotEmpty ? _plate.text.trim() : null,
+      'driver_name': _weighOn && _driver.text.trim().isNotEmpty ? _driver.text.trim() : null,
+      if (_finOn) ...<String, dynamic>{ // S35.T35.6c: server applies only when form.fin_block is on
+        'discount_amount': parseNum(_finDisc.text) ?? 0,
+        'weighbridge_cost': parseNum(_finWb.text) ?? 0,
+        'side_cost_payer': _finPayer,
+      },
       'gram': preset == 'dombest' ? parseNum(_gram.text) : null,
       'pct_khandan': preset == 'dombest' ? parseNum(_pctKhandan.text) : null,
       'pct_dombest': preset == 'khandan' ? parseNum(_pctDombest.text) : null,
@@ -430,6 +552,21 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
   Widget build(BuildContext context) {
     if (_loadingCats) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+    if (_fxEditBlocked) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('ویرایش خرید')),
+        body: const Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: Text(
+              'این خرید به ارز ثبت شده و نرخ آن ثابت است؛ ویرایش مستقیم ممکن نیست.\n'
+              'برای اصلاح نرخ از «سند تعدیل نرخ» استفاده کنید، یا خرید را حذف و دوباره ثبت کنید.',
+              textAlign: TextAlign.center,
+            ),
+          ),
+        ),
+      );
     }
     final preset = _presetKey;
     return Scaffold(
@@ -527,13 +664,16 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
                 child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                   sectionTitle(context, 'قیمت و وزن'),
                   numField(_ounce, 'انس پسته (اختیاری)'),
-                  numField(_price, 'فی خرید (تومان به ازای هر کیلو)',
-                      required: true, thousands: true, onChanged: () => setState(() {})),
-                  if (_fx)
-                    numField(_usdRate, 'قیمت دلار در زمان خرید (تومان)',
-                        required: !_locked, thousands: true, onChanged: () => setState(() {}))
-                  else
-                    fxLockedField('قیمت دلار در زمان خرید (تومان)'),
+                  if (_fx && !_isEdit)
+                    FxDocFields(c: _fxc, priceLabel: 'فی خرید ارزی (هر کیلو)', onChanged: () => setState(() {})),
+                  if (!_fxc.active && !_useGrades)
+                    numField(_price, 'فی خرید (ریال به ازای هر کیلو)',
+                        required: true, thousands: true, onChanged: () => setState(() {})),
+                  if (_priceTableOn && !_fxc.active && !_useGrades)
+                    PriceSuggestionHint(
+                        typeName: _suggestTypeName, ounceUid: _ounceUid, onAccept: (num v) => setState(() => _price.text = plain(v))), // S35.T35.4
+                  if (_gradesOn && !_fxc.active) GradeLinesEditor(c: _gc, netKg: _net, onChanged: () => setState(() {})),
+                  if (!_fx) fxLockedField('خرید به ارز'),
                   numField(_total, 'وزن کل (ناخالص) به کیلو', required: true, onChanged: () => setState(() {})),
                   Row(children: [
                     Expanded(
@@ -542,17 +682,44 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
                     Expanded(
                         child: numField(_largeSack, 'تعداد گونی بزرگ (۲۰۰ گرم)', hint: '0', onChanged: () => setState(() {}))),
                   ]),
+                  if (_weighOn) ...[
+                    sectionTitle(context, 'توزین'),
+                    const Padding(
+                      padding: EdgeInsets.only(bottom: 4),
+                      child: Text('تارا یعنی وزن گونی یا ظرف خالی که از وزن کل کم می‌شود', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                    ),
+                    numField(_tareManual, 'تارا (کیلو) — خالی = از تعداد گونی', hint: faNum(_sackTare), onChanged: () => setState(() {})),
+                    Row(children: [
+                      Expanded(child: numField(_deduct, _deductPct ? 'کسر کیفیت (درصد)' : 'کسر کیفیت (کیلو)', onChanged: () => setState(() {}))),
+                      const SizedBox(width: 8),
+                      DropdownButton<bool>(
+                        value: _deductPct,
+                        items: const <DropdownMenuItem<bool>>[
+                          DropdownMenuItem<bool>(value: false, child: Text('کیلو')),
+                          DropdownMenuItem<bool>(value: true, child: Text('درصد')),
+                        ],
+                        onChanged: (bool? v) => setState(() => _deductPct = v ?? false),
+                      ),
+                    ]),
+                    textField(_ticket, 'شمارهٔ قبض باسکول'),
+                    Row(children: [
+                      Expanded(child: textField(_plate, 'پلاک')),
+                      const SizedBox(width: 8),
+                      Expanded(child: textField(_driver, 'راننده')),
+                    ]),
+                  ],
                   Card(
                     color: Theme.of(context).colorScheme.primaryContainer,
                     child: Padding(
                       padding: const EdgeInsets.all(12),
                       child: Column(children: [
-                        infoRow('وزن گونی‌ها', '${faNum(_tare)} کیلو'),
+                        infoRow(_weighOn ? 'تارا' : 'وزن گونی‌ها', '${faNum(_tare)} کیلو'),
+                        if (_weighOn && _deductKg > 0) infoRow('کسر کیفیت', '${faNum(_deductKg)} کیلو'),
                         infoRow('وزن پسته (خالص)', '${faNum(_net)} کیلو'),
-                        infoRow('ارزش کل', '${faNum(_net * (parseNum(_price.text) ?? 0), dec: 0)} تومان'),
-                        if (_fx && _usdPerKg != null) ...[
-                          infoRow('فی خرید به دلار (هر کیلو)', faUsd(_usdPerKg!, dec: 4)),
-                          infoRow('ارزش کل به دلار', faUsd(_net * _usdPerKg!)),
+                        infoRow('ارزش کل', '${faNum(_net * _priceVal, dec: 0)} ریال'),
+                        if (_fxc.active && _fxc.priceCcyNum != null) ...[
+                          infoRow('فی خرید ارزی (هر کیلو)', faCcy(_fxc.ccy!, _fxc.priceCcyNum!, dec: _fxc.decimals)),
+                          infoRow('ارزش کل ارزی', faCcy(_fxc.ccy!, _net * _fxc.priceCcyNum!, dec: _fxc.decimals)),
                         ],
                       ]),
                     ),
@@ -615,8 +782,23 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
             sectionTitle(context, 'سایر'),
             PartyField(controller: _seller, label: 'فروشنده (اختیاری)'),
             textField(_note, 'توضیحات (اختیاری)', lines: 2),
-            numField(_laborCost, 'هزینه کارگر (تومان) — اختیاری', thousands: true, hint: 'اگر وارد شود از سود این پسته کم می‌شود'),
-            numField(_transportCost, 'هزینه حمل‌ونقل / باسکول (تومان) — اختیاری', thousands: true, hint: 'اگر وارد شود از سود این پسته کم می‌شود'),
+            numField(_laborCost, 'هزینه کارگر (ریال) — اختیاری', thousands: true, hint: 'اگر وارد شود از سود این پسته کم می‌شود'),
+            if (_finOn) ...[
+              sectionTitle(context, 'بلوک مالی'),
+              numField(_finDisc, 'تخفیف (ریال) — اختیاری', thousands: true),
+              numField(_finWb, 'هزینهٔ باسکول (ریال) — اختیاری', thousands: true),
+              DropdownButtonFormField<String>(
+                value: _finPayer,
+                decoration: const InputDecoration(labelText: 'هزینه‌های جانبی بر عهدهٔ'),
+                items: const <DropdownMenuItem<String>>[
+                  DropdownMenuItem<String>(value: 'us', child: Text('ما')),
+                  DropdownMenuItem<String>(value: 'party', child: Text('طرف حساب')),
+                ],
+                onChanged: (String? v) => setState(() => _finPayer = v ?? 'us'),
+              ),
+            ],
+            if (_finOn && widget.existing != null) FinBlockCard(docType: 'purchase', docId: (widget.existing!['id'] as num?)?.toInt()), // S35.T35.6f
+            numField(_transportCost, 'هزینه حمل‌ونقل / باسکول (ریال) — اختیاری', thousands: true, hint: 'اگر وارد شود از سود این پسته کم می‌شود'),
             TaxChoiceField(status: _taxStatus, rate: _taxRate, onChanged: (String? v) => setState(() => _taxStatus = v)),
             const SizedBox(height: 8),
             FilledButton.icon(

@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 
 import 'db.dart';
+import 'fx_local.dart';
+import 'fx_tx_fields.dart';
 import 'notify_service.dart';
 import 'pdf_output.dart';
+import 'pay_terms_ui.dart';
 import 'pdf_service.dart';
 import 'utils.dart';
 import 'widgets.dart';
@@ -95,7 +98,9 @@ class _PaymentScreenState extends State<PaymentScreen> with EditGuard<PaymentScr
 
   String _typeLabel(String t, String? st) => t == 'lump'
       ? 'پرداخت یکجا'
-      : (st == 'cheque' ? 'پرداخت مرحله‌ای (چک)' : 'پرداخت مرحله‌ای (اعتباری/قسطی)');
+      : t == 'mixed'
+          ? 'پرداخت ترکیبی (نقد + قسط + چک)'
+          : (st == 'cheque' ? 'پرداخت مرحله‌ای (چک)' : 'پرداخت مرحله‌ای (اعتباری/قسطی)');
 
   /// انتخاب یا تغییر نوع پرداخت همیشه با تأیید کاربر انجام می‌شود
   Future<void> _requestType(String t, String? st) async {
@@ -322,6 +327,12 @@ class _PaymentScreenState extends State<PaymentScreen> with EditGuard<PaymentScr
                       title: const Text('پرداخت مرحله‌ای'),
                       onChanged: (v) => _requestType('staged', _stagedType ?? 'credit'),
                     ),
+                    RadioListTile<String>(
+                      value: 'mixed',
+                      groupValue: _payType,
+                      title: const Text('ترکیبی (نقد + قسط + چک)'),
+                      onChanged: (v) => _requestType('mixed', null),
+                    ),
                   ]),
                 ),
                 if (_payType == 'staged') ...[
@@ -347,6 +358,18 @@ class _PaymentScreenState extends State<PaymentScreen> with EditGuard<PaymentScr
                 if (_payType == 'lump') _lumpSection(),
                 if (_payType == 'staged' && _stagedType == 'credit') _creditSection(),
                 if (_payType == 'staged' && _stagedType == 'cheque') _chequeSection(),
+                if (_payType == 'mixed') ...[
+                  _lumpSection(),
+                  const SizedBox(height: 12),
+                  _creditSection(),
+                  const SizedBox(height: 12),
+                  _chequeSection(),
+                  const SizedBox(height: 12),
+                  PayTermsPreview(installments: <Map<String, dynamic>>[
+                    ..._credit,
+                    ..._cheque,
+                  ]),
+                ],
                 const SizedBox(height: 24),
               ],
             ),
@@ -359,10 +382,10 @@ class _PaymentScreenState extends State<PaymentScreen> with EditGuard<PaymentScr
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(children: [
-          infoRow('مبلغ کل خرید', '${faNum(_total, dec: 0)} تومان'),
-          infoRow('تسویه شده', '${faNum(_settled, dec: 0)} تومان'),
+          infoRow('مبلغ کل خرید', '${faNum(_total, dec: 0)} ریال'),
+          infoRow('تسویه شده', '${faNum(_settled, dec: 0)} ریال'),
           infoRow(_remaining >= 0 ? 'باقیمانده' : 'پرداخت اضافی',
-              '${faNum(_remaining.abs(), dec: 0)} تومان'),
+              '${faNum(_remaining.abs(), dec: 0)} ریال'),
         ]),
       ),
     );
@@ -383,7 +406,7 @@ class _PaymentScreenState extends State<PaymentScreen> with EditGuard<PaymentScr
               value: (r['paid'] as int? ?? 1) == 1,
               onChanged: (v) => _toggleLumpPaid(r, v ?? false),
             ),
-            title: Text('${faNum(r['amount'] as num, dec: 0)} تومان — ${jalaliDate(r['date'] as String)}'),
+            title: Text('${faNum(r['amount'] as num, dec: 0)} ریال — ${jalaliDate(r['date'] as String)}'),
             subtitle: Text('از ${r['from_account'] ?? '-'} (${r['payer_name'] ?? '-'})\nبه ${r['to_account'] ?? '-'} (${r['seller_name'] ?? '-'})'
                 '${(r['paid'] as int? ?? 1) == 1 ? '\nتسویه شده' : ''}'),
             isThreeLine: true,
@@ -416,7 +439,7 @@ class _PaymentScreenState extends State<PaymentScreen> with EditGuard<PaymentScr
               value: (r['paid'] as int) == 1,
               onChanged: (v) => _toggleCreditPaid(r, v ?? false),
             ),
-            title: Text('${faNum(r['amount'] as num, dec: 0)} تومان — سررسید ${jalaliDate(r['due_date'] as String)}'),
+            title: Text('${faNum(r['amount'] as num, dec: 0)} ریال — سررسید ${jalaliDate(r['due_date'] as String)}'),
             subtitle: Text('از ${r['from_account'] ?? '-'} (${r['payer_name'] ?? '-'})\nبه ${r['to_account'] ?? '-'} (${r['seller_name'] ?? '-'})'
                 '${(r['paid'] as int) == 1 ? '\nپرداخت شده' : ''}'),
             isThreeLine: true,
@@ -450,7 +473,7 @@ class _PaymentScreenState extends State<PaymentScreen> with EditGuard<PaymentScr
               value: (r['paid'] as int) == 1,
               onChanged: (v) => _toggleChequePaid(r, v ?? false),
             ),
-            title: Text('${faNum(r['amount'] as num, dec: 0)} تومان — سررسید ${jalaliDate(r['due_date'] as String)}'),
+            title: Text('${faNum(r['amount'] as num, dec: 0)} ریال — سررسید ${jalaliDate(r['due_date'] as String)}'),
             subtitle: Text('چک ${r['cheque_no'] ?? '-'} — بانک ${r['bank_name'] ?? '-'}\n'
                 'از ${r['from_account'] ?? '-'} (${r['payer_name'] ?? '-'}) به ${r['to_account'] ?? '-'} (${r['seller_name'] ?? '-'})'
                 '${(r['paid'] as int) == 1 ? '\nپرداخت شده' : ''}'),
@@ -483,6 +506,7 @@ class _LumpForm extends StatefulWidget {
 
 class _LumpFormState extends State<_LumpForm> {
   final _form = GlobalKey<FormState>();
+  late final FxTxController _fx;
   late final TextEditingController _amount;
   late final TextEditingController _fromAccount;
   late final TextEditingController _payerName;
@@ -496,6 +520,10 @@ class _LumpFormState extends State<_LumpForm> {
     super.initState();
     final e = widget.existing;
     _amount = TextEditingController(text: e == null ? '' : plain(e['amount'] as num));
+    _fx = FxTxController(_amount);
+    _fx.load(e).then((_) {
+      if (mounted) setState(() {});
+    });
     _fromAccount = TextEditingController(text: e?['from_account'] as String? ?? '');
     _payerName = TextEditingController(text: e?['payer_name'] as String? ?? '');
     _toAccount = TextEditingController(text: e?['to_account'] as String? ?? '');
@@ -506,7 +534,13 @@ class _LumpFormState extends State<_LumpForm> {
 
   void _save() {
     if (!_form.currentState!.validate()) return;
+    final String? fxErr = _fx.validate();
+    if (fxErr != null) {
+      snack(context, fxErr);
+      return;
+    }
     Navigator.pop(context, {
+      ..._fx.fields(),
       'amount': parseNum(_amount.text) ?? 0,
       'date': (_date ?? DateTime.now()).toIso8601String(),
       'from_account': _fromAccount.text.trim(),
@@ -529,7 +563,8 @@ class _LumpFormState extends State<_LumpForm> {
               Text(widget.existing == null ? 'تراکنش جدید' : 'ویرایش تراکنش',
                   style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 12),
-              numField(_amount, 'مبلغ (تومان)', required: true, thousands: true),
+              FxTxFields(c: _fx, dateIso: fxIsoDate(_date ?? DateTime.now()), onChanged: () => setState(() {})),
+              numField(_amount, 'مبلغ (ریال)', required: true, thousands: true),
               OverpayWarning(controller: _amount, total: widget.total, others: widget.others),
               dateField(context, 'تاریخ واریز', _date, (d) => setState(() => _date = d)),
               textField(_fromAccount, 'از کدام حساب'),
@@ -565,6 +600,7 @@ class _CreditForm extends StatefulWidget {
 
 class _CreditFormState extends State<_CreditForm> {
   final _form = GlobalKey<FormState>();
+  late final FxTxController _fx;
   late final TextEditingController _amount;
   late final TextEditingController _fromAccount;
   late final TextEditingController _payerName;
@@ -578,6 +614,10 @@ class _CreditFormState extends State<_CreditForm> {
     super.initState();
     final e = widget.existing;
     _amount = TextEditingController(text: e == null ? '' : plain(e['amount'] as num));
+    _fx = FxTxController(_amount);
+    _fx.load(e).then((_) {
+      if (mounted) setState(() {});
+    });
     _fromAccount = TextEditingController(text: e?['from_account'] as String? ?? '');
     _payerName = TextEditingController(text: e?['payer_name'] as String? ?? '');
     _toAccount = TextEditingController(text: e?['to_account'] as String? ?? '');
@@ -592,7 +632,13 @@ class _CreditFormState extends State<_CreditForm> {
       snack(context, 'سررسید را انتخاب کنید');
       return;
     }
+    final String? fxErr = _fx.validate();
+    if (fxErr != null) {
+      snack(context, fxErr);
+      return;
+    }
     Navigator.pop(context, {
+      ..._fx.fields(),
       'amount': parseNum(_amount.text) ?? 0,
       'due_date': _due!.toIso8601String(),
       'from_account': _fromAccount.text.trim(),
@@ -614,7 +660,8 @@ class _CreditFormState extends State<_CreditForm> {
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               Text(widget.existing == null ? 'قسط جدید' : 'ویرایش قسط', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 12),
-              numField(_amount, 'مبلغ قسط (تومان)', required: true, thousands: true),
+              FxTxFields(c: _fx, dateIso: fxIsoDate(_due ?? DateTime.now()), onChanged: () => setState(() {})),
+              numField(_amount, 'مبلغ قسط (ریال)', required: true, thousands: true),
               OverpayWarning(controller: _amount, total: widget.total, others: widget.others),
               dateField(context, 'تاریخ سررسید', _due, (d) => setState(() => _due = d)),
               textField(_fromAccount, 'از کدام حساب'),
@@ -650,8 +697,10 @@ class _ChequeForm extends StatefulWidget {
 
 class _ChequeFormState extends State<_ChequeForm> {
   final _form = GlobalKey<FormState>();
+  late final FxTxController _fx;
   late final TextEditingController _amount;
   late final TextEditingController _chequeNo;
+  late final TextEditingController _sayad = TextEditingController(); // S35.T35.7c: شناسهٔ صیاد
   late final TextEditingController _bankName;
   late final TextEditingController _fromAccount;
   late final TextEditingController _payerName;
@@ -665,7 +714,12 @@ class _ChequeFormState extends State<_ChequeForm> {
     super.initState();
     final e = widget.existing;
     _amount = TextEditingController(text: e == null ? '' : plain(e['amount'] as num));
+    _fx = FxTxController(_amount);
+    _fx.load(e).then((_) {
+      if (mounted) setState(() {});
+    });
     _chequeNo = TextEditingController(text: e?['cheque_no'] as String? ?? '');
+    _sayad.text = (e?['sayad_id'] as String?) ?? '';
     _bankName = TextEditingController(text: e?['bank_name'] as String? ?? '');
     _fromAccount = TextEditingController(text: e?['from_account'] as String? ?? '');
     _payerName = TextEditingController(text: e?['payer_name'] as String? ?? '');
@@ -681,10 +735,22 @@ class _ChequeFormState extends State<_ChequeForm> {
       snack(context, 'سررسید را انتخاب کنید');
       return;
     }
+    final String? fxErr = _fx.validate();
+    if (fxErr != null) {
+      snack(context, fxErr);
+      return;
+    }
+    final String sy = sayadDigitsFa(_sayad.text); // S35.T35.7c: format check only (16 digits)
+    if (sy.isNotEmpty && !RegExp(r'^\d{16}$').hasMatch(sy)) {
+      snack(context, 'شناسهٔ صیاد باید ۱۶ رقم باشد');
+      return;
+    }
     Navigator.pop(context, {
+      ..._fx.fields(),
       'amount': parseNum(_amount.text) ?? 0,
       'due_date': _due!.toIso8601String(),
       'cheque_no': _chequeNo.text.trim(),
+      'sayad_id': sy.isEmpty ? null : sy,
       'bank_name': _bankName.text.trim(),
       'from_account': _fromAccount.text.trim(),
       'payer_name': _payerName.text.trim(),
@@ -705,10 +771,12 @@ class _ChequeFormState extends State<_ChequeForm> {
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
               Text(widget.existing == null ? 'چک جدید' : 'ویرایش چک', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 12),
-              numField(_amount, 'مبلغ چک (تومان)', required: true, thousands: true),
+              FxTxFields(c: _fx, dateIso: fxIsoDate(_due ?? DateTime.now()), onChanged: () => setState(() {})),
+              numField(_amount, 'مبلغ چک (ریال)', required: true, thousands: true),
               OverpayWarning(controller: _amount, total: widget.total, others: widget.others),
               dateField(context, 'تاریخ سررسید چک', _due, (d) => setState(() => _due = d)),
               textField(_chequeNo, 'شماره چک'),
+              textField(_sayad, 'شناسهٔ صیاد (۱۶ رقم) — اختیاری'), // S35.T35.7c
               textField(_bankName, 'نام بانک'),
               textField(_fromAccount, 'از کدام حساب'),
               textField(_payerName, 'به نام چه کسی (واریزکننده)'),
@@ -729,4 +797,15 @@ class _ChequeFormState extends State<_ChequeForm> {
       ),
     );
   }
+}
+
+/// S35.T35.7c: Persian digits → ASCII; spaces and dashes removed (sayad id input).
+String sayadDigitsFa(String raw) {
+  const String fa = '۰۱۲۳۴۵۶۷۸۹';
+  final StringBuffer b = StringBuffer();
+  for (final String ch in raw.split('')) {
+    final int idx = fa.indexOf(ch);
+    b.write(idx >= 0 ? '$idx' : ch);
+  }
+  return b.toString().replaceAll(RegExp(r'[\s-]'), '');
 }
