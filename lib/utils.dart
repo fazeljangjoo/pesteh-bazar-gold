@@ -305,6 +305,27 @@ double saleExtraShare(Map<String, dynamic> sale, Map<String, dynamic> item) {
 }
 
 
+/// S30.T30.5 — درآمد، بها و سود یک فروش به ارزِ دلخواه، فقط از «جدول نرخ ثبت‌شده».
+/// [rateOf] = نرخ آن تاریخ (yyyy-MM-dd) به‌ازای یک واحد ارز، در واحد ذخیرهٔ پول (تومان/ریال)؛ null = نرخ نیست.
+/// درآمد و هزینه‌های جانبیِ فروش با نرخ روز فروش، بهای هر قلم و هزینه‌های جانبیِ خریدش با نرخ روز خرید
+/// (`purchase_date` قلم، وگرنه روز فروش) ارزش‌گذاری می‌شود. اگر هر نرخی نباشد null برمی‌گرداند (سود ارزی نمایش داده نشود).
+({double revenue, double cost, double profit})? saleFx(Map<String, dynamic> sale, double? Function(String isoDate) rateOf) {
+  final String sd = '${sale['date']}';
+  final double? rs = rateOf(sd);
+  if (rs == null || rs <= 0) return null;
+  var cost = saleExtraCosts(sale) / rs;
+  for (final it in (sale['items'] as List)) {
+    final Map<String, dynamic> m = it as Map<String, dynamic>;
+    final String pd = (m['purchase_date'] as String?)?.trim().isNotEmpty == true ? m['purchase_date'] as String : sd;
+    final double? rp = rateOf(pd);
+    if (rp == null || rp <= 0) return null;
+    final double w = (m['weight'] as num).toDouble();
+    cost += (w * (m['cost_price'] as num).toDouble() + w * purchaseExtraPerKg(m)) / rp;
+  }
+  final double revenue = (sale['net_weight'] as num).toDouble() * (sale['price'] as num).toDouble() / rs;
+  return (revenue: revenue, cost: cost, profit: revenue - cost);
+}
+
 /// تماس با پشتیبانی: روی گوشی شماره‌گیر باز می‌شود؛ روی ویندوز (تلفن ندارد) شماره کپی می‌شود.
 Future<void> callSupport(BuildContext context, String callNumber, String displayPhone) async {
   if (Platform.isWindows) {
@@ -318,3 +339,13 @@ Future<void> callSupport(BuildContext context, String callNumber, String display
   }
   await launchUrl(Uri.parse('tel:$callNumber'));
 }
+
+/// مبلغ ارزی با کد ارز، مثل «۱٬۲۰۰٫۵۰ USD» (S26.T26.3).
+String faCcy(String code, num amount, {int dec = 2}) => '${faNum(amount, dec: dec)} $code';
+
+/// ریال به ارز با نرخ (ریال به‌ازای یک واحد ارز). نرخ صفر یا منفی = null.
+double? rialToCcy(double rial, double rate) => rate > 0 ? rial / rate : null;
+
+/// ارز به ریال با نرخ. نرخ صفر یا منفی = null.
+double? ccyToRial(double amount, double rate) => rate > 0 ? amount * rate : null;
+

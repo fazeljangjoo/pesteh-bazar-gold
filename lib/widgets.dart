@@ -328,7 +328,7 @@ class OverpayWarning extends StatelessWidget {
           ),
           child: Text(
             'هشدار: با این مبلغ، جمع همهٔ تراکنش‌های ثبت‌شده '
-            '${faNum(sum - total, dec: 0)} تومان بیشتر از مبلغ کل شده است؛ '
+            '${faNum(sum - total, dec: 0)} ریال بیشتر از مبلغ کل شده است؛ '
             'شما دارید بیشتر از مبلغ کل ${receipt ? 'دریافت' : 'پرداخت'} می‌کنید. ثبت آن همچنان ممکن است.',
             style: TextStyle(color: Colors.orange.shade900, fontSize: 12.5),
           ),

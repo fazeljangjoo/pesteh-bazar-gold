@@ -7,7 +7,9 @@ import 'package:http/http.dart' as http;
 
 import 'db.dart';
 import 'entity_store.dart';
+import 'fx_local.dart';
 import 'license_service.dart';
+import 'money_unit.dart'; // S29.T29.3
 import 'local_backup.dart';
 
 /// وضعیت همگام‌سازی برای نمایش در صفحه‌ها
@@ -61,6 +63,8 @@ class SyncService {
   Timer? _debounce;
   Timer? _tick;
   DateTime _lastPullTry = DateTime.fromMillisecondsSinceEpoch(0);
+  bool _unitProbed = false; // S29.T29.3: server money_unit checked once per app run (and again after a unit error)
+  DateTime _lastFxTry = DateTime.fromMillisecondsSinceEpoch(0); // S27c: آخرین تازه‌سازی کش ارز/نرخ
   // آخرین تغییر محلی/ارسال موفق؛ تا ۹۰ ثانیه بعدش دریافتِ خودکار از سرور انجام نمی‌شود
   DateTime _lastActivity = DateTime.fromMillisecondsSinceEpoch(0);
 
@@ -138,12 +142,20 @@ class SyncService {
     if (!ok) return;
     final (p, f) = await AppDb.I.queueCounts();
     _emit(pending: p, failed: f);
+    if (!_unitProbed && p == 0 && f == 0 && !AppDb.I.isEditing) {
+      if (await _probeMoneyUnit(cred.$1, cred.$2)) pull = true; // server turned rial: x10 done locally, now reload
+    }
     final due = DateTime.now().difference(_lastPullTry) >= _pullEvery;
     final settled = DateTime.now().difference(_lastActivity) >= _settle;
     // تا وقتی فرم/صفحهٔ ثبتی باز است دریافت از سرور انجام نمی‌شود (شناسه‌ها زیر دست کاربر عوض نشوند)
     if (p == 0 && f == 0 && !AppDb.I.isEditing && (pull == true || (pull == null && due && settled))) {
       _lastPullTry = DateTime.now();
       await _pull(cred.$1, cred.$2);
+    }
+    // S27c: کش ارز/نرخ (پلن ارزی) مستقل از وضعیت صف تازه می‌شود تا سند «نرخ ثبت نشده» بعد از ثبت نرخ دوباره ارسال شود
+    if (LicenseService.I.isFx.value && DateTime.now().difference(_lastFxTry) >= const Duration(minutes: 10)) {
+      _lastFxTry = DateTime.now();
+      await FxLocal.refresh();
     }
     _error = null;
     _lastOk = DateTime.now();
@@ -249,7 +261,7 @@ class SyncService {
 
   Future<_ApiResult> _call(String phone, String token, String action, Map<String, dynamic> payload,
       {String? idem, int timeoutSec = 30}) async {
-    final body = <String, dynamic>{'phone': phone, 'token': token, 'action': action, 'payload': payload};
+    final body = <String, dynamic>{'phone': phone, 'token': token, 'action': action, 'payload': payload, 'unit': AppDb.I.moneyUnit};
     if (idem != null) body['idem'] = idem;
     final resp = await http
         .post(Uri.parse(_url), headers: {'Content-Type': 'application/json'}, body: jsonEncode(body))
@@ -349,6 +361,15 @@ class SyncService {
         _error = r.error;
         return false;
       }
+      final String ue = (r.data?['error'] ?? '').toString();
+      if (ue == 'upgrade_required' || ue == 'unit_mismatch') {
+        // S29.T29.3: the op carries amounts in another unit than the server stores: never retry it blindly
+        _unitProbed = false;
+        _error = ue == 'upgrade_required'
+            ? 'واحد پول سرور ریال شده و مبلغ‌های صف با واحد قدیمی‌اند؛ از «بازخوانی کامل» در صفحهٔ همگام‌سازی استفاده کنید یا برنامه را به‌روز کنید'
+            : r.error;
+        return false;
+      }
       final retryable = r.code == 409 || r.code == 429 || r.code >= 500 || r.data == null;
       if (retryable) {
         final att = ((op['attempts'] as num?) ?? 0).toInt() + 1;
@@ -360,9 +381,29 @@ class SyncService {
         _error = r.error;
         return false;
       }
+      if (r.data?['error'] == 'rate_missing') {
+        // S27c: نرخ ارز در سرور نیست؛ سند از صف جدا می‌شود و بعد از ثبت نرخ خودکار دوباره ارسال می‌شود
+        await AppDb.I.failOpRateMissing(seq, (r.data?['ccy'] ?? '').toString(), (r.data?['rate_date'] ?? '').toString());
+        continue;
+      }
       // خطای قطعی (اعتبارسنجی/موجودی/…): این مورد ارسال‌شدنی نیست
       await AppDb.I.failOp(seq, r.error);
     }
+  }
+
+  /// S29.T29.3: asks the server for its money unit (bootstrap is idempotent). Server rial + local toman +
+  /// empty queue => x10 on the local mirror. Returns true when a migration happened (caller reloads).
+  Future<bool> _probeMoneyUnit(String phone, String token) async {
+    try {
+      final _ApiResult b = await _call(phone, token, 'bootstrap', {}, timeoutSec: 30);
+      if (b.code != 200 || b.data == null) return false;
+      _unitProbed = true;
+      final String serverUnit = MoneyUnit.normalize(b.data!['money_unit']);
+      if (serverUnit == MoneyUnit.rial && AppDb.I.moneyUnit != MoneyUnit.rial) {
+        return await AppDb.I.migrateMoneyToRial();
+      }
+    } catch (_) {}
+    return false;
   }
 
   // ======================= دریافت =======================
@@ -377,11 +418,14 @@ class SyncService {
     // STAGE12: exported_at = ساعت سرور همین خروجی؛ فقط در صورت اعمال واقعی به‌عنوان snap_at ذخیره می‌شود
     final exp = r.data!['exported_at'];
     final ents = r.data!['entities'];
-    return AppDb.I.replaceAllFromServer(Map<String, dynamic>.from(tables),
+    final String srvUnit = MoneyUnit.normalize(r.data!['money_unit']); // S29.T29.3
+    final bool applied = await AppDb.I.replaceAllFromServer(Map<String, dynamic>.from(tables),
         discardQueue: discardQueue,
         exportedAt: exp is String ? exp : null,
         entities: ents is Map ? Map<String, dynamic>.from(ents) : null,
         docs: r.data!['docs'] is Map ? Map<String, dynamic>.from(r.data!['docs'] as Map) : null);
+    if (applied) await AppDb.I.setMoneyUnit(srvUnit); // mirror now holds exactly the server's unit
+    return applied;
   }
 
   /// ورود روی این دستگاه (یا نصب مجدد): همهٔ داده‌های حساب را از سرور می‌آورد.
@@ -395,6 +439,7 @@ class SyncService {
       if (b.code != 200) return b.error;
       final ok = await _pull(cred.$1, cred.$2);
       if (!ok) return 'همگام‌سازی انجام نشد؛ دوباره تلاش کنید';
+      if (LicenseService.I.isFx.value) await FxLocal.refresh();
       _lastOk = DateTime.now();
       _error = null;
       _emit(pending: 0, failed: 0);
