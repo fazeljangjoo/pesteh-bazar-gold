@@ -158,7 +158,7 @@ class _ReturnFormState extends State<_ReturnForm> {
           dateField(context, 'تاریخ برگشت', _date, (DateTime d) => setState(() => _date = d)),
           numField(_kg, 'وزن برگشت', required: true, suffix: 'کیلو', max: widget.maxKg),
           numField(_price, widget.isSale ? 'فی برگشت (پیش‌فرض: فی فروش)' : 'فی برگشت (پیش‌فرض: فی خرید)',
-              required: true, suffix: 'تومان', thousands: true),
+              required: true, suffix: 'ریال', thousands: true),
           DropdownButtonFormField<String>(
             value: _mode,
             decoration: const InputDecoration(labelText: 'نحوهٔ تسویه', border: OutlineInputBorder()),
@@ -169,7 +169,7 @@ class _ReturnFormState extends State<_ReturnForm> {
             onChanged: (String? v) => setState(() => _mode = v ?? _mode),
           ),
           const SizedBox(height: 12),
-          if (_hasRefund) numField(_refund, 'مبلغ بازپرداخت (خالی = کل ارزش برگشت)', suffix: 'تومان', thousands: true),
+          if (_hasRefund) numField(_refund, 'مبلغ بازپرداخت (خالی = کل ارزش برگشت)', suffix: 'ریال', thousands: true),
           if (_mode == 'cheque_given' || _mode == 'cheque_back') textField(_cheque, 'شمارهٔ چک'),
           textField(_note, 'یادداشت', lines: 2),
           if (_err != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(_err!, style: const TextStyle(color: Colors.red))),
@@ -330,8 +330,8 @@ class _ReturnsTabState extends State<_ReturnsTab> {
               for (final Map<String, dynamic> i in its)
                 infoRow('${i['type_name'] ?? i['code'] ?? ''}',
                     '${faNum(ReturnsHelp.d(i['kg']), dec: 3)} کیلو × ${faNum(ReturnsHelp.d(i['unit_price']), dec: 0)}'),
-              infoRow('ارزش برگشت', '${faNum(ReturnsHelp.d(r['total']), dec: 0)} تومان'),
-              infoRow('بازپرداخت', '${faNum(ReturnsHelp.d(r['refund_amount']), dec: 0)} تومان'),
+              infoRow('ارزش برگشت', '${faNum(ReturnsHelp.d(r['total']), dec: 0)} ریال'),
+              infoRow('بازپرداخت', '${faNum(ReturnsHelp.d(r['refund_amount']), dec: 0)} ریال'),
               const SizedBox(height: 8),
               Wrap(spacing: 8, children: <Widget>[
                 OutlinedButton.icon(
@@ -344,7 +344,7 @@ class _ReturnsTabState extends State<_ReturnsTab> {
                         <String>['تاریخ', jalaliDate('${r['date']}')],
                         <String>[widget.isSale ? 'خریدار' : 'فروشنده', '${r['party']}'],
                       ],
-                      columns: <String>['ردیف', 'کالا', 'کد', 'وزن (کیلو)', 'فی (تومان)', 'مبلغ (تومان)'],
+                      columns: <String>['ردیف', 'کالا', 'کد', 'وزن (کیلو)', 'فی (ریال)', 'مبلغ (ریال)'],
                       rows: <List<String>>[
                         for (int k = 0; k < its.length; k++)
                           <String>[
@@ -354,9 +354,9 @@ class _ReturnsTabState extends State<_ReturnsTab> {
                           ],
                       ],
                       totals: <List<String>>[
-                        <String>['ارزش برگشت (تومان)', faNum(ReturnsHelp.d(r['total']), dec: 0)],
-                        <String>['بازپرداخت (تومان)', faNum(ReturnsHelp.d(r['refund_amount']), dec: 0)],
-                        <String>['اثر بر حساب (تومان)', faNum(ReturnsHelp.d(r['net_effect']), dec: 0)],
+                        <String>['ارزش برگشت (ریال)', faNum(ReturnsHelp.d(r['total']), dec: 0)],
+                        <String>['بازپرداخت (ریال)', faNum(ReturnsHelp.d(r['refund_amount']), dec: 0)],
+                        <String>['اثر بر حساب (ریال)', faNum(ReturnsHelp.d(r['net_effect']), dec: 0)],
                       ],
                       note: r['note'] as String?,
                     );
@@ -402,7 +402,7 @@ class _ReturnsTabState extends State<_ReturnsTab> {
           ListTile(
             title: Text('${r['party']} — شمارهٔ ${faNum(ReturnsHelp.d(r['number']), dec: 0)}'),
             subtitle: Text(jalaliDate('${r['date']}')),
-            trailing: Text('${faNum(ReturnsHelp.d(r['total']), dec: 0)} تومان'),
+            trailing: Text('${faNum(ReturnsHelp.d(r['total']), dec: 0)} ریال'),
             onTap: () => _open(r),
           ),
       ]),
@@ -467,10 +467,10 @@ class _ReturnsProfitCardState extends State<ReturnsProfitCard> {
         child: Column(children: <Widget>[
           sectionTitle(context, 'برگشت از فروش در این بازه'),
           infoRow('تعداد برگشت', faNum(ReturnsHelp.d(s['count']), dec: 0)),
-          infoRow('فروش برگشتی (کسر از فروش)', '${faNum(rev, dec: 0)} تومان'),
-          infoRow('بهای کالای برگشتی (کسر از بها)', '${faNum(cogs, dec: 0)} تومان'),
-          infoRow('سود برگشتی', '${faNum(prof, dec: 0)} تومان'),
-          infoRow(net >= 0 ? 'سود خالص پس از برگشت' : 'زیان خالص پس از برگشت', '${faNum(net.abs(), dec: 0)} تومان'),
+          infoRow('فروش برگشتی (کسر از فروش)', '${faNum(rev, dec: 0)} ریال'),
+          infoRow('بهای کالای برگشتی (کسر از بها)', '${faNum(cogs, dec: 0)} ریال'),
+          infoRow('سود برگشتی', '${faNum(prof, dec: 0)} ریال'),
+          infoRow(net >= 0 ? 'سود خالص پس از برگشت' : 'زیان خالص پس از برگشت', '${faNum(net.abs(), dec: 0)} ریال'),
           const Text('برگشت‌ها بر اساس تاریخ برگشت حساب می‌شوند؛ هزینهٔ کارگر و حمل فروش اصلی تغییر نمی‌کند.',
               style: TextStyle(fontSize: 11, color: Colors.black54)),
         ]),

@@ -605,7 +605,7 @@ class _DashTabState extends State<_DashTab> {
                 dense: true,
                 contentPadding: EdgeInsets.zero,
                 title: Text((c['party'] ?? '').toString()),
-                subtitle: Text('فروش: ${faNum((c['revenue'] as num?) ?? 0, dec: 0)} تومان'
+                subtitle: Text('فروش: ${faNum((c['revenue'] as num?) ?? 0, dec: 0)} ریال'
                     '${profit && c['profit'] is num ? ' · سود تقریبی: ${faNum(c['profit'] as num, dec: 0)}' : ''}'),
                 onTap: () => _openParty(context, (c['party'] ?? '').toString()),
               ),

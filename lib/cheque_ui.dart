@@ -135,7 +135,7 @@ Future<bool> runChequeTransition(BuildContext context, Map<String, dynamic> cheq
       child: AlertDialog(
         title: Text(kChequeActionLabels[to] ?? to),
         content: Column(mainAxisSize: MainAxisSize.min, children: <Widget>[
-          Text('چک ${cheque['number'] ?? ''} — ${faNum(_d(cheque['amount']), dec: 0)} تومان'),
+          Text('چک ${cheque['number'] ?? ''} — ${faNum(_d(cheque['amount']), dec: 0)} ریال'),
           const SizedBox(height: 8),
           if (to == 'endorsed') textField(partyC, 'خرج به چه کسی؟ (نام طرف حساب)', required: true),
           textField(noteC, 'توضیح (اختیاری)'),
@@ -275,7 +275,7 @@ class _ChequeListScreenState extends State<ChequeListScreen> with SingleTickerPr
           await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => ChequeDetailScreen(cheque: c)));
           _load();
         },
-        title: Text('${c['party'] ?? '—'} · ${faNum(_d(c['amount']), dec: 0)} تومان'),
+        title: Text('${c['party'] ?? '—'} · ${faNum(_d(c['amount']), dec: 0)} ریال${(c['ccy'] ?? '').toString().isEmpty ? '' : ' (${faNum(_d(c['ccy_amount']), dec: 2)} ${c['ccy']})'}'),
         subtitle: Text('چک ${c['number'] ?? '—'} · ${c['bank'] ?? '—'}\nسررسید: ${jalaliDate('${c['due_date']}')}'
             '${(c['endorsed_to'] ?? '') != '' ? '\nخرج به: ${c['endorsed_to']}' : ''}'),
         isThreeLine: true,
@@ -304,7 +304,7 @@ class _ChequeListScreenState extends State<ChequeListScreen> with SingleTickerPr
       final DateTime? dt = DateTime.tryParse(d);
       out.add(Padding(
         padding: const EdgeInsets.fromLTRB(8, 12, 8, 4),
-        child: Text('${jalaliDate(d)}${dt == null ? '' : ' · ${_when(dt)}'} — جمع ${faNum(sum, dec: 0)} تومان',
+        child: Text('${jalaliDate(d)}${dt == null ? '' : ' · ${_when(dt)}'} — جمع ${faNum(sum, dec: 0)} ریال',
             style: const TextStyle(fontWeight: FontWeight.bold)),
       ));
       out.addAll(byDay[d]!.map(_tile));
@@ -402,7 +402,7 @@ class _ChequeListScreenState extends State<ChequeListScreen> with SingleTickerPr
                 ),
                 Padding(
                   padding: const EdgeInsets.all(8),
-                  child: Text('${faNum(rows.length, dec: 0)} چک · جمع ${faNum(total, dec: 0)} تومان', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  child: Text('${faNum(rows.length, dec: 0)} چک · جمع ${faNum(total, dec: 0)} ریال', style: const TextStyle(fontWeight: FontWeight.bold)),
                 ),
                 Expanded(child: RefreshIndicator(onRefresh: _load, child: _body(rows))),
               ]),
@@ -461,7 +461,8 @@ class _ChequeDetailScreenState extends State<ChequeDetailScreen> {
               child: Column(children: <Widget>[
                 infoRow('نوع', _c['direction'] == 'received' ? 'دریافتی' : 'پرداختی'),
                 infoRow('طرف حساب', '${_c['party'] ?? '—'}'),
-                infoRow('مبلغ', '${faNum(_d(_c['amount']), dec: 0)} تومان'),
+                infoRow('مبلغ', '${faNum(_d(_c['amount']), dec: 0)} ریال'),
+                if ((_c['ccy'] ?? '').toString().isNotEmpty) infoRow('مبلغ ارزی / نرخ', '${faNum(_d(_c['ccy_amount']), dec: 2)} ${_c['ccy']} × ${faNum(_d(_c['fx_rate']), dec: 0)} ریال'),
                 infoRow('بانک', '${_c['bank'] ?? '—'}'),
                 infoRow('سررسید', jalaliDate('${_c['due_date']}')),
                 infoRow('وضعیت', kChequeLabels['${_c['status']}'] ?? '${_c['status_label'] ?? _c['status']}', valueColor: _kStatusColors['${_c['status']}']),

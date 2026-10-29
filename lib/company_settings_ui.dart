@@ -128,12 +128,12 @@ class _CompanySettingsScreenState extends State<CompanySettingsScreen> {
             <String>['تاریخ', '۱۴۰۵/۰۱/۰۱'],
             <String>['خریدار', 'نمونه'],
           ],
-          columns: <String>['ردیف', 'کالا', 'وزن (کیلو)', 'فی (تومان)', 'مبلغ (تومان)'],
+          columns: <String>['ردیف', 'کالا', 'وزن (کیلو)', 'فی (ریال)', 'مبلغ (ریال)'],
           rows: <List<String>>[
             <String>['۱', 'پستهٔ احمدآقایی', '۱۰۰', '۵۰۰٬۰۰۰', '۵۰٬۰۰۰٬۰۰۰'],
           ],
           totals: <List<String>>[
-            <String>['جمع کل (تومان)', '۵۰٬۰۰۰٬۰۰۰'],
+            <String>['جمع کل (ریال)', '۵۰٬۰۰۰٬۰۰۰'],
           ],
           signLabels: <String>['امضای فروشنده', 'امضای خریدار'],
         ),

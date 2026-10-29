@@ -58,7 +58,7 @@ class _DuesScreenState extends State<DuesScreen> {
     final verb = i.receivable ? 'دریافت' : 'پرداخت';
     final who = i.party.isEmpty ? '' : ' ${i.receivable ? 'از' : 'به'} ${i.party}';
     final ok = await confirm(
-        context, '${i.kind} به مبلغ ${faNum(i.amount, dec: 0)} تومان$who «$verb شد» ثبت شود؟');
+        context, '${i.kind} به مبلغ ${faNum(i.amount, dec: 0)} ریال$who «$verb شد» ثبت شود؟');
     if (!ok) return;
     final done = await saveConfirmed(context, () => AppDb.I.setPaid(i.table, i.id, true),
         successMsg: '$verb با موفقیت ثبت شد');
@@ -115,10 +115,10 @@ class _DuesScreenState extends State<DuesScreen> {
                   child: Padding(
                     padding: const EdgeInsets.all(12),
                     child: Column(children: [
-                      infoRow('جمع پرداختی‌های باقی‌مانده', '${faNum(pay, dec: 0)} تومان'),
-                      infoRow('جمع دریافتی‌های باقی‌مانده', '${faNum(rec, dec: 0)} تومان'),
+                      infoRow('جمع پرداختی‌های باقی‌مانده', '${faNum(pay, dec: 0)} ریال'),
+                      infoRow('جمع دریافتی‌های باقی‌مانده', '${faNum(rec, dec: 0)} ریال'),
                       if (overdue > 0)
-                        infoRow('سررسید گذشته', '${faNum(overdue, dec: 0)} تومان',
+                        infoRow('سررسید گذشته', '${faNum(overdue, dec: 0)} ریال',
                             valueColor: Theme.of(context).colorScheme.error),
                     ]),
                   ),
@@ -184,7 +184,7 @@ class _DuesScreenState extends State<DuesScreen> {
           children: [
             Text(faNum(i.amount, dec: 0),
                 style: TextStyle(fontWeight: FontWeight.w700, color: color)),
-            const Text('تومان', style: TextStyle(fontSize: 11)),
+            const Text('ریال', style: TextStyle(fontSize: 11)),
           ],
         ),
         onTap: () => _markDone(i),

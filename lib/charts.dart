@@ -21,10 +21,11 @@ const Color kChartOther = Color(0xFF9E9E9E);
 const Color kGainColor = Color(0xFF2E7D32);
 const Color kLossColor = Color(0xFFC62828);
 
-/// عدد کوتاه‌شده برای نمودار: ۱٫۲ میلیارد / ۴۵۰ میلیون / ۱۲ هزار
+/// عدد کوتاه‌شده برای نمودار (ریال): ۱٫۲ هزار میلیارد / ۱٫۲ میلیارد / ۴۵۰ میلیون / ۱۲ هزار
 String faCompact(double v) {
   final a = v.abs();
   final sign = v < 0 ? '-' : '';
+  if (a >= 1e12) return '$sign${faNum(a / 1e12, dec: 1)} هزار میلیارد';
   if (a >= 1e9) return '$sign${faNum(a / 1e9, dec: 1)} میلیارد';
   if (a >= 1e6) return '$sign${faNum(a / 1e6, dec: 1)} میلیون';
   if (a >= 1e3) return '$sign${faNum(a / 1e3, dec: 0)} هزار';
@@ -115,7 +116,10 @@ class ChartSlice {
 }
 
 /// عدد کوتاه‌شدهٔ دلاری (برای نمودار پلن ارزی): ۱٫۲ میلیون / ۴٫۵ هزار / ۱۲۰ / ۵٫۲۵
-String faCompactUsd(double v) {
+String faCompactUsd(double v) => faCompactCcy(v);
+
+/// عدد کوتاه‌شدهٔ ارزی (هر ارز) — S30.T30.5
+String faCompactCcy(double v) {
   final a = v.abs();
   final sign = v < 0 ? '-' : '';
   if (a >= 1e6) return '$sign${faNum(a / 1e6, dec: 2)} میلیون';
@@ -330,7 +334,7 @@ class GroupedBarChart extends StatefulWidget {
   final List<BarSeries> series;
   final double height;
   final String Function(double) format;
-  final String Function(double)? compact; // برچسب کوتاه بالای میله (پیش‌فرض: تومان)
+  final String Function(double)? compact; // برچسب کوتاه بالای میله (پیش‌فرض: ریال)
   const GroupedBarChart({
     super.key,
     required this.groups,

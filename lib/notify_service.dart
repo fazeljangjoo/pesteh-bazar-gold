@@ -94,7 +94,7 @@ class NotifyService {
     final id = row['id'] as int;
     final dueDate = DateTime.parse(row['due_date'] as String);
     final amount = (row['amount'] as num).toDouble();
-    await _scheduleDue(_creditBase + id, 'سررسید قسط', '${faNum(amount, dec: 0)} تومان', dueDate);
+    await _scheduleDue(_creditBase + id, 'سررسید قسط', '${faNum(amount, dec: 0)} ریال', dueDate);
   }
 
   Future<void> cancelCreditRow(int id) => cancelDueByBase(_creditBase + id);
@@ -104,7 +104,7 @@ class NotifyService {
     final dueDate = DateTime.parse(row['due_date'] as String);
     final amount = (row['amount'] as num).toDouble();
     final bank = (row['bank_name'] as String?) ?? '';
-    await _scheduleDue(_chequeBase + id, 'سررسید چک', '${faNum(amount, dec: 0)} تومان $bank', dueDate);
+    await _scheduleDue(_chequeBase + id, 'سررسید چک', '${faNum(amount, dec: 0)} ریال $bank', dueDate);
   }
 
   Future<void> cancelChequeRow(int id) => cancelDueByBase(_chequeBase + id);
@@ -114,7 +114,7 @@ class NotifyService {
     final dueDate = DateTime.parse(row['due_date'] as String);
     final amount = (row['amount'] as num).toDouble();
     await _scheduleDue(
-        _receiptCreditBase + id, 'سررسید وصول مطالبه', '${faNum(amount, dec: 0)} تومان', dueDate);
+        _receiptCreditBase + id, 'سررسید وصول مطالبه', '${faNum(amount, dec: 0)} ریال', dueDate);
   }
 
   Future<void> cancelReceiptCreditRow(int id) => cancelDueByBase(_receiptCreditBase + id);
@@ -125,7 +125,7 @@ class NotifyService {
     final amount = (row['amount'] as num).toDouble();
     final bank = (row['bank_name'] as String?) ?? '';
     await _scheduleDue(
-        _receiptChequeBase + id, 'سررسید چک دریافتی', '${faNum(amount, dec: 0)} تومان $bank', dueDate);
+        _receiptChequeBase + id, 'سررسید چک دریافتی', '${faNum(amount, dec: 0)} ریال $bank', dueDate);
   }
 
   Future<void> cancelReceiptChequeRow(int id) => cancelDueByBase(_receiptChequeBase + id);
@@ -138,7 +138,7 @@ class NotifyService {
     final given = row['kind'] == 'given';
     final party = (row['party'] as String?) ?? '';
     await _scheduleDue(_loanBase + id, given ? 'سررسید وصول قرض' : 'سررسید بازپرداخت قرض',
-        '${faNum(amount, dec: 0)} تومان ${given ? 'از' : 'به'} $party', dueDate);
+        '${faNum(amount, dec: 0)} ریال ${given ? 'از' : 'به'} $party', dueDate);
   }
 
   Future<void> cancelLoanRow(int id) => cancelDueByBase(_loanBase + id.abs() % 900000);

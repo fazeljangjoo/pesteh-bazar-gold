@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import 'charts.dart';
 import 'db.dart';
+import 'fx_profit.dart' show FxProfitBlock, FxRateBook;
 import 'live_query.dart';
 import 'license_service.dart';
 import 'perms.dart';
@@ -24,7 +25,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
   DateTime? _from;
   DateTime? _to;
   String _q = ''; // جستجوی کد پسته در گزارش سود
-  bool _chartUsd = false; // نمایش نمودار به دلار (فقط پلن ارزی)
+  String? _chartCcy; // S30.T30.6: ارز نمودار سود و زیان؛ null = ریال (پیش‌فرض)
+  FxRateBook? _book; // نرخ‌های ثبت‌شدهٔ ارزها (فقط پلن ارزی)
   bool _lockChecked = false; // قفل صفحهٔ سود و زیان
   bool _unlocked = false;
 
@@ -32,6 +34,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
   void initState() {
     super.initState();
     _checkLock();
+    if (LicenseService.I.isFx.value) {
+      FxRateBook.load().then((b) {
+        if (mounted) setState(() => _book = b);
+      }).catchError((_) {});
+    }
   }
 
   @override
@@ -79,7 +86,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
           : await AppDb.I.allReceiptTransactions(from: _from, to: _to);
       final total = rows.fold<double>(0, (s, r) => s + (r['amount'] as num).toDouble());
       final table = <List<String>>[
-        ['وضعیت', 'نوع', 'کد پسته', 'تاریخ', 'مبلغ (تومان)', isPayments ? 'فروشنده' : 'خریدار'],
+        ['وضعیت', 'نوع', 'کد پسته', 'تاریخ', 'مبلغ (ریال)', isPayments ? 'فروشنده' : 'خریدار'],
         for (final r in rows)
           [
             (r['paid'] as int) == 1 ? 'تسویه‌شده' : 'باقیمانده',
@@ -107,12 +114,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
       Map<String, double> byTypeT,
       {({List<double> gains, List<double> losses, Map<String, double> byType})? usdData}) {
     // پلن ارزی: کاربر می‌تواند نمودار را به دلار ببیند (سود/زیان دلاری فروش‌هایی که قیمت دلار و فی دلاریِ خرید دارند)
-    final useUsd = usdData != null && _chartUsd;
+    final useUsd = usdData != null && _chartCcy != null;
+    final cc = _chartCcy ?? '';
     final gains = useUsd ? usdData!.gains : gainsT;
     final losses = useUsd ? usdData!.losses : lossesT;
     final byType = useUsd ? usdData!.byType : byTypeT;
-    String fmtFull(double v) => useUsd ? '${faCompactUsd(v)} دلار' : '${faCompact(v)} تومان';
-    String fmtShort(double v) => useUsd ? faCompactUsd(v) : faCompact(v);
+    String fmtFull(double v) => useUsd ? '${faCompactCcy(v)} $cc' : '${faCompact(v)} ریال';
+    String fmtShort(double v) => useUsd ? faCompactCcy(v) : faCompact(v);
     final groups = <BarGroup>[
       for (var i = 0; i < buckets.length; i++)
         BarGroup(buckets[i].label, buckets[i].fullLabel, [gains[i], losses[i]]),
@@ -140,12 +148,12 @@ class _ReportsScreenState extends State<ReportsScreen> {
               compact: fmtShort,
             )
           : ChartEmpty(useUsd
-              ? 'برای فروش‌های این بازه قیمت دلار یا فی دلاریِ خرید ثبت نشده'
+              ? 'برای فروش‌های این بازه نرخ ثبت‌شدهٔ $cc در جدول نرخ نیست'
               : 'در این بازه سود یا زیانی ثبت نشده');
     } else {
       body = slices.isEmpty
           ? ChartEmpty(useUsd
-              ? 'برای فروش‌های این بازه قیمت دلار یا فی دلاریِ خرید ثبت نشده'
+              ? 'برای فروش‌های این بازه نرخ ثبت‌شدهٔ $cc در جدول نرخ نیست'
               : 'در این بازه سود یا زیانی ثبت نشده')
           : Center(
               child: DonutChart(
@@ -157,18 +165,18 @@ class _ReportsScreenState extends State<ReportsScreen> {
             );
     }
     return ChartCard(
-      title: useUsd ? 'نمودار سود و زیان (دلاری)' : 'نمودار سود و زیان',
+      title: useUsd ? 'نمودار سود و زیان ($cc)' : 'نمودار سود و زیان',
       subtitle: _profitPeriodLabel(),
       child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         if (usdData != null) ...[
-          SegmentedButton<bool>(
-            segments: const <ButtonSegment<bool>>[
-              ButtonSegment<bool>(value: false, label: Text('تومان')),
-              ButtonSegment<bool>(value: true, label: Text('دلار')),
+          SegmentedButton<String>(
+            segments: <ButtonSegment<String>>[
+              const ButtonSegment<String>(value: '', label: Text('ریال')),
+              for (final c in _book?.codes ?? const <String>[]) ButtonSegment<String>(value: c, label: Text(c)),
             ],
-            selected: <bool>{_chartUsd},
+            selected: <String>{_chartCcy ?? ''},
             showSelectedIcon: false,
-            onSelectionChanged: (v) => setState(() => _chartUsd = v.first),
+            onSelectionChanged: (v) => setState(() => _chartCcy = v.first.isEmpty ? null : v.first),
           ),
           const SizedBox(height: 8),
         ],
@@ -247,7 +255,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
             final buckets = (cFrom != null && cTo != null) ? buildBuckets(cFrom, cTo) : <TimeBucket>[];
             final bucketTypes = List<Map<String, double>>.generate(buckets.length, (_) => <String, double>{});
             // نمودار دلاری (فقط پلن ارزی): همان منطق، با سود دلاری هر قلم
-            final fxChart = LicenseService.I.isFx.value;
+            final fxChart = LicenseService.I.isFx.value && _book != null && _book!.codes.isNotEmpty;
             final bucketTypesUsd = List<Map<String, double>>.generate(buckets.length, (_) => <String, double>{});
             final byTypeUsd = <String, double>{};
 
@@ -259,8 +267,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
             final rows = <Widget>[];
             for (final sale in list) {
               final items = sale['items'] as List;
-              final saleU = fxChart ? saleUsd(sale) : null; // null = قیمت دلار یا فی دلاریِ خرید ثبت نشده
-              final saleRate = (sale['usd_rate'] as num?)?.toDouble() ?? 0;
+              final sdIso = '${sale['date']}';
+              final double? rSale = (fxChart && _chartCcy != null) ? _book!.rateOf(_chartCcy!, sdIso) : null; // null = نرخ ثبت‌شده نیست
               for (final it in items) {
                 // قلم‌های مخلوط/جداسازی بر اساس «نوع زیردسته»شان حساب می‌شوند
                 final baseT = (it['base_type'] as String?)?.trim() ?? '';
@@ -271,8 +279,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 final cost = w * (it['cost_price'] as num).toDouble() + extraCost;
                 byType[key] = (byType[key] ?? 0) + (rev - cost);
                 final sdt = DateTime.parse(sale['date'] as String);
-                final double? profitU = (saleU != null && saleRate > 0)
-                    ? (rev / saleRate) - w * (it['cost_price_usd'] as num).toDouble() - extraCost / saleRate
+                // S30.T30.6: ارزش‌گذاری فقط با جدول نرخ — درآمد و هزینهٔ جانبیِ فروش با نرخ روز فروش، بهای قلم و هزینهٔ جانبیِ خرید با نرخ روز خرید
+                final pdIso = ((it['purchase_date'] as String?)?.trim().isNotEmpty == true) ? it['purchase_date'] as String : sdIso;
+                final double? rBuy = (fxChart && _chartCcy != null) ? _book!.rateOf(_chartCcy!, pdIso) : null;
+                final double? profitU = (rSale != null && rBuy != null)
+                    ? rev / rSale - (w * (it['cost_price'] as num).toDouble() + w * purchaseExtraPerKg(it)) / rBuy - saleExtraShare(sale, it) / rSale
                     : null;
                 if (profitU != null) byTypeUsd[key] = (byTypeUsd[key] ?? 0) + profitU;
                 for (var bi = 0; bi < buckets.length; bi++) {
@@ -315,11 +326,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       ),
                       Text(comp),
                       const SizedBox(height: 8),
-                      infoRow('مبلغ فروش', '${faNum(revenue, dec: 0)} تومان'),
-                      infoRow('بهای خرید و هزینه‌ها', '${faNum(cost, dec: 0)} تومان'),
+                      infoRow('مبلغ فروش', '${faNum(revenue, dec: 0)} ریال'),
+                      infoRow('بهای خرید و هزینه‌ها', '${faNum(cost, dec: 0)} ریال'),
                       if (saleExtraCosts(sale) > 0)
-                        infoRow('هزینه‌های ثبت‌شده در فروش (کارگر / حمل‌ونقل)', '${faNum(saleExtraCosts(sale), dec: 0)} تومان'),
-                      infoRow('سود / زیان', '${faNum(profit, dec: 0)} تومان'),
+                        infoRow('هزینه‌های ثبت‌شده در فروش (کارگر / حمل‌ونقل)', '${faNum(saleExtraCosts(sale), dec: 0)} ریال'),
+                      infoRow('سود / زیان', '${faNum(profit, dec: 0)} ریال'),
                       if (fx && usd != null) ...[
                         infoRow('مبلغ فروش (دلار)', faUsd(usd.revenue)),
                         infoRow('بهای خرید و هزینه‌ها (دلار)', faUsd(usd.cost)),
@@ -387,13 +398,13 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   child: Padding(
                     padding: const EdgeInsets.all(12),
                     child: Column(children: [
-                      infoRow('مجموع فروش', '${faNum(totalRevenue, dec: 0)} تومان'),
-                      infoRow('مجموع بهای خرید و هزینه‌ها', '${faNum(totalCost, dec: 0)} تومان'),
+                      infoRow('مجموع فروش', '${faNum(totalRevenue, dec: 0)} ریال'),
+                      infoRow('مجموع بهای خرید و هزینه‌ها', '${faNum(totalCost, dec: 0)} ریال'),
                       if (totalGain > 0)
-                        infoRow('مجموع سود اجناس سودده', '${faNum(totalGain, dec: 0)} تومان', valueColor: kGainColor),
+                        infoRow('مجموع سود اجناس سودده', '${faNum(totalGain, dec: 0)} ریال', valueColor: kGainColor),
                       if (totalLoss < 0)
-                        infoRow('مجموع زیان اجناس زیان‌ده', '${faNum(-totalLoss, dec: 0)} تومان', valueColor: kLossColor),
-                      infoRow(totalProfit >= 0 ? 'خالص سود' : 'خالص زیان', '${faNum(totalProfit.abs(), dec: 0)} تومان',
+                        infoRow('مجموع زیان اجناس زیان‌ده', '${faNum(-totalLoss, dec: 0)} ریال', valueColor: kLossColor),
+                      infoRow(totalProfit >= 0 ? 'خالص سود' : 'خالص زیان', '${faNum(totalProfit.abs(), dec: 0)} ریال',
                           valueColor: totalProfit >= 0 ? kGainColor : kLossColor),
                       if (fx) ...[
                         const Divider(),
@@ -404,6 +415,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         if (usdMissing > 0)
                           Text('${faNum(usdMissing, dec: 0)} فروش به‌دلیل نبودنِ قیمت دلار یا فی دلاریِ خرید در جمع دلاری نیامده است',
                               style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                        FxProfitBlock(sales: list), // S30.T30.5: سود هر ارز از جدول نرخ ثبت‌شده
                       ],
                     ]),
                   ),
@@ -422,7 +434,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         sectionTitle(context, 'سود به تفکیک نوع پسته (بازهٔ انتخاب‌شده)'),
                         for (final e in (byType.entries.toList()
                           ..sort((a, b) => b.value.compareTo(a.value))))
-                          infoRow(e.key, '${faNum(e.value, dec: 0)} تومان',
+                          infoRow(e.key, '${faNum(e.value, dec: 0)} ریال',
                               valueColor: e.value >= 0 ? Colors.green.shade800 : scheme.error),
                       ]),
                     ),

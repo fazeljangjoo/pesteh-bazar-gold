@@ -120,7 +120,7 @@ class _CashFlowCardState extends State<CashFlowCard> {
                   BarSeries('واریزی', kGainColor),
                   BarSeries('برداشت', Color(0xFFD9822B)),
                 ],
-                format: (v) => '${faCompact(v)} تومان',
+                format: (v) => '${faCompact(v)} ریال',
               ),
               const SizedBox(height: 12),
               Row(children: [
@@ -224,7 +224,7 @@ class _LoanSheetState extends State<_LoanSheet> with EditGuard<_LoanSheet> {
       return;
     }
     if (_isRepay && amt > _repayMax + 0.5) {
-      snack(context, 'مبلغ بازپرداخت از مانده (${faNum(_repayMax, dec: 0)} تومان) بیشتر است');
+      snack(context, 'مبلغ بازپرداخت از مانده (${faNum(_repayMax, dec: 0)} ریال) بیشتر است');
       return;
     }
     final dueList = <Map<String, dynamic>>[];
@@ -287,7 +287,7 @@ class _LoanSheetState extends State<_LoanSheet> with EditGuard<_LoanSheet> {
                 }),
               ),
           ]),
-          numField(d.amount, 'مبلغ سررسید (تومان)', required: true, thousands: true, onChanged: () => setState(() {})),
+          numField(d.amount, 'مبلغ سررسید (ریال)', required: true, thousands: true, onChanged: () => setState(() {})),
           dateField(context, 'تاریخ سررسید', d.date, (v) => setState(() => d.date = v)),
           textField(d.note, 'جزئیات (اختیاری)'),
         ]),
@@ -321,11 +321,11 @@ class _LoanSheetState extends State<_LoanSheet> with EditGuard<_LoanSheet> {
                 onSelectionChanged: (v) => setState(() => _kind = v.first),
               ),
               const SizedBox(height: 6),
-              Text('مانده قابل بازپرداخت: ${faNum(_repayMax, dec: 0)} تومان',
+              Text('مانده قابل بازپرداخت: ${faNum(_repayMax, dec: 0)} ریال',
                   style: const TextStyle(fontSize: 12.5, color: Colors.black54)),
               const SizedBox(height: 10),
             ],
-            numField(_amount, 'مبلغ (تومان)', required: true, thousands: true, hint: _hint, onChanged: () => setState(() {})),
+            numField(_amount, 'مبلغ (ریال)', required: true, thousands: true, hint: _hint, onChanged: () => setState(() {})),
             dateField(context, _isRepay ? 'تاریخ بازپرداخت' : (_kind == 'given' ? 'تاریخ اعطای قرض' : 'تاریخ دریافت قرض'), _date,
                 (d) => setState(() => _date = d)),
             textField(_note, 'توضیحات (اختیاری)'),
@@ -340,7 +340,7 @@ class _LoanSheetState extends State<_LoanSheet> with EditGuard<_LoanSheet> {
               Row(children: [
                 Expanded(
                   child: Text(
-                    'جمع سررسیدها: ${faNum(_dueSum, dec: 0)} از ${faNum(amt, dec: 0)} تومان',
+                    'جمع سررسیدها: ${faNum(_dueSum, dec: 0)} از ${faNum(amt, dec: 0)} ریال',
                     style: TextStyle(
                         fontSize: 12.5,
                         color: (_dueSum - amt).abs() <= 0.5 ? Colors.green.shade800 : Colors.deepOrange.shade800),
@@ -390,7 +390,7 @@ Future<void> exportLoanPdf(BuildContext context, {PartyAccount? party, List<Part
     }
     final single = withLoans.length == 1;
     final entries = <List<String>>[
-      [if (!single) 'طرف‌حساب', 'نوع', 'مبلغ (تومان)', 'تاریخ', 'توضیحات'],
+      [if (!single) 'طرف‌حساب', 'نوع', 'مبلغ (ریال)', 'تاریخ', 'توضیحات'],
     ];
     for (final a in withLoans) {
       for (final l in a.loans) {
@@ -404,7 +404,7 @@ Future<void> exportLoanPdf(BuildContext context, {PartyAccount? party, List<Part
       }
     }
     final dueRows = <List<String>>[
-      [if (!single) 'طرف‌حساب', 'نوع', 'مبلغ (تومان)', 'سررسید', 'وضعیت', 'جزئیات'],
+      [if (!single) 'طرف‌حساب', 'نوع', 'مبلغ (ریال)', 'سررسید', 'وضعیت', 'جزئیات'],
     ];
     for (final r in await AppDb.I.loanDueRows(includePaid: true)) {
       if (!keys.contains(partyKey(r['party'] as String?))) continue;
@@ -423,8 +423,8 @@ Future<void> exportLoanPdf(BuildContext context, {PartyAccount? party, List<Part
       title: single ? 'دفتر قرض و وام — ${withLoans.first.name}' : 'دفتر قرض و وام — همهٔ طرف‌حساب‌ها',
       subtitle: '',
       summary: [
-        ('مانده طلب قرضی', '${faNum(recv, dec: 0)} تومان'),
-        ('مانده بدهی قرضی', '${faNum(pay, dec: 0)} تومان'),
+        ('مانده طلب قرضی', '${faNum(recv, dec: 0)} ریال'),
+        ('مانده بدهی قرضی', '${faNum(pay, dec: 0)} ریال'),
       ],
       sections: [
         (heading: 'تراکنش‌های قرض و بازپرداخت', rows: entries),

@@ -278,7 +278,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   padding: const EdgeInsets.all(12),
                   child: Column(children: [
                     infoRow('مجموع موجودی (خالص)', '${faNum(totalKg)} کیلو'),
-                    infoRow('ارزش خرید موجودی', '${faNum(totalValue, dec: 0)} تومان'),
+                    infoRow('ارزش خرید موجودی', '${faNum(totalValue, dec: 0)} ریال'),
                     infoRow('تعداد گونی کل', '${faNum(totalSmall + totalLarge)} عدد'),
                     infoRow('گونی کوچک', faNum(totalSmall)),
                     infoRow('گونی بزرگ', faNum(totalLarge)),
@@ -302,7 +302,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   child: Column(children: [
                     infoRow('تعداد خریدهای فروش‌رفته', '${faNum(soldOut.length, dec: 0)} بار'),
                     infoRow('مجموع وزن فروش‌رفته (خالص)', '${faNum(soldKg)} کیلو'),
-                    infoRow('ارزش خرید آن‌ها', '${faNum(soldValue, dec: 0)} تومان'),
+                    infoRow('ارزش خرید آن‌ها', '${faNum(soldValue, dec: 0)} ریال'),
                     if (_showMixed && totalWaste > 0.0005)
                       infoRow('مجموع ضایعات ثبت‌شده', '${faNum(totalWaste)} کیلو'),
                   ]),

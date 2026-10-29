@@ -70,15 +70,15 @@ class _PartiesScreenState extends State<PartiesScreen> {
                   child: Padding(
                     padding: const EdgeInsets.all(12),
                     child: Column(children: [
-                      infoRow('جمع طلب‌ها (از خریدارها)', '${faNum(theyOwe, dec: 0)} تومان',
+                      infoRow('جمع طلب‌ها (از خریدارها)', '${faNum(theyOwe, dec: 0)} ریال',
                           valueColor: Colors.green.shade800),
-                      infoRow('جمع بدهی‌ها (به فروشنده‌ها)', '${faNum(weOwe, dec: 0)} تومان',
+                      infoRow('جمع بدهی‌ها (به فروشنده‌ها)', '${faNum(weOwe, dec: 0)} ریال',
                           valueColor: Colors.red.shade800),
                       if (loanRecv > 0.5 || loanPay > 0.5) ...[
                         const Divider(),
-                        infoRow('مانده طلب قرضی', '${faNum(loanRecv, dec: 0)} تومان',
+                        infoRow('مانده طلب قرضی', '${faNum(loanRecv, dec: 0)} ریال',
                             valueColor: Colors.green.shade800),
-                        infoRow('مانده بدهی قرضی', '${faNum(loanPay, dec: 0)} تومان',
+                        infoRow('مانده بدهی قرضی', '${faNum(loanPay, dec: 0)} ریال',
                             valueColor: Colors.red.shade800),
                       ],
                       if (all.any((a) => a.hasLoans))
@@ -217,23 +217,23 @@ class PartyDetailScreen extends StatelessWidget {
             padding: const EdgeInsets.all(12),
             child: Column(children: [
               if (a.bought > 0) ...[
-                infoRow('جمع خرید از او', '${faNum(a.bought, dec: 0)} تومان'),
-                infoRow('پرداخت‌شده به او', '${faNum(a.paid, dec: 0)} تومان'),
-                infoRow('بدهی ما به او', '${faNum(a.weOwe, dec: 0)} تومان',
+                infoRow('جمع خرید از او', '${faNum(a.bought, dec: 0)} ریال'),
+                infoRow('پرداخت‌شده به او', '${faNum(a.paid, dec: 0)} ریال'),
+                infoRow('بدهی ما به او', '${faNum(a.weOwe, dec: 0)} ریال',
                     valueColor: a.weOwe > 0.5 ? Colors.red.shade800 : null),
               ],
               if (a.bought > 0 && a.sold > 0) const Divider(),
               if (a.sold > 0) ...[
-                infoRow('جمع فروش به او', '${faNum(a.sold, dec: 0)} تومان'),
-                infoRow('دریافت‌شده از او', '${faNum(a.received, dec: 0)} تومان'),
-                infoRow('طلب ما از او', '${faNum(a.theyOwe, dec: 0)} تومان',
+                infoRow('جمع فروش به او', '${faNum(a.sold, dec: 0)} ریال'),
+                infoRow('دریافت‌شده از او', '${faNum(a.received, dec: 0)} ریال'),
+                infoRow('طلب ما از او', '${faNum(a.theyOwe, dec: 0)} ریال',
                     valueColor: a.theyOwe > 0.5 ? Colors.green.shade800 : null),
               ],
               if (a.bought > 0 && a.sold > 0) ...[
                 const Divider(),
                 infoRow(
                   settled ? 'تراز نهایی' : (a.net > 0 ? 'تراز نهایی: او به ما بدهکار است' : 'تراز نهایی: ما به او بدهکاریم'),
-                  settled ? 'تسویه' : '${faNum(a.net.abs(), dec: 0)} تومان',
+                  settled ? 'تسویه' : '${faNum(a.net.abs(), dec: 0)} ریال',
                 ),
               ],
             ]),
@@ -270,14 +270,14 @@ class PartyDetailScreen extends StatelessWidget {
               style: TextStyle(fontSize: 12, color: Colors.black54)),
           const SizedBox(height: 8),
           if (a.hasLoans) ...[
-            if (a.loanGiven > 0) infoRow('قرض اعطایی (به او داده‌ایم)', '${faNum(a.loanGiven, dec: 0)} تومان'),
-            if (a.loanTaken > 0) infoRow('قرض دریافتی (از او گرفته‌ایم)', '${faNum(a.loanTaken, dec: 0)} تومان'),
-            if (a.repaidToUs > 0) infoRow('بازپرداخت دریافتی', '${faNum(a.repaidToUs, dec: 0)} تومان'),
-            if (a.repaidByUs > 0) infoRow('بازپرداخت پرداختی', '${faNum(a.repaidByUs, dec: 0)} تومان'),
+            if (a.loanGiven > 0) infoRow('قرض اعطایی (به او داده‌ایم)', '${faNum(a.loanGiven, dec: 0)} ریال'),
+            if (a.loanTaken > 0) infoRow('قرض دریافتی (از او گرفته‌ایم)', '${faNum(a.loanTaken, dec: 0)} ریال'),
+            if (a.repaidToUs > 0) infoRow('بازپرداخت دریافتی', '${faNum(a.repaidToUs, dec: 0)} ریال'),
+            if (a.repaidByUs > 0) infoRow('بازپرداخت پرداختی', '${faNum(a.repaidByUs, dec: 0)} ریال'),
             const Divider(),
             infoRow(
               settledLoan ? 'مانده قرض' : (net > 0 ? 'مانده طلب قرضی (او به ما بدهکار است)' : 'مانده بدهی قرضی (ما به او بدهکاریم)'),
-              settledLoan ? 'تسویه' : '${faNum(net.abs(), dec: 0)} تومان',
+              settledLoan ? 'تسویه' : '${faNum(net.abs(), dec: 0)} ریال',
               valueColor: settledLoan ? null : (net > 0 ? Colors.green.shade800 : Colors.red.shade800),
             ),
           ] else
@@ -336,7 +336,7 @@ class PartyDetailScreen extends StatelessWidget {
       dense: true,
       contentPadding: EdgeInsets.zero,
       leading: Icon(l.isIn ? Icons.south_west : Icons.north_east, color: color),
-      title: Text('${l.label} • ${faNum(l.amount, dec: 0)} تومان', style: TextStyle(color: color, fontWeight: FontWeight.w600)),
+      title: Text('${l.label} • ${faNum(l.amount, dec: 0)} ریال', style: TextStyle(color: color, fontWeight: FontWeight.w600)),
       subtitle: Text('${jalaliDateFromDt(l.date)}${(l.note ?? '').isEmpty ? '' : '\n${l.note}'}'),
       isThreeLine: (l.note ?? '').isNotEmpty,
       trailing: IconButton(
@@ -347,7 +347,7 @@ class PartyDetailScreen extends StatelessWidget {
             context: context,
             builder: (ctx) => AlertDialog(
               title: const Text('حذف این مورد؟'),
-              content: Text('${l.label} به مبلغ ${faNum(l.amount, dec: 0)} تومان حذف می‌شود.'),
+              content: Text('${l.label} به مبلغ ${faNum(l.amount, dec: 0)} ریال حذف می‌شود.'),
               actions: [
                 TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('انصراف')),
                 FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('حذف')),

@@ -182,7 +182,7 @@ class _BrokerDialogState extends State<_BrokerDialog> {
               onChanged: (String? v) => setState(() => _basis = v ?? 'percent'),
             ),
             const SizedBox(height: 12),
-            numField(_value, _basis == 'percent' ? 'درصد' : 'مبلغ (تومان)', onChanged: () => setState(() {})),
+            numField(_value, _basis == 'percent' ? 'درصد' : 'مبلغ (ریال)', onChanged: () => setState(() {})),
             DropdownButtonFormField<String>(
               value: _payer,
               decoration: const InputDecoration(labelText: 'پرداخت‌کننده'),
@@ -192,7 +192,7 @@ class _BrokerDialogState extends State<_BrokerDialog> {
               onChanged: (String? v) => setState(() => _payer = v ?? 'us'),
             ),
             const SizedBox(height: 12),
-            infoRow('کمیسیون محاسبه‌شده', '${faNum(_preview, dec: 0)} تومان'),
+            infoRow('کمیسیون محاسبه‌شده', '${faNum(_preview, dec: 0)} ریال'),
             Text(
               _payer != 'us'
                   ? 'کمیسیون را طرف مقابل می‌پردازد؛ روی هزینه و سود شما اثری ندارد.'
@@ -279,7 +279,7 @@ class _BrokerScreenState extends State<BrokerScreen> {
         child: AlertDialog(
           title: Text('پرداخت به ${broker['broker_name']}'),
           content: Column(mainAxisSize: MainAxisSize.min, children: <Widget>[
-            numField(amount, 'مبلغ (تومان)', thousands: true),
+            numField(amount, 'مبلغ (ریال)', thousands: true),
             textField(note, 'توضیح'),
           ]),
           actions: <Widget>[
@@ -350,7 +350,7 @@ class _BrokerScreenState extends State<BrokerScreen> {
                   onChanged: (String? v) => set(() => basis = v ?? 'percent'),
                 ),
                 const SizedBox(height: 8),
-                numField(value, basis == 'percent' ? 'درصد' : 'مبلغ (تومان)'),
+                numField(value, basis == 'percent' ? 'درصد' : 'مبلغ (ریال)'),
                 DropdownButtonFormField<String>(
                   value: applies,
                   decoration: const InputDecoration(labelText: 'برای'),
@@ -468,10 +468,10 @@ class _BrokerScreenState extends State<BrokerScreen> {
                           padding: const EdgeInsets.all(12),
                           child: Column(children: <Widget>[
                             sectionTitle(context, 'جمع بازه'),
-                            infoRow('کمیسیون خرید (به بهای تمام‌شده)', '${faNum(_d(t['purchase_commission']), dec: 0)} تومان'),
-                            infoRow('کمیسیون فروش (هزینهٔ فروش)', '${faNum(_d(t['sale_commission']), dec: 0)} تومان'),
-                            infoRow('پرداخت‌شده در بازه', '${faNum(_d(t['paid']), dec: 0)} تومان'),
-                            infoRow('کمیسیون به‌عهدهٔ طرف مقابل', '${faNum(_d(t['counterparty_commission']), dec: 0)} تومان'),
+                            infoRow('کمیسیون خرید (به بهای تمام‌شده)', '${faNum(_d(t['purchase_commission']), dec: 0)} ریال'),
+                            infoRow('کمیسیون فروش (هزینهٔ فروش)', '${faNum(_d(t['sale_commission']), dec: 0)} ریال'),
+                            infoRow('پرداخت‌شده در بازه', '${faNum(_d(t['paid']), dec: 0)} ریال'),
+                            infoRow('کمیسیون به‌عهدهٔ طرف مقابل', '${faNum(_d(t['counterparty_commission']), dec: 0)} ریال'),
                           ]),
                         ),
                       ),
@@ -511,7 +511,7 @@ class _BrokerScreenState extends State<BrokerScreen> {
                       for (final Map<String, dynamic> p in _pays)
                         ListTile(
                           dense: true,
-                          title: Text('${p['broker_name']} — ${faNum(_d(p['amount']), dec: 0)} تومان'),
+                          title: Text('${p['broker_name']} — ${faNum(_d(p['amount']), dec: 0)} ریال'),
                           subtitle: Text(jalaliDate('${p['date']}') + ((p['note'] ?? '') == '' ? '' : ' · ${p['note']}')),
                           trailing: IconButton(
                               icon: const Icon(Icons.delete_outline),
@@ -585,8 +585,8 @@ class _BrokerProfitCardState extends State<BrokerProfitCard> {
         padding: const EdgeInsets.all(12),
         child: Column(children: <Widget>[
           sectionTitle(context, 'کارمزد دلال (فروش)'),
-          infoRow('کارمزد دلال فروش در این بازه', '${faNum(_saleComm, dec: 0)} تومان'),
-          infoRow('سود پس از کارمزد دلال', '${faNum(widget.profit - _saleComm, dec: 0)} تومان'),
+          infoRow('کارمزد دلال فروش در این بازه', '${faNum(_saleComm, dec: 0)} ریال'),
+          infoRow('سود پس از کارمزد دلال', '${faNum(widget.profit - _saleComm, dec: 0)} ریال'),
         ]),
       ),
     );

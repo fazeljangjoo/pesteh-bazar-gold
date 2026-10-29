@@ -2,6 +2,7 @@ import 'broker_ui.dart';
 import 'package:flutter/material.dart';
 
 import 'db.dart';
+import 'grade_lines_ui.dart' show GradeCostRows;
 import 'vouchers_links.dart';
 import 'live_query.dart';
 import 'invoice_service.dart';
@@ -38,8 +39,8 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
       ['تاریخ', jalaliDate(p['date'] as String)],
       if (p['seller'] != null) ['فروشنده', p['seller']],
       if (p['ounce'] != null) ['انس', faNum(p['ounce'] as num)],
-      ['فی خرید', '${faNum(p['price'] as num, dec: 0)} تومان'],
-      if (LicenseService.I.isFx.value && p['usd_rate'] != null) ['قیمت دلار روز خرید', '${faNum(p['usd_rate'] as num, dec: 0)} تومان'],
+      ['فی خرید', '${faNum(p['price'] as num, dec: 0)} ریال'],
+      if (LicenseService.I.isFx.value && p['usd_rate'] != null) ['قیمت دلار روز خرید', '${faNum(p['usd_rate'] as num, dec: 0)} ریال'],
       if (LicenseService.I.isFx.value && p['price_usd'] != null) ['فی خرید به دلار (هر کیلو)', faUsd(p['price_usd'] as num, dec: 4)],
       ['وزن کل (ناخالص)', '${faNum(p['total_weight'] as num)} کیلو'],
       ['گونی کوچک (۱۰۰گ)', faNum(p['small_sack_count'] as num)],
@@ -48,8 +49,8 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
       ['مانده در انبار (خالص)', '${faNum(p['remaining'] as num)} کیلو'],
       ['گونی کوچک مانده', faNum((p['small_sacks_remaining'] as num?) ?? 0)],
       ['گونی بزرگ مانده', faNum((p['large_sacks_remaining'] as num?) ?? 0)],
-      if (p['labor_cost'] != null) ['هزینه کارگر', '${faNum(p['labor_cost'] as num, dec: 0)} تومان'],
-      if (p['transport_cost'] != null) ['هزینه حمل‌ونقل / باسکول', '${faNum(p['transport_cost'] as num, dec: 0)} تومان'],
+      if (p['labor_cost'] != null) ['هزینه کارگر', '${faNum(p['labor_cost'] as num, dec: 0)} ریال'],
+      if (p['transport_cost'] != null) ['هزینه حمل‌ونقل / باسکول', '${faNum(p['transport_cost'] as num, dec: 0)} ریال'],
       if (((p['in_mix_codes'] as List?) ?? const []).isNotEmpty)
         ['داخل مخلوط/جداسازی (هنوز فروش نرفته)', ((p['in_mix_codes'] as List).cast<String>()).join('، ')],
       if (preset == 'dombest' && p['gram'] != null) ['گرم', faNum(p['gram'] as num)],
@@ -91,6 +92,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                 ),
               const SizedBox(height: 8),
               for (final r in rows) infoRow(r[0], r[1]),
+              GradeCostRows(docType: 'purchase', docId: p['id'] as int), // S35.T35.3c
               LocalDocVoucherLinks(mapKind: 'pur', localId: p['id'] as int, sourceType: 'purchase'),
               const SizedBox(height: 12),
               FilledButton.icon(
@@ -177,7 +179,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
         title: Text('${p['category_name']} - ${p['type_name']}'),
         subtitle: Text(
             'کد ${p['code'] ?? '-'}  •  ${jalaliDate(p['date'] as String)}  •  ${faNum(p['net_weight'] as num)} کیلو (خالص)\n'
-            '${sold ? 'فروخته‌شده' : 'مانده ${faNum(p['remaining'] as num)} کیلو (خالص)'}  •  فی ${faNum(p['price'] as num, dec: 0)} تومان'
+            '${sold ? 'فروخته‌شده' : 'مانده ${faNum(p['remaining'] as num)} کیلو (خالص)'}  •  فی ${faNum(p['price'] as num, dec: 0)} ریال'
             '${LicenseService.I.isFx.value && p['price_usd'] != null ? ' (${faUsd(p['price_usd'] as num, dec: 3)})' : ''}'
             '${_inMixLine(p)}'),
         isThreeLine: true,

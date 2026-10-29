@@ -73,7 +73,7 @@ class _ProformaListScreenState extends State<ProformaListScreen> {
         if (r['valid_until'] != null) <String>['اعتبار تا', jalaliDate('${r['valid_until']}')],
         <String>['وضعیت', _kStatusFa['${r['status']}'] ?? '${r['status']}'],
       ],
-      columns: <String>['ردیف', 'شرح', 'وزن (کیلو)', 'فی (تومان)', 'تخفیف', 'مبلغ (تومان)'],
+      columns: <String>['ردیف', 'شرح', 'وزن (کیلو)', 'فی (ریال)', 'تخفیف', 'مبلغ (ریال)'],
       rows: <List<String>>[
         for (int k = 0; k < its.length; k++)
           <String>[
@@ -85,7 +85,7 @@ class _ProformaListScreenState extends State<ProformaListScreen> {
             faNum(ReturnsHelp.d(its[k]['amount']), dec: 0),
           ],
       ],
-      totals: <List<String>>[<String>['جمع کل (تومان)', faNum(ReturnsHelp.d(r['total']), dec: 0)]],
+      totals: <List<String>>[<String>['جمع کل (ریال)', faNum(ReturnsHelp.d(r['total']), dec: 0)]],
       note: [r['note'], r['terms']].where((x) => x != null && '$x'.trim().isNotEmpty).join('\n'),
     );
     if (!mounted) return;
@@ -139,7 +139,7 @@ class _ProformaListScreenState extends State<ProformaListScreen> {
                             title: Text('${r['party']} — شمارهٔ ${faNum(ReturnsHelp.d(r['number']), dec: 0)}'),
                             subtitle: Text('${jalaliDate('${r['date']}')} • ${_kStatusFa['${r['status']}'] ?? r['status']}'),
                             trailing: Row(mainAxisSize: MainAxisSize.min, children: <Widget>[
-                              Text('${faNum(ReturnsHelp.d(r['total']), dec: 0)} تومان'),
+                              Text('${faNum(ReturnsHelp.d(r['total']), dec: 0)} ریال'),
                               PopupMenuButton<String>(
                                 onSelected: (String v) => _action(r, v),
                                 itemBuilder: (_) {
@@ -347,8 +347,8 @@ class _ProformaFormScreenState extends State<ProformaFormScreen> {
           ),
           const SizedBox(height: 10),
           numField(l.kg, 'وزن', required: true, suffix: 'کیلو'),
-          numField(l.price, 'فی', required: true, suffix: 'تومان', thousands: true),
-          numField(l.disc, 'تخفیف این قلم (مبلغ)', suffix: 'تومان', thousands: true),
+          numField(l.price, 'فی', required: true, suffix: 'ریال', thousands: true),
+          numField(l.disc, 'تخفیف این قلم (مبلغ)', suffix: 'ریال', thousands: true),
           if (_lines.length > 1)
             Align(
               alignment: Alignment.centerLeft,

@@ -159,11 +159,11 @@ class HomeScreen extends StatelessWidget {
                           const Text('چیزی سررسید نزدیک ندارد')
                         else ...[
                           if (overdue.isNotEmpty)
-                            infoRow('عقب‌افتاده', '${faNum(overdue.length)} مورد • ${faNum(overdueAmt, dec: 0)} تومان',
+                            infoRow('عقب‌افتاده', '${faNum(overdue.length)} مورد • ${faNum(overdueAmt, dec: 0)} ریال',
                                 valueColor: scheme.error),
                           if (soon.isNotEmpty)
                             infoRow('تا ۷ روز آینده',
-                                '${faNum(soon.length)} مورد • ${faNum(soonAmt, dec: 0)} تومان'),
+                                '${faNum(soon.length)} مورد • ${faNum(soonAmt, dec: 0)} ریال'),
                         ],
                       ]),
                     ),

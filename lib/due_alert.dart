@@ -71,7 +71,7 @@ class _DueAlertHostState extends State<DueAlertHost> {
                     dense: true,
                     leading: Icon(d.receivable ? Icons.south_west : Icons.north_east,
                         color: d.receivable ? Colors.green.shade700 : Colors.red.shade700),
-                    title: Text('${d.kind} ${d.receivable ? 'دریافتی' : 'پرداختی'} — ${faNum(d.amount, dec: 0)} تومان'),
+                    title: Text('${d.kind} ${d.receivable ? 'دریافتی' : 'پرداختی'} — ${faNum(d.amount, dec: 0)} ریال'),
                     subtitle: Text('${d.party.isEmpty ? '' : '${d.party} · '}${dueWhen(d.date)}'),
                   ),
                 if (soon.length > 12) Text('و ${faNum(soon.length - 12, dec: 0)} مورد دیگر…'),

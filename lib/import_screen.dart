@@ -11,13 +11,14 @@ import 'widgets.dart';
 // S13.T13.2a — import wizard (kind → template/file → column mapping → validation preview).
 // T13.2b: server check (dry run) + final commit via import.commit (idempotent by import_batch_id) + result report.
 class ImportScreen extends StatefulWidget {
-  const ImportScreen({super.key});
+  final String? initialKind; // S35.T35.4b: preselect a kind (e.g. 'grade_prices')
+  const ImportScreen({super.key, this.initialKind});
   @override
   State<ImportScreen> createState() => _ImportScreenState();
 }
 
 class _ImportScreenState extends State<ImportScreen> {
-  ImpKind _kind = kImportKinds.first;
+  late ImpKind _kind = kImportKinds.firstWhere((ImpKind k) => k.id == widget.initialKind, orElse: () => kImportKinds.first);
   ImpSheet? _sheet;
   String _fileName = '';
   Map<String, int> _map = <String, int>{};

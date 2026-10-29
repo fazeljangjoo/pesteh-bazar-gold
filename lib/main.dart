@@ -25,6 +25,10 @@ import 'company_profile.dart';
 import 'company_settings_ui.dart';
 import 'accounts_ui.dart';
 import 'vouchers_ui.dart';
+import 'fx_currencies_ui.dart'; // S26.T26.2
+import 'fx_rates_ui.dart'; // S26.T26.2
+import 'form_settings.dart' show FormSettingsScreen; // S35.T35.1
+import 'fx_mismatch_ui.dart'; // S27c.T27b.8
 import 'fiscal_ui.dart';
 import 'integrity_ui.dart'; // S16.T16.6b
 import 'vat_report_ui.dart'; // S17.T17.2b
@@ -35,6 +39,7 @@ import 'upgrade_ui.dart';
 import 'stock_count_ui.dart';
 import 'ledger_reports_ui.dart'; // S18.T18.1
 import 'trial_balance_ui.dart'; // S18.T18.2
+import 'treasury_balances_ui.dart'; // S28.T28.1
 import 'statements_ui.dart'; // S18.T18.3
 import 'official_invoice.dart'; // S17.T17.3
 import 'pos_screen.dart';
@@ -183,6 +188,15 @@ class _HomeShellState extends State<HomeShell> {
                 child: Align(alignment: AlignmentDirectional.centerStart, child: EditionBadge()),
               ),
               const Divider(height: 1),
+              if (StaffPerms.I.can('settings.manage'))
+                ListTile( // S35.T35.1
+                  leading: const Icon(Icons.tune_outlined),
+                  title: const Text('تنظیمات فرم‌ها'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const FormSettingsScreen()));
+                  },
+                ),
               if (StaffPerms.I.can('users.manage'))
                 ListTile(
                   leading: const Icon(Icons.manage_accounts_outlined),
@@ -368,6 +382,39 @@ class _HomeShellState extends State<HomeShell> {
                 ),
               ],
               FeatureGate(
+                feature: 'fx.rates',
+                child: ListTile(
+                  leading: const Icon(Icons.currency_exchange_outlined),
+                  title: const Text('ارزها'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const FxCurrenciesScreen()));
+                  },
+                ),
+              ),
+              FeatureGate(
+                feature: 'fx.rates',
+                child: ListTile(
+                  leading: const Icon(Icons.trending_up_outlined),
+                  title: const Text('نرخ روزانه ارز'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const FxRatesScreen()));
+                  },
+                ),
+              ),
+              FeatureGate(
+                feature: 'fx.documents',
+                child: ListTile(
+                  leading: const Icon(Icons.compare_arrows_outlined),
+                  title: const Text('مغایرت نرخ اسناد ارزی'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const FxMismatchScreen()));
+                  },
+                ),
+              ),
+              FeatureGate(
                 feature: 'gold.coa',
                 child: ListTile(
                   leading: const Icon(Icons.account_tree_outlined),
@@ -410,6 +457,18 @@ class _HomeShellState extends State<HomeShell> {
                     onTap: () {
                       Navigator.pop(context);
                       Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const TrialBalanceScreen()));
+                    },
+                  ),
+                ),
+              if (StaffPerms.I.can('accounting.view'))
+                FeatureGate(
+                  feature: 'gold.vouchers',
+                  child: ListTile(
+                    leading: const Icon(Icons.account_balance_wallet_outlined),
+                    title: const Text('موجودی صندوق و بانک'),
+                    onTap: () {
+                      Navigator.pop(context);
+                      Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const TreasuryBalancesScreen()));
                     },
                   ),
                 ),

@@ -46,14 +46,14 @@ class ChequeReportData {
   List<List<String>> get kv {
     final List<List<String>> out = <List<String>>[
       <String>['تعداد چک', faNum(_d(raw['count']), dec: 0)],
-      <String>['جمع مبلغ (تومان)', _m(raw['total']), 'b'],
+      <String>['جمع مبلغ (ریال)', _m(raw['total']), 'b'],
     ];
     if (kind == 'summary') {
       final Map<String, dynamic> r = Map<String, dynamic>.from(raw['received'] as Map? ?? <String, dynamic>{});
       final Map<String, dynamic> i = Map<String, dynamic>.from(raw['issued'] as Map? ?? <String, dynamic>{});
-      out.add(<String>['دریافتی باز (در انتظار نتیجه)', '${_m(r['open_amount'])} تومان — ${faNum(_d(r['open_count']), dec: 0)} چک']);
-      out.add(<String>['پرداختی باز (در انتظار نتیجه)', '${_m(i['open_amount'])} تومان — ${faNum(_d(i['open_count']), dec: 0)} چک']);
-      out.add(<String>['خالص باز (دریافتی منهای پرداختی)', '${_m(raw['net_open'])} تومان', 'b']);
+      out.add(<String>['دریافتی باز (در انتظار نتیجه)', '${_m(r['open_amount'])} ریال — ${faNum(_d(r['open_count']), dec: 0)} چک']);
+      out.add(<String>['پرداختی باز (در انتظار نتیجه)', '${_m(i['open_amount'])} ریال — ${faNum(_d(i['open_count']), dec: 0)} چک']);
+      out.add(<String>['خالص باز (دریافتی منهای پرداختی)', '${_m(raw['net_open'])} ریال', 'b']);
     }
     return out;
   }
@@ -66,7 +66,7 @@ class ChequeReportData {
   (List<String>, List<List<String>>) toTable() {
     if (kind == 'summary') {
       return (
-        <String>['جهت', 'وضعیت', 'تعداد', 'مبلغ (تومان)'],
+        <String>['جهت', 'وضعیت', 'تعداد', 'مبلغ (ریال)'],
         ReturnsHelp.maps(raw['groups'])
             .map((Map<String, dynamic> g) => <String>[_dirLabel(g['direction']), kChequeLabels['${g['status']}'] ?? '${g['status']}', faNum(_d(g['count']), dec: 0), _m(g['amount'])])
             .toList(),
@@ -89,7 +89,7 @@ class ChequeReportData {
       );
     }
     return (
-      <String>['سررسید', 'جهت', 'شماره چک', 'بانک', 'طرف حساب', 'وضعیت', 'مبلغ (تومان)'],
+      <String>['سررسید', 'جهت', 'شماره چک', 'بانک', 'طرف حساب', 'وضعیت', 'مبلغ (ریال)'],
       ReturnsHelp.maps(raw['items'])
           .map((Map<String, dynamic> c) => <String>[
                 _jd(c['due_date']),

@@ -31,6 +31,7 @@ class PartyStatementScreen extends StatefulWidget {
 class _PartyStatementScreenState extends State<PartyStatementScreen> {
   DateTime? _from;
   DateTime? _to;
+  String _ccy = ''; // S28.T28.3: '' = all, 'IRR' = rial only, else currency code
   bool _loading = true;
   String? _error;
   Map<String, dynamic> _data = <String, dynamic>{};
@@ -50,6 +51,7 @@ class _PartyStatementScreenState extends State<PartyStatementScreen> {
       final Map<String, dynamic> payload = <String, dynamic>{'party': widget.partyName};
       if (_from != null) payload['from'] = _iso(_from!);
       if (_to != null) payload['to'] = _iso(_to!);
+      if (_ccy.isNotEmpty) payload['ccy'] = _ccy;
       final Map<String, dynamic> r = await StockApi.call('parties.statement', payload);
       if (!mounted) return;
       setState(() {
@@ -63,6 +65,41 @@ class _PartyStatementScreenState extends State<PartyStatementScreen> {
         _loading = false;
       });
     }
+  }
+
+  /// Currency choices come from the balances the server returned (only currencies this party has).
+  List<Widget> _ccyFilter() {
+    final Object? b = _data['balances'];
+    final Map<String, dynamic> by = (b is Map && b['by_ccy'] is Map) ? Map<String, dynamic>.from(b['by_ccy'] as Map) : <String, dynamic>{};
+    if (by.isEmpty && _ccy.isEmpty) return <Widget>[];
+    final List<String> codes = <String>['', 'IRR', ...by.keys];
+    if (_ccy.isNotEmpty && !codes.contains(_ccy)) codes.add(_ccy);
+    return <Widget>[
+      const SizedBox(height: 8),
+      DropdownButtonFormField<String>(
+        value: _ccy,
+        decoration: const InputDecoration(labelText: 'فیلتر ارز', border: OutlineInputBorder()),
+        items: <DropdownMenuItem<String>>[
+          for (final String c in codes)
+            DropdownMenuItem<String>(value: c, child: Text(c.isEmpty ? 'همه (معادل ریالی)' : (c == 'IRR' ? 'ریالی' : c))),
+        ],
+        onChanged: (String? v) {
+          _ccy = v ?? '';
+          _load();
+        },
+      ),
+      if (by.isNotEmpty)
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(12),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+              const Text('مانده به تفکیک ارز', style: TextStyle(fontWeight: FontWeight.w700)),
+              for (final MapEntry<String, dynamic> e in by.entries)
+                Text('${e.key}: ${_balText(_num((e.value as Map)['amount']))}  (معادل ریالی ${_balText(_num((e.value as Map)['rial']))})'),
+            ]),
+          ),
+        ),
+    ];
   }
 
   Future<void> _pick(bool isFrom) async {
@@ -189,6 +226,7 @@ class _PartyStatementScreenState extends State<PartyStatementScreen> {
                           },
                         ),
                     ]),
+                    ..._ccyFilter(),
                     const SizedBox(height: 8),
                     Card(
                       child: Padding(
@@ -219,6 +257,8 @@ class _PartyStatementScreenState extends State<PartyStatementScreen> {
                                 Text('+${faNum(_num(r['debit']), dec: 0)}', style: TextStyle(color: Colors.green.shade800)),
                               if (_num(r['credit']) > 0)
                                 Text('−${faNum(_num(r['credit']), dec: 0)}', style: TextStyle(color: Colors.red.shade800)),
+                                  if ((r['ccy'] ?? '').toString().isNotEmpty)
+                                Text('${faNum(_num(r['ccy_amount']), dec: 2)} ${r['ccy']}', style: const TextStyle(fontSize: 11)),
                               Text(_balText(_num(r['balance'])), style: const TextStyle(fontSize: 11)),
                             ],
                           ),
