@@ -1,6 +1,6 @@
 // پسته‌بازار — رابط مخصوص ویندوز: منوی کناری ثابت، تم دسکتاپ، میان‌بُرهای صفحه‌کلید، بزرگ‌نمایی و تمام‌صفحه (F11).
 // فقط وقتی Platform.isWindows باشد استفاده می‌شود؛ روی اندروید هیچ‌کدام از این‌ها اجرا نمی‌شود.
-import 'dart:ffi';
+import 'dart:ffi' hide Size;
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/material.dart';
