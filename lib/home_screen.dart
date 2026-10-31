@@ -1,3 +1,5 @@
+import 'dart:io' show Platform;
+
 import 'package:flutter/material.dart';
 import 'fmt.dart' show Fmt;
 
@@ -75,6 +77,199 @@ class HomeScreen extends StatelessWidget {
             double overdueAmt = overdue.fold(0.0, (s, d) => s + d.amount);
             double soonAmt = soon.fold(0.0, (s, d) => s + d.amount);
 
+            final Widget assistant = ValueListenableBuilder<bool>(
+              valueListenable: LicenseService.I.isFx,
+              builder: (context, fx, _) => !fx
+                  ? const SizedBox.shrink()
+                  : Padding(
+                      padding: const EdgeInsets.only(top: 12),
+                      child: InkWell(
+                        onTap: () => Navigator.push(
+                            context, MaterialPageRoute(builder: (_) => const AssistantScreen())),
+                        child: Card(
+                          color: scheme.secondaryContainer,
+                          child: Padding(
+                            padding: const EdgeInsets.all(14),
+                            child: Row(children: [
+                              const Icon(Icons.smart_toy_outlined),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text('دستیار پسته بازار',
+                                    style: Theme.of(context).textTheme.titleMedium
+                                        ?.copyWith(fontWeight: FontWeight.w700)),
+                              ),
+                              const Icon(Icons.chevron_left),
+                            ]),
+                          ),
+                        ),
+                      ),
+                    ),
+            );
+            final Widget invCard = Card(
+              color: scheme.primaryContainer,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
+                child: Column(children: [
+                  Text('موجودی انبار (خالص)', style: Theme.of(context).textTheme.titleMedium),
+                  const SizedBox(height: 6),
+                  Text('${faNum(invKg)} کیلو',
+                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800)),
+                ]),
+              ),
+            );
+            final Widget salesCard = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+              sectionTitle(context, 'فروش'),
+              Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(children: [
+                    infoRow('فروش امروز', '${faNum(todayCount)} مورد • ${faNum(todayKg)} کیلو (خالص)'),
+                    infoRow('فروش این ماه', '${faNum(monthKg)} کیلو (خالص)'),
+                  ]),
+                ),
+              ),
+            ]);
+            final Widget duesCard = InkWell(
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DuesScreen())),
+              child: Card(
+                color: overdue.isNotEmpty ? scheme.errorContainer : null,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    Row(children: [
+                      Expanded(
+                          child: Text('سررسیدها',
+                              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800))),
+                      const Icon(Icons.chevron_left),
+                    ]),
+                    if (overdue.isEmpty && soon.isEmpty)
+                      const Text('چیزی سررسید نزدیک ندارد')
+                    else ...[
+                      if (overdue.isNotEmpty)
+                        infoRow('عقب‌افتاده', '${faNum(overdue.length)} مورد • ${Fmt.money(overdueAmt)}',
+                            valueColor: scheme.error),
+                      if (soon.isNotEmpty)
+                        infoRow('تا ۷ روز آینده', '${faNum(soon.length)} مورد • ${Fmt.money(soonAmt)}'),
+                    ],
+                  ]),
+                ),
+              ),
+            );
+            final Widget syncCard = InkWell(
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SyncScreen())),
+              child: ValueListenableBuilder<SyncInfo>(
+                valueListenable: SyncService.I.info,
+                builder: (context, info, _) => Card(
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(children: [
+                      Icon(info.failed > 0
+                          ? Icons.error_outline
+                          : info.offline
+                              ? Icons.cloud_off
+                              : info.pending > 0
+                                  ? Icons.cloud_sync_outlined
+                                  : Icons.cloud_done_outlined),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(info.failed > 0
+                            ? 'همگام‌سازی: ${faNum(info.failed)} مورد خطادار'
+                            : info.offline
+                                ? 'آفلاین — ${faNum(info.pending)} تغییر در صف ارسال'
+                                : info.pending > 0
+                                    ? 'همگام‌سازی: ${faNum(info.pending)} تغییر در صف ارسال'
+                                    : 'همگام‌سازی: به‌روز است'),
+                      ),
+                      const Icon(Icons.chevron_left),
+                    ]),
+                  ),
+                ),
+              ),
+            );
+
+            // ---- ویندوز: داشبورد دو ستونه با کاشی‌های آمار ----
+            if (Platform.isWindows) {
+              final bool hasOverdue = overdue.isNotEmpty;
+              return ListView(
+                padding: const EdgeInsets.all(24),
+                children: [
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Expanded(
+                        child: _statTile(context, Icons.warehouse_outlined, 'موجودی انبار (خالص)',
+                            '${faNum(invKg)} کیلو', null, scheme.primaryContainer, scheme.onPrimaryContainer)),
+                    const SizedBox(width: 16),
+                    Expanded(
+                        child: _statTile(context, Icons.today_outlined, 'فروش امروز', '${faNum(todayKg)} کیلو',
+                            '${faNum(todayCount)} مورد', Colors.white, scheme.primary)),
+                    const SizedBox(width: 16),
+                    Expanded(
+                        child: _statTile(context, Icons.calendar_month_outlined, 'فروش این ماه',
+                            '${faNum(monthKg)} کیلو', null, Colors.white, scheme.primary)),
+                    const SizedBox(width: 16),
+                    Expanded(
+                        child: _statTile(
+                            context,
+                            hasOverdue ? Icons.warning_amber_rounded : Icons.event_available_outlined,
+                            'سررسیدها',
+                            hasOverdue ? '${faNum(overdue.length)} عقب‌افتاده' : '${faNum(soon.length)} تا ۷ روز آینده',
+                            hasOverdue ? Fmt.money(overdueAmt) : (soon.isEmpty ? 'چیزی سررسید نزدیک ندارد' : Fmt.money(soonAmt)),
+                            hasOverdue ? scheme.errorContainer : Colors.white,
+                            hasOverdue ? scheme.error : scheme.primary)),
+                  ]),
+                  const SizedBox(height: 18),
+                  Row(children: [
+                    SizedBox(
+                      width: 220,
+                      child: FilledButton.icon(
+                        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PurchaseForm())),
+                        icon: const Icon(Icons.shopping_cart_outlined),
+                        label: const Text('خرید جدید'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    SizedBox(
+                      width: 220,
+                      child: FilledButton.icon(
+                        onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SaleForm())),
+                        icon: const Icon(Icons.sell_outlined),
+                        label: const Text('فروش جدید'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    SizedBox(
+                      width: 200,
+                      child: OutlinedButton.icon(
+                        onPressed: () => _scanAndOpen(context),
+                        icon: const Icon(Icons.qr_code_scanner),
+                        label: const Text('اسکن بارکد'),
+                      ),
+                    ),
+                  ]),
+                  const SizedBox(height: 16),
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Expanded(
+                      flex: 3,
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: const [
+                        MessagesCard(),
+                        CrmHomeCard(),
+                        InstantPnlCard(),
+                      ]),
+                    ),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      flex: 2,
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                        duesCard,
+                        syncCard,
+                        assistant,
+                      ]),
+                    ),
+                  ]),
+                  const SizedBox(height: 24),
+                ],
+              );
+            }
+
             return ListView(
               padding: const EdgeInsets.all(16),
               children: [
@@ -89,125 +284,42 @@ class HomeScreen extends StatelessWidget {
                   label: const Text('اسکن بارکد'),
                 ),
                 // دستیار: فقط برای کاربر پلن fx دیده می‌شود (isFx از ورود/بوت ذخیره می‌شود)
-                ValueListenableBuilder<bool>(
-                  valueListenable: LicenseService.I.isFx,
-                  builder: (context, fx, _) => !fx
-                      ? const SizedBox.shrink()
-                      : Padding(
-                          padding: const EdgeInsets.only(top: 12),
-                          child: InkWell(
-                            onTap: () => Navigator.push(context,
-                                MaterialPageRoute(builder: (_) => const AssistantScreen())),
-                            child: Card(
-                              color: scheme.secondaryContainer,
-                              child: Padding(
-                                padding: const EdgeInsets.all(14),
-                                child: Row(children: [
-                                  const Icon(Icons.smart_toy_outlined),
-                                  const SizedBox(width: 12),
-                                  Expanded(
-                                    child: Text('دستیار پسته بازار',
-                                        style: Theme.of(context).textTheme.titleMedium
-                                            ?.copyWith(fontWeight: FontWeight.w700)),
-                                  ),
-                                  const Icon(Icons.chevron_left),
-                                ]),
-                              ),
-                            ),
-                          ),
-                        ),
-                ),
+                assistant,
                 const SizedBox(height: 16),
                 // موجودی انبار: درشت و پررنگ
-                Card(
-                  color: scheme.primaryContainer,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 14),
-                    child: Column(children: [
-                      Text('موجودی انبار (خالص)', style: Theme.of(context).textTheme.titleMedium),
-                      const SizedBox(height: 6),
-                      Text('${faNum(invKg)} کیلو',
-                          style: Theme.of(context).textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w800)),
-                    ]),
-                  ),
-                ),
+                invCard,
                 const SizedBox(height: 12),
-                sectionTitle(context, 'فروش'),
-                Card(
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(children: [
-                      infoRow('فروش امروز', '${faNum(todayCount)} مورد • ${faNum(todayKg)} کیلو (خالص)'),
-                      infoRow('فروش این ماه', '${faNum(monthKg)} کیلو (خالص)'),
-                    ]),
-                  ),
-                ),
+                salesCard,
                 const SizedBox(height: 12),
-                InkWell(
-                  onTap: () => Navigator.push(
-                      context, MaterialPageRoute(builder: (_) => const DuesScreen())),
-                  child: Card(
-                    color: overdue.isNotEmpty ? scheme.errorContainer : null,
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                        Row(children: [
-                          Expanded(
-                              child: Text('سررسیدها',
-                                  style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800))),
-                          const Icon(Icons.chevron_left),
-                        ]),
-                        if (overdue.isEmpty && soon.isEmpty)
-                          const Text('چیزی سررسید نزدیک ندارد')
-                        else ...[
-                          if (overdue.isNotEmpty)
-                            infoRow('عقب‌افتاده', '${faNum(overdue.length)} مورد • ${Fmt.money(overdueAmt)}',
-                                valueColor: scheme.error),
-                          if (soon.isNotEmpty)
-                            infoRow('تا ۷ روز آینده',
-                                '${faNum(soon.length)} مورد • ${Fmt.money(soonAmt)}'),
-                        ],
-                      ]),
-                    ),
-                  ),
-                ),
+                duesCard,
                 const SizedBox(height: 12),
-                InkWell(
-                  onTap: () => Navigator.push(
-                      context, MaterialPageRoute(builder: (_) => const SyncScreen())),
-                  child: ValueListenableBuilder<SyncInfo>(
-                    valueListenable: SyncService.I.info,
-                    builder: (context, info, _) => Card(
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Row(children: [
-                          Icon(info.failed > 0
-                              ? Icons.error_outline
-                              : info.offline
-                                  ? Icons.cloud_off
-                                  : info.pending > 0
-                                      ? Icons.cloud_sync_outlined
-                                      : Icons.cloud_done_outlined),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(info.failed > 0
-                                ? 'همگام‌سازی: ${faNum(info.failed)} مورد خطادار'
-                                : info.offline
-                                    ? 'آفلاین — ${faNum(info.pending)} تغییر در صف ارسال'
-                                    : info.pending > 0
-                                        ? 'همگام‌سازی: ${faNum(info.pending)} تغییر در صف ارسال'
-                                        : 'همگام‌سازی: به‌روز است'),
-                          ),
-                          const Icon(Icons.chevron_left),
-                        ]),
-                      ),
-                    ),
-                  ),
-                ),
+                syncCard,
                 const SizedBox(height: 24),
               ],
             );
           },
+      ),
+    );
+  }
+
+  /// کاشی آمار داشبورد ویندوز
+  Widget _statTile(BuildContext context, IconData icon, String title, String value, String? sub, Color bg, Color accent) {
+    return Card(
+      margin: EdgeInsets.zero,
+      color: bg,
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Icon(icon, color: accent, size: 22),
+            const SizedBox(width: 8),
+            Expanded(child: Text(title, style: TextStyle(fontSize: 13.5, color: accent, fontWeight: FontWeight.w600))),
+          ]),
+          const SizedBox(height: 12),
+          Text(value, style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: accent)),
+          const SizedBox(height: 2),
+          Text(sub ?? ' ', style: TextStyle(fontSize: 12.5, color: accent.withOpacity(0.8))),
+        ]),
       ),
     );
   }

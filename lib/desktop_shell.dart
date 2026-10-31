@@ -150,7 +150,7 @@ ThemeData buildDeskTheme() {
       color: Colors.white,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
-      margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      margin: const EdgeInsets.symmetric(vertical: 5),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: const BorderSide(color: _kLine)),
     ),
     dialogTheme: DialogThemeData(
@@ -381,7 +381,10 @@ class _Sidebar extends StatelessWidget {
         color: Colors.white,
         border: Border(left: BorderSide(color: _kLine)),
       ),
-      child: Column(
+      // Material لازم است: ListTile و Text بدونِ Material خطا می‌دهند / زیرخط می‌خورند
+      child: Material(
+        type: MaterialType.transparency,
+        child: Column(
         children: <Widget>[
           _SidebarHeader(collapsed: collapsed),
           ValueListenableBuilder<int>(
@@ -419,6 +422,7 @@ class _Sidebar extends StatelessWidget {
           const Divider(height: 1),
           _SidebarFooter(collapsed: collapsed, onSync: onSync),
         ],
+      ),
       ),
     );
   }
