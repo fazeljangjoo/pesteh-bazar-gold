@@ -22,6 +22,7 @@ class IntakeListScreen extends StatefulWidget {
 const Map<String, String> kIntakeStatusLabels = <String, String>{
   'draft': 'پیش‌نویس',
   'submitted': 'ثبت‌شده',
+  'returned': 'برگشتی برای اصلاح',
   'confirmed': 'قطعی‌شده',
   'rejected': 'ردشده',
   'sample_only': 'نمونه',
@@ -75,7 +76,7 @@ class _IntakeListScreenState extends State<IntakeListScreen> {
     final rows = await EntityStore.I.list('lot_intakes', q: _q.text);
     final out = <IntakeRowView>[];
     for (final r in rows) {
-      final pending = (r['status'] ?? 'draft') == 'draft' && await EntityStore.I.isSubmitPending(r['uid'] as String);
+      final pending = const <String>['draft', 'returned'].contains((r['status'] ?? 'draft').toString()) && await EntityStore.I.isSubmitPending(r['uid'] as String);
       final v = IntakeRowView(r, pending);
       if (_filter == 'all' || (_filter == 'pending' ? pending : v.status == _filter)) out.add(v);
     }
@@ -96,7 +97,7 @@ class _IntakeListScreenState extends State<IntakeListScreen> {
       return;
     }
     await Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => IntakeFormScreen(uid: v.status == 'draft' ? v.uid : null),
+      builder: (_) => IntakeFormScreen(uid: (v.status == 'draft' || v.status == 'returned') ? v.uid : null),
     ));
     _refresh();
   }
@@ -155,6 +156,7 @@ class _IntakeListScreenState extends State<IntakeListScreen> {
                           DropdownMenuItem(value: 'pending', child: Text('در صف ارسال')),
                           DropdownMenuItem(value: 'draft', child: Text('پیش‌نویس')),
                           DropdownMenuItem(value: 'submitted', child: Text('ثبت‌شده')),
+                          DropdownMenuItem(value: 'returned', child: Text('برگشتی')),
                           DropdownMenuItem(value: 'confirmed', child: Text('قطعی‌شده')),
                           DropdownMenuItem(value: 'rejected', child: Text('ردشده')),
                           DropdownMenuItem(value: 'sample_only', child: Text('نمونه')),

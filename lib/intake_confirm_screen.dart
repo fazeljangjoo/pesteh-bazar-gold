@@ -315,37 +315,50 @@ class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
   Future<void> _reject() async {
     if (_busy) return;
     final c = TextEditingController();
-    final reason = await showDialog<String>(
+    // نتیجه: (دلیل، قطعی؟) — «برگشت برای اصلاح»: اتاق انس ویرایش و دوباره ثبت می‌کند؛ «رد قطعی»: بسته می‌شود
+    final res = await showDialog<(String, bool)>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('رد پذیرش'),
+        title: const Text('رد / برگشت پذیرش'),
         content: TextField(
           controller: c,
           autofocus: true,
           maxLength: 250,
           maxLines: 3,
-          decoration: const InputDecoration(labelText: 'دلیل رد (اجباری)', border: OutlineInputBorder()),
+          decoration: const InputDecoration(labelText: 'دلیل (اجباری)', border: OutlineInputBorder()),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('انصراف')),
+          OutlinedButton(
+            onPressed: () {
+              final t = c.text.trim();
+              if (t.isEmpty) return;
+              Navigator.pop(ctx, (t, true));
+            },
+            child: const Text('رد قطعی'),
+          ),
           FilledButton(
             onPressed: () {
               final t = c.text.trim();
               if (t.isEmpty) return;
-              Navigator.pop(ctx, t);
+              Navigator.pop(ctx, (t, false));
             },
-            child: const Text('رد کردن'),
+            child: const Text('برگشت برای اصلاح'),
           ),
         ],
       ),
     );
     c.dispose();
-    if (reason == null || !mounted) return;
+    if (res == null || !mounted) return;
+    final reason = res.$1;
+    final isFinal = res.$2;
+    if (isFinal && !await confirm(context, 'رد قطعی: پذیرش بسته می‌شود و دیگر قابل ویرایش نیست. مطمئنید؟')) return;
+    if (!mounted) return;
     setState(() => _busy = true);
-    final r = await IntakeApi.call('intake.reject', <String, dynamic>{'uid': widget.uid, 'reason': reason}, idem: _idem('reject'));
+    final r = await IntakeApi.call('intake.reject', <String, dynamic>{'uid': widget.uid, 'reason': reason, 'final': isFinal}, idem: _idem('reject'));
     if (!mounted) return;
     if (r.ok) {
-      await _finish(r, 'پذیرش رد شد.');
+      await _finish(r, isFinal ? 'پذیرش رد قطعی شد.' : 'پذیرش برای اصلاح به اتاق انس برگشت.');
       return;
     }
     setState(() => _busy = false);
@@ -354,10 +367,39 @@ class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
 
   Future<void> _markSample() async {
     if (_busy) return;
-    final ok = await confirm(context, 'این پذیرش «نمونه» شود؟ خرید و موجودی ساخته نمی‌شود و دیگر قابل قطعی‌سازی نیست.');
-    if (!ok || !mounted) return;
+    final nc = TextEditingController();
+    final note = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('نمونه‌کردن پذیرش'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('خرید و موجودی ساخته نمی‌شود و دیگر قابل قطعی‌سازی نیست.'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: nc,
+            autofocus: true,
+            maxLength: 400,
+            maxLines: 3,
+            decoration: const InputDecoration(labelText: 'توضیح نمونه (الزامی): برای چیست/کیست؟', border: OutlineInputBorder()),
+          ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('انصراف')),
+          FilledButton(
+            onPressed: () {
+              final t = nc.text.trim();
+              if (t.isEmpty) return;
+              Navigator.pop(ctx, t);
+            },
+            child: const Text('ثبت نمونه'),
+          ),
+        ],
+      ),
+    );
+    nc.dispose();
+    if (note == null || !mounted) return;
     setState(() => _busy = true);
-    final r = await IntakeApi.call('intake.mark_sample', <String, dynamic>{'uid': widget.uid}, idem: _idem('sample'));
+    final r = await IntakeApi.call('intake.mark_sample', <String, dynamic>{'uid': widget.uid, 'note': note}, idem: _idem('sample'));
     if (!mounted) return;
     if (r.ok) {
       await _finish(r, 'پذیرش به‌عنوان نمونه ثبت شد.');
@@ -609,7 +651,7 @@ class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
                   OutlinedButton.icon(
                     onPressed: _busy ? null : _reject,
                     icon: const Icon(Icons.block),
-                    label: const Text('رد'),
+                    label: const Text('رد / برگشت'),
                   ),
                   TextButton.icon(
                     onPressed: _busy ? null : _markSample,
