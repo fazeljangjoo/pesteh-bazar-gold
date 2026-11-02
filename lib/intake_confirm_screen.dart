@@ -100,6 +100,8 @@ class IntakeConfirmScreen extends StatefulWidget {
 
 class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
   final TextEditingController _base = TextEditingController();
+  bool _baseGram = false; // «خرید گرمی» برای پسته اصلی
+  final TextEditingController _baseG = TextEditingController(); // پیش‌فرض: «گرم» ثبت‌شدهٔ اتاق انس
   final List<_PctRow> _rows = <_PctRow>[];
   Map<String, dynamic>? _intake;
   bool _loading = true;
@@ -126,6 +128,7 @@ class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
   void dispose() {
     _debounce?.cancel();
     _base.dispose();
+    _baseG.dispose();
     for (final r in _rows) {
       r.dispose();
     }
@@ -148,14 +151,19 @@ class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
         kernelG: (p['kernel_g'] as num?)?.toDouble(),
         allowed: true,
       ));
+      if (_rows.last.kernelG != null) _rows.last.g.text = _plainNum(_rows.last.kernelG!);
     }
     if (!mounted) return;
+    final ig = (intake?['gram'] as num?)?.toDouble();
+    if (ig != null) _baseG.text = _plainNum(ig);
     setState(() {
       _intake = intake;
       _submitPending = pending;
       _loading = false;
     });
   }
+
+  static String _plainNum(double v) => v == v.roundToDouble() ? v.toInt().toString() : v.toString();
 
   bool get _editable => _intake != null && _intake!['status'] == 'submitted' && !_submitPending && _allowed;
 
@@ -190,7 +198,17 @@ class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
       }
       items.add(it);
     }
-    return <String, dynamic>{'uid': widget.uid, 'base_price': base, 'items': items};
+    final out = <String, dynamic>{'uid': widget.uid, 'base_price': base, 'items': items};
+    if (_baseGram) {
+      final bg = parseIntakeNum(_baseG.text) ?? (_intake?['gram'] as num?)?.toDouble();
+      if (bg == null || bg <= 0 || bg > 100) {
+        _formErr = '«گرم مغز در ۱۰۰ گرم» پسته اصلی را (۰ تا ۱۰۰) وارد کنید';
+        return null;
+      }
+      out['base_gram_mode'] = true;
+      out['base_g'] = bg;
+    }
+    return out;
   }
 
   double? get _srvWeight => (_srv?['weight_kg'] as num?)?.toDouble();
@@ -216,7 +234,13 @@ class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
         });
       }
     }
-    return priceBlend(<String, dynamic>{'base_price': payload['base_price'], 'weight_kg': w, 'ref_gram': ref, 'items': items});
+    return priceBlend(<String, dynamic>{
+      'base_price': payload['base_price'],
+      'weight_kg': w,
+      'ref_gram': ref,
+      'items': items,
+      if (payload['base_gram_mode'] == true) ...<String, dynamic>{'base_gram_mode': true, 'base_g': payload['base_g']},
+    });
   }
 
   void _changed() {
@@ -417,6 +441,11 @@ class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
               onChanged: (v) {
                 r.separate = v == true;
                 if (!r.separate) r.gram = false;
+                // گرمِ ثبت‌شده در اتاق انس خودکار اعمال می‌شود؛ نیازی به ورود دوباره نیست
+                if (r.separate && r.kernelG != null) {
+                  r.gram = true;
+                  if (r.g.text.trim().isEmpty) r.g.text = _plainNum(r.kernelG!);
+                }
                 _changed();
               },
             ),
@@ -543,6 +572,31 @@ class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
               else ...[
                 const SizedBox(height: 12),
                 MoneyField(controller: _base, label: 'قیمت پایه (هر کیلو)', onChanged: _changed),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  title: const Text('خرید گرمی (پسته اصلی)'),
+                  value: _baseGram,
+                  onChanged: (v) {
+                    _baseGram = v == true;
+                    _changed();
+                  },
+                ),
+                if (_baseGram)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: TextField(
+                      controller: _baseG,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      decoration: InputDecoration(
+                        labelText: 'گرم مغز پسته اصلی در ۱۰۰ گرم',
+                        helperText: (_intake?['gram'] != null) ? 'ثبت اتاق انس: ${Fmt.number((_intake!['gram'] as num).toDouble(), dec: 3)}' : null,
+                        border: const OutlineInputBorder(),
+                      ),
+                      onChanged: (_) => _changed(),
+                    ),
+                  ),
                 for (final r in _rows) _pctCard(r, local),
                 _summary(payload, local),
                 const SizedBox(height: 12),
