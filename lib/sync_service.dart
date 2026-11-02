@@ -12,6 +12,7 @@ import 'entity_store.dart';
 import 'fx_local.dart';
 import 'license_service.dart';
 import 'money_unit.dart'; // S29.T29.3
+import 'perms.dart'; // S10: کارکن ⇒ sync.export
 import 'local_backup.dart';
 import 'sync_plan.dart'; // S7
 
@@ -74,7 +75,7 @@ class _ApiResult {
 ///
 /// * ارسال: عملیات صف‌شده (`sync_ops`) به‌ترتیب، با کلید یکتای idem ارسال می‌شود؛
 ///   ارسال تکراری (اینترنت ضعیف) دوباره ثبت نمی‌شود.
-/// * دریافت: `backup.export` سرور کل داده‌های حساب را می‌آورد (فقط وقتی صف خالی است).
+/// * دریافت: `backup.export` (مالک) یا `sync.export` (کارکن؛ فیلترشده) کل داده‌های قابل‌دیدن را می‌آورد (فقط وقتی صف خالی است).
 /// * ورود روی دستگاه جدید: [initialSync] همهٔ داده‌های حساب را از سرور می‌آورد.
 class SyncService {
   SyncService._();
@@ -727,7 +728,9 @@ class SyncService {
         v0 = (await _ping(phone, token, null)).ver;
       } catch (_) {}
     }
-    final r = await _call(phone, token, 'backup.export', {}, timeoutSec: 120);
+    // S10: مالک ⇒ backup.export (کامل)؛ کارکنِ غیرمالک ⇒ sync.export (فقط‌خواندنی، فیلتر مجوز/قیمت در سرور)
+    final String exportAction = StaffPerms.I.isStaff ? 'sync.export' : 'backup.export';
+    final r = await _call(phone, token, exportAction, {}, timeoutSec: 120);
     if (r.code != 200 || r.data == null) throw _ServerError(r.error, r.code);
     final tables = r.data!['tables'];
     if (tables is! Map) throw _ServerError('پاسخ نامعتبر از سرور', r.code);
