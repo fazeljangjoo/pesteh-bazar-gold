@@ -1,0 +1,14 @@
+[
+ {"name":"A: dombest 20% @28M, P=31M, 100kg","in":{"base_price":31000000,"weight_kg":100,"items":[{"pct":20,"q":28000000}]},"avg_per_kg":30400000,"total":3040000000},
+ {"name":"B gram: q=28M,R=50,g=45 -> eff 25.2M, avg 29.84M","in":{"base_price":31000000,"weight_kg":100,"items":[{"pct":20,"q":28000000,"gram_mode":true,"g":45}]},"avg_per_kg":29840000,"total":2984000000},
+ {"name":"multi: 10%@25M + 20%@20M, P=30M","in":{"base_price":30000000,"weight_kg":10,"items":[{"pct":10,"q":25000000},{"pct":20,"q":20000000}]},"avg_per_kg":27500000,"total":275000000},
+ {"name":"no items = P","in":{"base_price":31000000,"weight_kg":50,"items":[]},"avg_per_kg":31000000,"total":1550000000},
+ {"name":"unticked item (q null) priced at P","in":{"base_price":31000000,"weight_kg":50,"items":[{"pct":15,"q":null}]},"avg_per_kg":31000000,"total":1550000000},
+ {"name":"custom R=100","in":{"base_price":31000000,"weight_kg":1,"ref_gram":100,"items":[{"pct":20,"q":28000000,"gram_mode":true,"g":45}]},"avg_per_kg":27320000,"total":27320000},
+ {"name":"rounding to whole rial","in":{"base_price":1000,"weight_kg":3,"items":[{"pct":33.333,"q":500}]},"avg_per_kg":833,"total":2499},
+ {"name":"sum over 100","in":{"base_price":1,"weight_kg":1,"items":[{"pct":60,"q":1},{"pct":50,"q":1}]},"error":"sum_over_100"},
+ {"name":"negative q","in":{"base_price":1,"weight_kg":1,"items":[{"pct":10,"q":-1}]},"error":"bad_q"},
+ {"name":"gram out of range","in":{"base_price":1,"weight_kg":1,"items":[{"pct":10,"q":1,"gram_mode":true,"g":120}]},"error":"bad_gram"},
+ {"name":"gram mode without g","in":{"base_price":1,"weight_kg":1,"items":[{"pct":10,"q":1,"gram_mode":true}]},"error":"bad_gram"},
+ {"name":"bad weight","in":{"base_price":1,"weight_kg":-5,"items":[]},"error":"bad_weight_kg"}
+]

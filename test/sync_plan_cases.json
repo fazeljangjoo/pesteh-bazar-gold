@@ -1,0 +1,42 @@
+{
+  "known": ["lot_intakes", "lot_intake_pcts", "pct_defs", "warehouses"],
+  "plans": [
+    {"name": "no changes", "changes": [], "reset": false, "own": [], "entities": [], "full": false, "consumed": 0, "foreign": 0},
+    {"name": "own entity.save only: just advance the baseline",
+     "changes": [{"ver": 5, "action": "entity.save", "entity": "lot_intakes"}], "reset": false,
+     "own": ["entity.save|lot_intakes"], "entities": [], "full": false, "consumed": 1, "foreign": 0},
+    {"name": "foreign entity.save: entity delta only",
+     "changes": [{"ver": 5, "action": "entity.save", "entity": "lot_intakes"}], "reset": false,
+     "own": [], "entities": ["lot_intakes"], "full": false, "consumed": 0, "foreign": 1},
+    {"name": "foreign purchases.create: full pull",
+     "changes": [{"ver": 7, "action": "purchases.create", "entity": "purchases"}], "reset": false,
+     "own": [], "entities": [], "full": true, "consumed": 0, "foreign": 1},
+    {"name": "foreign intake.confirm: intake entities + full (purchase/stock)",
+     "changes": [{"ver": 8, "action": "intake.confirm", "entity": "lot_intakes"}], "reset": false,
+     "own": [], "entities": ["lot_intake_pcts", "lot_intakes", "pct_defs"], "full": true, "consumed": 0, "foreign": 1},
+    {"name": "foreign intake.submit: intake entities only (no purchase yet)",
+     "changes": [{"ver": 9, "action": "intake.submit", "entity": "lot_intakes"}], "reset": false,
+     "own": [], "entities": ["lot_intake_pcts", "lot_intakes", "pct_defs"], "full": false, "consumed": 0, "foreign": 1},
+    {"name": "own+foreign same action, different entity (foreign first)",
+     "changes": [{"ver": 10, "action": "entity.save", "entity": "lot_intakes"}, {"ver": 11, "action": "entity.save", "entity": "warehouses"}],
+     "reset": false, "own": ["entity.save|warehouses"], "entities": ["lot_intakes"], "full": false, "consumed": 1, "foreign": 1},
+    {"name": "own+foreign same action, different entity (own first)",
+     "changes": [{"ver": 10, "action": "entity.save", "entity": "warehouses"}, {"ver": 11, "action": "entity.save", "entity": "lot_intakes"}],
+     "reset": false, "own": ["entity.save|warehouses"], "entities": ["lot_intakes"], "full": false, "consumed": 1, "foreign": 1},
+    {"name": "two own, three in log: one foreign",
+     "changes": [{"ver": 1, "action": "sales.create", "entity": "sales"}, {"ver": 2, "action": "sales.create", "entity": "sales"}, {"ver": 3, "action": "sales.create", "entity": "sales"}],
+     "reset": false, "own": ["sales.create|sales", "sales.create|sales"], "entities": [], "full": true, "consumed": 2, "foreign": 1},
+    {"name": "reset: full pull", "changes": [], "reset": true, "own": [], "entities": [], "full": true, "consumed": 0, "foreign": 0},
+    {"name": "unknown entity from a newer server is ignored",
+     "changes": [{"ver": 4, "action": "entity.save", "entity": "future_thing"}], "reset": false,
+     "own": [], "entities": [], "full": false, "consumed": 0, "foreign": 1}
+  ],
+  "backoff": [
+    {"poll": 4, "fail": 0, "expect": 4},
+    {"poll": 4, "fail": 1, "expect": 8},
+    {"poll": 4, "fail": 2, "expect": 16},
+    {"poll": 4, "fail": 5, "expect": 60},
+    {"poll": 1, "fail": 0, "expect": 2},
+    {"poll": 100, "fail": 0, "expect": 60}
+  ]
+}
