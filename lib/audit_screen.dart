@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import 'excel_io.dart';
 import 'utils.dart';
 import 'warehouse_ui.dart';
+import 'widgets.dart' show snack;
 
 /// T02.3 — گزارش ممیزی (audit log). فقط برای مالک یا کارکنی که audit.view دارد.
 /// آنلاین از طریق StockApi (app.php → audit.list). فیلتر: کاربر، نوع رکورد، بازهٔ تاریخ، جستجوی متن.
@@ -22,6 +24,8 @@ const Map<String, String> _kEntityFa = <String, String>{
   'backup': 'پشتیبان',
   'category': 'دسته‌بندی',
   'type': 'نوع',
+  'intake': 'پذیرش اتاق انس', // S6.T3 (entity='intake' در audit_log)
+  'intake_price_settings': 'تنظیم گرم مرجع قیمت',
 };
 
 const Map<String, String> _kVerbFa = <String, String>{
@@ -54,6 +58,8 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
   String _from = '';
   String _to = '';
   final TextEditingController _q = TextEditingController();
+  final TextEditingController _code = TextEditingController(); // S6.T3: کد پسته
+  bool _exporting = false;
 
   @override
   void initState() {
@@ -65,6 +71,7 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
   @override
   void dispose() {
     _q.dispose();
+    _code.dispose();
     super.dispose();
   }
 
@@ -92,13 +99,7 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
       if (reset) _items.clear();
     });
     try {
-      final Map<String, dynamic> p = <String, dynamic>{'limit': 50};
-      if (_staffId != null) p['staff_id'] = _staffId;
-      if (_entity.isNotEmpty) p['entity'] = _entity;
-      if (_action.isNotEmpty) p['action'] = _action;
-      if (_from.isNotEmpty) p['from'] = _from;
-      if (_to.isNotEmpty) p['to'] = _to;
-      if (_q.text.trim().isNotEmpty) p['q'] = _q.text.trim();
+      final Map<String, dynamic> p = _params(limit: 50);
       if (!reset && _items.isNotEmpty) p['before_id'] = _items.last['id'];
       final r = await StockApi.call('audit.list', p);
       final raw = r['items'];
@@ -108,10 +109,109 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
         }
       }
       _hasMore = r['has_more'] == true;
+      if (_items.isNotEmpty) _learnStaff(_items);
     } catch (e) {
       _error = e.toString().replaceFirst('Exception: ', '');
     }
     if (mounted) setState(() => _loading = false);
+  }
+
+  /// S6.T3: پارامترهای فیلتر. «کد پسته» در شرح ممیزی پذیرش می‌آید (مثلاً «… (KH-…)») و سرور فقط یک `q` می‌شناسد؛
+  /// اگر هم کد و هم متن آزاد داده شود، کد به سرور می‌رود و متن آزاد سمت کلاینت اعمال می‌شود ([_textOk]).
+  Map<String, dynamic> _params({required int limit}) {
+    final Map<String, dynamic> p = <String, dynamic>{'limit': limit};
+    if (_staffId != null) p['staff_id'] = _staffId;
+    if (_entity.isNotEmpty) p['entity'] = _entity;
+    if (_action.isNotEmpty) p['action'] = _action;
+    if (_from.isNotEmpty) p['from'] = _from;
+    if (_to.isNotEmpty) p['to'] = _to;
+    final String code = _code.text.trim();
+    final String text = _q.text.trim();
+    if (code.isNotEmpty) {
+      p['q'] = code;
+    } else if (text.isNotEmpty) {
+      p['q'] = text;
+    }
+    return p;
+  }
+
+  bool _textOk(Map<String, dynamic> it) {
+    final String code = _code.text.trim();
+    final String text = _q.text.trim().toLowerCase();
+    if (code.isEmpty || text.isEmpty) return true; // فقط یکی داده شده؛ سرور فیلتر کرده
+    return '${it['summary'] ?? ''} ${it['entity_id'] ?? ''} ${it['staff_name'] ?? ''}'.toLowerCase().contains(text);
+  }
+
+  /// بدون مجوز users.manage فهرست کاربران نیست؛ نام پرسنل را از خود ردیف‌های ممیزی می‌سازیم تا فیلتر پرسنل کار کند.
+  void _learnStaff(List<Map<String, dynamic>> rows) {
+    final Set<int> have = <int>{for (final s in _staff) int.tryParse('${s['id']}') ?? -1};
+    bool added = false;
+    for (final it in rows) {
+      final int id = int.tryParse('${it['staff_id']}') ?? 0;
+      final String name = (it['staff_name'] ?? '').toString();
+      if (id <= 0 || name.isEmpty || have.contains(id)) continue;
+      have.add(id);
+      _staff.add(<String, dynamic>{'id': id, 'name': name});
+      added = true;
+    }
+    if (added && mounted) setState(() {});
+  }
+
+  /// S6.T3: خروجی Excel از «همهٔ» نتایجِ فیلتر فعلی (صفحه‌به‌صفحه تا سقف ۵۰۰۰ ردیف)، نه فقط ردیف‌های بارگذاری‌شده.
+  Future<void> _export() async {
+    if (_exporting) return;
+    setState(() => _exporting = true);
+    try {
+      const int cap = 5000;
+      final List<Map<String, dynamic>> all = <Map<String, dynamic>>[];
+      int? beforeId;
+      bool more = true;
+      while (more && all.length < cap) {
+        final Map<String, dynamic> p = _params(limit: 200);
+        if (beforeId != null) p['before_id'] = beforeId;
+        final Map<String, dynamic> r = await StockApi.call('audit.list', p);
+        final Object? raw = r['items'];
+        if (raw is! List || raw.isEmpty) break;
+        for (final x in raw) {
+          if (x is Map) {
+            final Map<String, dynamic> m = Map<String, dynamic>.from(x);
+            if (_textOk(m)) all.add(m);
+          }
+        }
+        beforeId = int.tryParse('${(raw.last as Map)['id']}');
+        more = r['has_more'] == true && beforeId != null;
+      }
+      if (all.isEmpty) {
+        if (mounted) snack(context, 'موردی برای خروجی نیست');
+        return;
+      }
+      final List<List<String>> rows = <List<String>>[
+        for (final it in all)
+          <String>[
+            '${it['id'] ?? ''}',
+            _when((it['created_at'] ?? '').toString()),
+            (it['staff_name'] ?? '').toString().isEmpty ? 'مالک' : it['staff_name'].toString(),
+            _kVerbFa[(it['action'] ?? '').toString()] ?? (it['action'] ?? '').toString(),
+            _entityFa((it['entity'] ?? '').toString()),
+            '${it['entity_id'] ?? ''}',
+            '${it['summary'] ?? ''}',
+            '${it['ip'] ?? ''}',
+          ],
+      ];
+      final f = await ExcelIo.exportTable(
+        columns: const <String>['ردیف', 'زمان', 'کاربر', 'عملیات', 'رکورد', 'شناسه', 'شرح', 'IP'],
+        rows: rows,
+        sheetName: 'ممیزی',
+        filePrefix: 'audit',
+      );
+      if (!mounted) return;
+      if (all.length >= cap) snack(context, 'فقط ۵۰۰۰ ردیف اول خروجی گرفته شد؛ بازه را کوچک‌تر کنید.');
+      await ExcelIo.saveOrShare(context, f);
+    } catch (e) {
+      if (mounted) snack(context, 'خطا در خروجی: ${e.toString().replaceFirst('Exception: ', '')}');
+    } finally {
+      if (mounted) setState(() => _exporting = false);
+    }
   }
 
   /// S31.T31.5b — audit.verify: recompute the sha1 hash chain server-side and show the result.
@@ -251,6 +351,31 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
             ],
           ),
           const SizedBox(height: 8),
+          Row(
+            children: <Widget>[
+              Expanded(
+                child: TextField(
+                  controller: _code,
+                  decoration: InputDecoration(
+                    labelText: 'کد پسته',
+                    isDense: true,
+                    suffixIcon: IconButton(icon: const Icon(Icons.search), onPressed: () => _load(reset: true)),
+                  ),
+                  onSubmitted: (_) => _load(reset: true),
+                ),
+              ),
+              const SizedBox(width: 8),
+              FilterChip(
+                label: const Text('پذیرش‌های اتاق انس'),
+                selected: _entity == 'intake',
+                onSelected: (bool v) {
+                  setState(() => _entity = v ? 'intake' : '');
+                  _load(reset: true);
+                },
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
           TextField(
             controller: _q,
             decoration: InputDecoration(
@@ -278,6 +403,8 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
       ),
     );
   }
+
+  List<Map<String, dynamic>> get _visible => _items.where(_textOk).toList();
 
   String _when(String ts) {
     if (ts.length < 16) return ts;
@@ -313,6 +440,11 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('گزارش ممیزی'), actions: <Widget>[
+        IconButton(
+          icon: _exporting ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.table_view_outlined),
+          tooltip: 'خروجی Excel (طبق فیلترهای فعلی)',
+          onPressed: _exporting ? null : _export,
+        ), // S6.T3
         IconButton(icon: const Icon(Icons.verified_user_outlined), tooltip: 'بررسی صحت زنجیرهٔ ممیزی', onPressed: _verifyChain), // S31.T31.5b
       ]),
       body: Column(
@@ -320,18 +452,18 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
           _filters(),
           if (_error != null) Padding(padding: const EdgeInsets.all(8), child: Text(_error!, style: const TextStyle(color: Colors.red))),
           Expanded(
-            child: _items.isEmpty && !_loading
+            child: _visible.isEmpty && !_loading
                 ? const Center(child: Text('موردی ثبت نشده است'))
                 : ListView.separated(
-                    itemCount: _items.length + 1,
+                    itemCount: _visible.length + 1,
                     separatorBuilder: (BuildContext c, int i) => const Divider(height: 1),
                     itemBuilder: (BuildContext c, int i) {
-                      if (i == _items.length) {
+                      if (i == _visible.length) {
                         if (_loading) return const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator()));
                         if (_hasMore) return TextButton(onPressed: () => _load(), child: const Text('بیشتر'));
                         return const SizedBox.shrink();
                       }
-                      final Map<String, dynamic> it = _items[i];
+                      final Map<String, dynamic> it = _visible[i];
                       final String who = (it['staff_name'] ?? '').toString().isEmpty ? 'مالک' : it['staff_name'].toString();
                       final String verb = _kVerbFa[(it['action'] ?? '').toString()] ?? (it['action'] ?? '').toString();
                       return ListTile(

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'conflict_ui.dart';
 import 'db.dart';
 import 'sync_service.dart';
+import 'sync_status_ui.dart';
 import 'utils.dart';
 import 'widgets.dart';
 
@@ -97,6 +98,8 @@ class _SyncScreenState extends State<SyncScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  const Align(alignment: AlignmentDirectional.centerStart, child: SyncStatusChip()), // S7
+                  const SizedBox(height: 8),
                   infoRow('حساب', AppDb.I.phone == null ? '-' : toFaDigits(AppDb.I.phone!)),
                   infoRow('آخرین همگام‌سازی', info.lastOk == null ? '-' : _time(info.lastOk!)),
                   infoRow('در انتظار ارسال', faNum(info.pending)),
@@ -124,7 +127,7 @@ class _SyncScreenState extends State<SyncScreen> {
               icon: (_busy || info.running)
                   ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.sync),
-              label: const Text('همگام‌سازی همین حالا'),
+              label: const Text('همگام‌سازی همین حالا (اختیاری؛ همگام‌سازی خودکار است)'),
             ),
             const SizedBox(height: 8),
             OutlinedButton.icon(

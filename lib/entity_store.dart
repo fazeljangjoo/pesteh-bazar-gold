@@ -7,7 +7,7 @@ import 'db.dart';
 
 /// Bump when [kEntityRegistry] changes in a way the server must know about (informational; the server
 /// stays the authority: only entities it exports/lists are shown, see [EntityStore.visibleNames]).
-const int kEntityRegistryVersion = 1;
+const int kEntityRegistryVersion = 2; // S5.T1: lot_intakes / lot_intake_pcts / pct_defs (اتاق انس)
 
 /// One field of an entity (mirrors a column spec of `server/backend/api/entities.php`).
 /// type: string | text | int | bigint | decimal | bool | date | datetime | enum | ref | json
@@ -324,6 +324,82 @@ const Map<String, EntitySpec> kEntityRegistry = <String, EntitySpec>{
     permEdit: 'dev_notes.edit',
     permDelete: 'dev_notes.delete',
   ),
+  // S5.T1 (mirror of server `lot_intakes`; فیلدهای server-only مثل status/code فقط نمایش‌اند)
+  'lot_intakes': EntitySpec(
+    'lot_intakes',
+    'پذیرش اتاق انس',
+    <EntityField>[
+      EntityField('category_id', 'دسته', 'int', vmin: 1),
+      EntityField('type_name', 'نوع', 'string', max: 120),
+      EntityField('gross_kg', 'وزن کل (کیلو)', 'decimal', scale: 3, vmin: 0, vmax: 100000000),
+      EntityField('small_sacks', 'گونی کوچک', 'int', vmin: 0, vmax: 1000000, defaultValue: 0),
+      EntityField('large_sacks', 'گونی بزرگ', 'int', vmin: 0, vmax: 1000000, defaultValue: 0),
+      EntityField('ounce', 'انس', 'decimal', scale: 3, vmin: 0, vmax: 100000),
+      EntityField('gram', 'گرم', 'decimal', scale: 3, vmin: 0, vmax: 100),
+      EntityField('owner_name', 'نام صاحب پسته', 'string', max: 150),
+      EntityField('is_sample', 'نمونه', 'bool', defaultValue: false),
+      EntityField('status', 'وضعیت', 'enum',
+          values: <String>['draft', 'submitted', 'confirmed', 'rejected', 'sample_only'],
+          valueLabels: <String, String>{
+            'draft': 'پیش‌نویس',
+            'submitted': 'ثبت‌شده',
+            'confirmed': 'قطعی‌شده',
+            'rejected': 'ردشده',
+            'sample_only': 'نمونه'
+          },
+          defaultValue: 'draft'),
+      EntityField('code', 'کد پسته', 'string', max: 40),
+      EntityField('note', 'یادداشت', 'string', max: 500),
+      EntityField('purchase_id', 'شناسهٔ خرید', 'bigint', vmin: 1),
+      EntityField('created_by_staff_id', 'ثبت‌کننده', 'int', vmin: 0),
+      EntityField('created_by_name', 'نام ثبت‌کننده', 'string', max: 120),
+      EntityField('confirmed_by_staff_id', 'قطعی‌کننده', 'int', vmin: 0),
+      EntityField('confirmed_by_name', 'نام قطعی‌کننده', 'string', max: 120),
+      EntityField('confirmed_at', 'زمان قطعی‌سازی', 'datetime'),
+      EntityField('submitted_at', 'زمان ثبت', 'datetime'),
+      EntityField('reject_reason', 'دلیل رد', 'string', max: 250),
+    ],
+    search: <String>['code', 'owner_name', 'type_name', 'note'],
+    listFields: <String>['code', 'owner_name', 'type_name', 'gross_kg'],
+    permCreate: 'ounce.intake',
+    permEdit: 'ounce.edit_own',
+    permDelete: 'ounce.edit_own',
+  ),
+  // S5.T1 (mirror of server `lot_intake_pcts`)
+  'lot_intake_pcts': EntitySpec(
+    'lot_intake_pcts',
+    'درصد پذیرش',
+    <EntityField>[
+      EntityField('intake_id', 'پذیرش', 'ref', ref: 'lot_intakes', required: true),
+      EntityField('def_key', 'نوع درصد', 'string', required: true, max: 32),
+      EntityField('pct', 'درصد', 'decimal', scale: 3, required: true, vmin: 0, vmax: 100),
+      EntityField('kernel_g', 'گرم مغز در ۱۰۰ گرم', 'decimal', scale: 3, vmin: 0, vmax: 100),
+    ],
+    search: <String>['def_key'],
+    listFields: <String>['def_key', 'pct'],
+    permCreate: 'ounce.intake',
+    permEdit: 'ounce.edit_own',
+    permDelete: 'ounce.edit_own',
+  ),
+  // S5.T1 (mirror of server `pct_defs`; خواندنی برای فرم — مدیریت آن در مرحلهٔ بعد)
+  'pct_defs': EntitySpec(
+    'pct_defs',
+    'تعریف درصد پذیرش',
+    <EntityField>[
+      EntityField('key', 'کلید', 'string', max: 32),
+      EntityField('label', 'عنوان', 'string', required: true, max: 80),
+      EntityField('active', 'فعال', 'bool', defaultValue: true),
+      EntityField('sort', 'ترتیب', 'int', vmin: 0, vmax: 100000),
+      EntityField('pricing_allowed', 'قابل قیمت‌گذاری', 'bool', defaultValue: false),
+    ],
+    search: <String>['key', 'label'],
+    listFields: <String>['label', 'key'],
+    orderCol: 'sort',
+    orderDesc: false,
+    permCreate: 'ounce.intake',
+    permEdit: 'intake.confirm',
+    permDelete: 'intake.confirm',
+  ),
 };
 
 /// Local mirror of generic entities (table `entity_rows`, one JSON blob per row) + offline queue hooks.
@@ -559,6 +635,27 @@ class EntityStore {
     AppDb.I.version.value++;
   }
 
+  /// S5.T1: ثبت نهایی پذیرش. کلاینت فقط uid می‌فرستد؛ کد را سرور می‌دهد (idempotent روی سرور).
+  /// ترتیب صف FIFO است، پس درصدهایی که قبلاً ذخیره شده‌اند قبل از این عملیات به سرور می‌رسند.
+  Future<void> submitIntake(String uid) async {
+    final d = await AppDb.I.db;
+    await d.transaction((t) async {
+      await AppDb.I.entityEnqueue(t, 'intake.submit', {'uid': uid});
+    });
+    AppDb.I.version.value++;
+  }
+
+  /// آیا `intake.submit` این پذیرش هنوز در صف ارسال است؟ (برای نمایش «در انتظار ارسال»)
+  Future<bool> isSubmitPending(String uid) async {
+    final d = await AppDb.I.db;
+    final r = await d.query('sync_ops',
+        columns: ['seq'],
+        where: "action='intake.submit' AND state='pending' AND payload LIKE ?",
+        whereArgs: ['%"uid":"$uid"%'],
+        limit: 1);
+    return r.isNotEmpty;
+  }
+
   Future<void> _upsertSaveOp(DatabaseExecutor t, String uid, Map<String, dynamic> payload) async {
     final ex = await t.query('sync_ops',
         columns: ['seq'],
@@ -612,8 +709,11 @@ class EntityStore {
       final rows = e.value;
       if (rows is! List) continue;
       final b = t.batch();
+      var maxRev = 0; // S7: مکان‌نمای دلتا = بیشترین rev دیده‌شده (حتی ردیف‌های حذف‌شده)
       for (final raw in rows) {
         if (raw is! Map) continue;
+        final rv = int.tryParse('${raw['rev']}') ?? 0;
+        if (rv > maxRev) maxRev = rv;
         final uid = raw['uid'];
         if (uid is! String || uid.isEmpty) continue;
         if (raw['deleted_at'] != null) continue; // soft-deleted on the server
@@ -634,8 +734,94 @@ class EntityStore {
             conflictAlgorithm: ConflictAlgorithm.replace);
       }
       await b.commit(noResult: true);
+      await t.insert('meta', {'k': '$_kCursorPrefix$name', 'v': '$maxRev'}, conflictAlgorithm: ConflictAlgorithm.replace);
     }
     await t.insert('meta', {'k': _kVisibleKey, 'v': jsonEncode(visible)}, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
+  // ======================= S7: دلتا (entity.changes) =======================
+
+  static const String _kCursorPrefix = 'ent_cur:';
+
+  /// آخرین `rev` سروری که برای این entity اعمال شده (برای `since_rev`). اگر نیست: بیشترین rev ردیف‌های محلی.
+  Future<int> cursorOf(String entity) async {
+    final raw = await AppDb.I.metaGet('$_kCursorPrefix$entity');
+    final v = int.tryParse(raw ?? '');
+    if (v != null) return v;
+    final d = await AppDb.I.db;
+    final r = await d.rawQuery('SELECT MAX(rev) AS m FROM $table WHERE entity=?', [entity]);
+    return r.isEmpty ? 0 : ((r.first['m'] as num?)?.toInt() ?? 0);
+  }
+
+  /// ردیف‌های تغییرکردهٔ سرور ([items] از `entity.changes`) را در آینهٔ محلی اعمال می‌کند:
+  /// حذف نرم ⇒ حذف محلی؛ در غیر این صورت جایگزینی (مگر ردیف محلی از نسخهٔ سرور جدیدتر باشد).
+  /// فقط وقتی صف ارسال خالی است صدا زده می‌شود (SyncService). مکان‌نما را تا [maxRev] جلو می‌برد.
+  Future<int> applyDelta(String entity, List<dynamic> items, int maxRev) async {
+    final spec = kEntityRegistry[entity];
+    if (spec == null) return 0;
+    final d = await AppDb.I.db;
+    var changed = 0;
+    await d.transaction((t) async {
+      var top = maxRev;
+      for (final raw in items) {
+        if (raw is! Map) continue;
+        final uid = raw['uid'];
+        if (uid is! String || uid.isEmpty) continue;
+        final rv = int.tryParse('${raw['rev']}') ?? 0;
+        if (rv > top) top = rv;
+        if (raw['deleted_at'] != null) {
+          changed += await t.delete(table, where: 'entity=? AND uid=?', whereArgs: [entity, uid]);
+          continue;
+        }
+        final ex = await t.query(table, columns: ['rev'], where: 'entity=? AND uid=?', whereArgs: [entity, uid], limit: 1);
+        if (ex.isNotEmpty && ((ex.first['rev'] as num?)?.toInt() ?? 0) > rv) continue; // محلیِ جدیدتر (تازه ذخیره‌شده)
+        final data = <String, dynamic>{};
+        for (final f in spec.fields) {
+          data[f.key] = _fromServer(f, raw[f.key]);
+        }
+        await t.insert(
+            table,
+            {
+              'entity': entity,
+              'uid': uid,
+              'rev': rv,
+              'data': jsonEncode(data),
+              'created_at': raw['created_at']?.toString(),
+              'updated_at': raw['updated_at']?.toString(),
+            },
+            conflictAlgorithm: ConflictAlgorithm.replace);
+        changed++;
+      }
+      await t.insert('meta', {'k': '$_kCursorPrefix$entity', 'v': '$top'}, conflictAlgorithm: ConflictAlgorithm.replace);
+    });
+    if (changed > 0) AppDb.I.version.value++;
+    return changed;
+  }
+
+  /// S6: یک ردیف تازه از پاسخ سرور (مثلاً `item` در `intake.confirm`) را فوراً در آینهٔ محلی جایگزین می‌کند
+  /// (بدون صف؛ سرور مرجع است). ردیف ناشناخته/بدون uid نادیده گرفته می‌شود.
+  Future<void> applyServerItem(String entity, Object? raw) async {
+    final spec = kEntityRegistry[entity];
+    if (spec == null || raw is! Map) return;
+    final uid = raw['uid'];
+    if (uid is! String || uid.isEmpty) return;
+    final d = await AppDb.I.db;
+    final data = <String, dynamic>{};
+    for (final f in spec.fields) {
+      data[f.key] = _fromServer(f, raw[f.key]);
+    }
+    await d.insert(
+        table,
+        {
+          'entity': entity,
+          'uid': uid,
+          'rev': int.tryParse('${raw['rev']}') ?? 0,
+          'data': jsonEncode(data),
+          'created_at': raw['created_at']?.toString(),
+          'updated_at': raw['updated_at']?.toString(),
+        },
+        conflictAlgorithm: ConflictAlgorithm.replace);
+    AppDb.I.version.value++;
   }
 
   /// Raw server value (PDO may give strings) -> typed client value.

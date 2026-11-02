@@ -3,6 +3,7 @@ import 'cheque_ui.dart';
 import 'payroll_ui.dart'; // T11.4
 import 'dart:async';
 import 'perms.dart'; // T02.2
+import 'ounce_room_shell.dart'; // S5.T4
 import 'staff_screens.dart'; // T02.2
 import 'audit_screen.dart'; // T02.3
 import 'data_health_screen.dart'; // T23.2
@@ -69,6 +70,7 @@ import 'reports_screen.dart';
 import 'sales_screen.dart';
 import 'subscription_screen.dart';
 import 'sync_service.dart';
+import 'sync_status_ui.dart'; // S7
 import 'error_monitor.dart';
 
 void main() {
@@ -149,7 +151,13 @@ class PestehApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       theme: Platform.isWindows ? buildDeskTheme() : ThemeData(colorSchemeSeed: const Color(0xFF5B7F2A), useMaterial3: true),
       builder: (context, child) {
-        final body = Directionality(textDirection: TextDirection.rtl, child: child!);
+        final body = Directionality(
+          textDirection: TextDirection.rtl,
+          child: Stack(children: <Widget>[
+            Positioned.fill(child: child!),
+            const Positioned(left: 0, right: 0, bottom: 72, child: Center(child: RemoteUpdateBanner())), // S7
+          ]),
+        );
         if (!Platform.isWindows) return body;
         // ویندوز: تمام‌صفحه؛ فقط اندازهٔ متن با Ctrl + / - قابل تنظیم است
         return ValueListenableBuilder<double>(
@@ -683,6 +691,17 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   Widget build(BuildContext context) {
+    // S5.T4: کارکن فقط «اتاق انس» → پوستهٔ پذیرش (بقیهٔ تب‌ها پنهان)
+    return ValueListenableBuilder<Map<String, dynamic>?>(
+      valueListenable: StaffPerms.I.current,
+      builder: (BuildContext c, Map<String, dynamic>? _, Widget? __) {
+        if (StaffPerms.I.isOunceRoomOnly) return const OunceRoomShell();
+        return _buildHome(context);
+      },
+    );
+  }
+
+  Widget _buildHome(BuildContext context) {
     if (!Platform.isWindows) return _buildMobile(context);
     return DeskShell(
       navKey: _deskNav,
