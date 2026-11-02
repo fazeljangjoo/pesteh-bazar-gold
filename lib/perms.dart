@@ -25,6 +25,15 @@ class StaffPerms {
     return p is List && p.contains(key);
   }
 
+  /// S5.T4: کارکنی که فقط مجوزهای نقش «اتاق انس» را دارد (مالک و کارکن با هر مجوز مالی، نه).
+  bool get isOunceRoomOnly {
+    final s = current.value;
+    if (s == null) return false;
+    final p = s['perms'];
+    if (p is! List || p.isEmpty) return false;
+    return p.every((e) => kOunceRoomPerms.contains(e));
+  }
+
   /// raw = Map کارکن از سرور، یا null برای مالک. روی دستگاه هم ذخیره می‌شود تا آفلاین همان بماند.
   Future<void> apply(dynamic raw) async {
     final Map<String, dynamic>? next = raw is Map ? Map<String, dynamic>.from(raw) : null;
@@ -55,6 +64,9 @@ class StaffPerms {
 
   Future<void> clear() => apply(null);
 }
+
+/// S5.T4: مجوزهای نقش «اتاق انس» (همان نقش سیستمی سرور در permissions.php).
+const Set<String> kOunceRoomPerms = <String>{'ounce.intake', 'ounce.view_own', 'ounce.edit_own', 'ounces.view'};
 
 /// برچسب فارسی هر کلید مجوز (ترتیب گروه‌بندی در صفحهٔ نقش‌ها هم از همین فهرست است).
 const Map<String, String> kPermLabels = <String, String>{
@@ -98,6 +110,13 @@ const Map<String, String> kPermLabels = <String, String>{
   'settings.manage': 'تنظیمات',
   'users.manage': 'مدیریت کارکنان و نقش‌ها',
   'audit.view': 'مشاهدهٔ گزارش ممیزی',
+  'ounce.intake': 'ثبت پذیرش پسته در اتاق انس',
+  'ounce.view_own': 'مشاهدهٔ پذیرش‌های خود (اتاق انس)',
+  'ounce.view_all': 'مشاهدهٔ همهٔ پذیرش‌های اتاق انس',
+  'ounce.edit_own': 'ویرایش پذیرش خود قبل از قطعی‌شدن',
+  'intake.confirm': 'قطعی‌سازی پذیرش و افزودن به موجودی',
+  'intake.price': 'ورود و مشاهدهٔ قیمت پذیرش',
+  'price.view': 'مشاهدهٔ قیمت‌ها و مبالغ',
 };
 
 /// عنوان گروه (پیشوند کلید) برای گروه‌بندی ماتریس مجوز.
@@ -119,4 +138,7 @@ const Map<String, String> kModuleLabels = <String, String>{
   'accounting': 'حسابداری',
   'settings': 'تنظیمات',
   'users': 'کاربران',
+  'ounce': 'اتاق انس',
+  'intake': 'پذیرش و قطعی‌سازی',
+  'price': 'قیمت',
 };

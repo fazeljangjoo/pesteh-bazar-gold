@@ -110,7 +110,7 @@ class _StaffUsersScreenState extends State<StaffUsersScreen> {
                   ),
                   title: Text((s['name'] ?? '').toString()),
                   subtitle: Text(
-                    '${s['username']} • نقش: ${s['role_name'] ?? '-'}${active ? '' : ' • غیرفعال'}',
+                    '${s['username']} • نقش: ${s['role_name'] ?? '-'}${(s['staff_code'] ?? '').toString().isNotEmpty ? ' • کد ${s['staff_code']}' : ''}${active ? '' : ' • غیرفعال'}',
                   ),
                   onTap: () => _openForm(s),
                 ),

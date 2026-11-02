@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import 'conflict_ui.dart';
 import 'db.dart';
 import 'sync_service.dart';
+import 'sync_status_ui.dart';
 import 'utils.dart';
 import 'widgets.dart';
 
@@ -65,10 +67,10 @@ class _SyncScreenState extends State<SyncScreen> {
   Future<void> _reload() async {
     final info = SyncService.I.info.value;
     final extra = (info.pending + info.failed) > 0
-        ? '\n\n⚠ ${faNum(info.pending + info.failed)} تغییر ارسال‌نشده روی این گوشی هست که از بین می‌رود.'
+        ? '\n\n⚠ ${faNum(info.pending + info.failed)} تغییر ارسال‌نشده روی این سیستم هست که از بین می‌رود.'
         : '';
     final ok = await confirm(
-        context, 'همهٔ اطلاعات این گوشی با اطلاعات ذخیره‌شده روی سرور جایگزین شود؟$extra\n\nادامه می‌دهید؟');
+        context, 'همهٔ اطلاعات این سیستم با اطلاعات ذخیره‌شده روی سرور جایگزین شود؟$extra\n\nادامه می‌دهید؟');
     if (!ok || !mounted) return;
     setState(() => _busy = true);
     final err = await SyncService.I.reloadFromServer();
@@ -96,12 +98,14 @@ class _SyncScreenState extends State<SyncScreen> {
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                  const Align(alignment: AlignmentDirectional.centerStart, child: SyncStatusChip()), // S7
+                  const SizedBox(height: 8),
                   infoRow('حساب', AppDb.I.phone == null ? '-' : toFaDigits(AppDb.I.phone!)),
                   infoRow('آخرین همگام‌سازی', info.lastOk == null ? '-' : _time(info.lastOk!)),
                   infoRow('در انتظار ارسال', faNum(info.pending)),
                   infoRow('خطادار', faNum(info.failed),
                       valueColor: info.failed > 0 ? Colors.red.shade800 : null),
-                  if (info.offline) infoRow('اینترنت', 'قطع (اطلاعات روی گوشی ذخیره است)'),
+                  if (info.offline) infoRow('اینترنت', 'قطع (اطلاعات روی سیستم ذخیره است)'),
                   if (info.error != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
@@ -112,7 +116,7 @@ class _SyncScreenState extends State<SyncScreen> {
             ),
             const SizedBox(height: 8),
             const Text(
-              'همهٔ اطلاعات شما هم روی گوشی و هم روی سرور نگه‌داری می‌شود. برنامه بدون اینترنت کار می‌کند '
+              'همهٔ اطلاعات شما هم روی سیستم و هم روی سرور نگه‌داری می‌شود. برنامه بدون اینترنت کار می‌کند '
               'و با وصل‌شدن اینترنت، تغییرات خودکار ارسال می‌شود. با همین شماره و کد پیامکی روی وب، اندروید '
               'یا ویندوز وارد شوید، همین اطلاعات را می‌بینید.',
               style: TextStyle(color: Colors.black54),
@@ -123,7 +127,7 @@ class _SyncScreenState extends State<SyncScreen> {
               icon: (_busy || info.running)
                   ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
                   : const Icon(Icons.sync),
-              label: const Text('همگام‌سازی همین حالا'),
+              label: const Text('همگام‌سازی همین حالا (اختیاری؛ همگام‌سازی خودکار است)'),
             ),
             const SizedBox(height: 8),
             OutlinedButton.icon(
@@ -143,6 +147,17 @@ class _SyncScreenState extends State<SyncScreen> {
                   ),
                 ),
               const SizedBox(height: 8),
+              FilledButton.icon(
+                onPressed: _busy
+                    ? null
+                    : () async {
+                        await Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const ConflictsScreen()));
+                        await _load();
+                      },
+                icon: const Icon(Icons.rule),
+                label: const Text('بررسی و حل تعارض (تک‌تک)'),
+              ),
+              const SizedBox(height: 8),
               OutlinedButton.icon(
                 onPressed: _busy ? null : _retry,
                 icon: const Icon(Icons.refresh),
@@ -150,7 +165,7 @@ class _SyncScreenState extends State<SyncScreen> {
               ),
               const SizedBox(height: 4),
               const Text(
-                'اگر خطا تکرار شد، «بازخوانی کامل از سرور» اطلاعات گوشی را با سرور یکی می‌کند '
+                'اگر خطا تکرار شد، «بازخوانی کامل از سرور» اطلاعات سیستم را با سرور یکی می‌کند '
                 '(تغییرات خطادار از بین می‌رود).',
                 style: TextStyle(color: Colors.black54),
               ),

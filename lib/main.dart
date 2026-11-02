@@ -3,10 +3,12 @@ import 'cheque_ui.dart';
 import 'payroll_ui.dart'; // T11.4
 import 'dart:async';
 import 'perms.dart'; // T02.2
+import 'ounce_room_shell.dart'; // S5.T4
 import 'staff_screens.dart'; // T02.2
 import 'audit_screen.dart'; // T02.3
 import 'data_health_screen.dart'; // T23.2
 import 'dart:io';
+import 'dart:ui' show PlatformDispatcher;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -17,6 +19,8 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'app_lock.dart';
 import 'backup_screen.dart';
 import 'due_alert.dart';
+import 'pay_approval_ui.dart' show PayApprovalNoticeHost; // S31.T31.3b
+import 'desktop_shell.dart';
 import 'edition.dart';
 import 'entity_screens.dart';
 import 'entity_store.dart';
@@ -39,6 +43,11 @@ import 'upgrade_ui.dart';
 import 'stock_count_ui.dart';
 import 'ledger_reports_ui.dart'; // S18.T18.1
 import 'trial_balance_ui.dart'; // S18.T18.2
+import 'bank_recon_ui.dart'; // S31.T31.1b
+import 'period_lock_ui.dart'; // S31.T31.2b
+import 'daily_recon_ui.dart'; // S31.T31.4b
+import 'lc_ui.dart'; // S31.T31.12b
+import 'kpi_ui.dart'; // S31.T31.13b
 import 'treasury_balances_ui.dart'; // S28.T28.1
 import 'statements_ui.dart'; // S18.T18.3
 import 'official_invoice.dart'; // S17.T17.3
@@ -61,6 +70,8 @@ import 'reports_screen.dart';
 import 'sales_screen.dart';
 import 'subscription_screen.dart';
 import 'sync_service.dart';
+import 'sync_status_ui.dart'; // S7
+import 'error_monitor.dart';
 
 void main() {
   // چترِ ایمنیِ سراسری: اگر جایی خطایی بدون try/catch رها شود (مثلاً یک استثنای
@@ -74,6 +85,11 @@ void main() {
     FlutterError.onError = (FlutterErrorDetails details) {
       FlutterError.presentError(details);
       debugPrint('FlutterError: ${details.exceptionAsString()}');
+      ErrorMonitor.I.record(details.exception, details.stack); // S31.T31.18
+    };
+    PlatformDispatcher.instance.onError = (Object error, StackTrace stack) {
+      ErrorMonitor.I.record(error, stack); // S31.T31.18
+      return true;
     };
 
     if (Platform.isWindows || Platform.isLinux) {
@@ -90,14 +106,17 @@ void main() {
       return;
     }
 
+    if (Platform.isWindows) await DeskPrefs.load();
     await AppLock.I.load();
     await NotifyService.I.init();
     // همگام‌سازی خودکار با سرور (ارسال تغییرات آفلاین + دریافت تغییرات سایر دستگاه‌ها)
     // نکته: یادآوری‌های سررسید بعد از ورود/باز شدن دیتابیس حساب در LicenseGate زمان‌بندی می‌شود.
     SyncService.I.start();
+    ErrorMonitor.I.start(); // S31.T31.18: batched error reports (fire and forget)
     runApp(const PestehApp());
   }, (error, stack) {
     debugPrint('Uncaught zone error: $error\n$stack');
+    ErrorMonitor.I.record(error, stack); // S31.T31.18
   });
 }
 
@@ -130,17 +149,26 @@ class PestehApp extends StatelessWidget {
     return MaterialApp(
       title: 'پسته بازار',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(colorSchemeSeed: const Color(0xFF5B7F2A), useMaterial3: true),
+      theme: Platform.isWindows ? buildDeskTheme() : ThemeData(colorSchemeSeed: const Color(0xFF5B7F2A), useMaterial3: true),
       builder: (context, child) {
-        final body = Directionality(textDirection: TextDirection.rtl, child: child!);
+        final body = Directionality(
+          textDirection: TextDirection.rtl,
+          child: Stack(children: <Widget>[
+            Positioned.fill(child: child!),
+            const Positioned(left: 0, right: 0, bottom: 72, child: Center(child: RemoteUpdateBanner())), // S7
+          ]),
+        );
         if (!Platform.isWindows) return body;
-        // ویندوز: صفحه‌ها برای عرض گوشی طراحی شده‌اند؛ روی مانیتور بزرگ وسط و با عرض مناسب نمایش داده می‌شوند
-        return ColoredBox(
-          color: const Color(0xFFE9EDE6),
-          child: Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 1280), child: body)),
+        // ویندوز: تمام‌صفحه؛ فقط اندازهٔ متن با Ctrl + / - قابل تنظیم است
+        return ValueListenableBuilder<double>(
+          valueListenable: DeskPrefs.zoom,
+          builder: (BuildContext c, double z, Widget? _) => MediaQuery(
+            data: MediaQuery.of(c).copyWith(textScaler: TextScaler.linear(z)),
+            child: body,
+          ),
         );
       },
-      home: const LicenseGate(child: RenewBannerHost(child: DueAlertHost(child: AppLockHost(child: HomeShell())))),
+      home: const LicenseGate(child: PayApprovalNoticeHost(child: RenewBannerHost(child: DueAlertHost(child: AppLockHost(child: HomeShell()))))),
     );
   }
 }
@@ -162,39 +190,50 @@ class _HomeShellState extends State<HomeShell> {
     InventoryScreen(),
   ];
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      key: _scaffoldKey,
-      body: IndexedStack(index: _i, children: _pages),
-      floatingActionButtonLocation: FloatingActionButtonLocation.startFloat,
-      floatingActionButton: FloatingActionButton.small(
-        heroTag: 'moreMenu',
-        tooltip: 'بیشتر (سررسید، طرف‌حساب، گزارش، اشتراک)',
-        onPressed: () => _scaffoldKey.currentState?.openDrawer(),
-        child: const Icon(Icons.menu),
-      ),
-      drawer: Drawer(
-        child: SafeArea(
-          child: ListView(
-            padding: EdgeInsets.zero,
-            children: [
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
-                child: Text('پسته بازار', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-              ),
-              const Padding(
-                padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
-                child: Align(alignment: AlignmentDirectional.centerStart, child: EditionBadge()),
-              ),
-              const Divider(height: 1),
+  // ---- ویندوز: منوی کناری ثابت + Navigator داخلی (منو همیشه دیده می‌شود) ----
+  final GlobalKey<NavigatorState> _deskNav = GlobalKey<NavigatorState>();
+
+  void _closeMenu(BuildContext c) {
+    if (Platform.isWindows) {
+      _deskNav.currentState?.popUntil((Route<dynamic> r) => r.isFirst);
+    } else {
+      Navigator.pop(c);
+    }
+  }
+
+  Future<T?> _push<T extends Object?>(BuildContext c, Route<T> r) {
+    if (Platform.isWindows && _deskNav.currentState != null) return _deskNav.currentState!.push<T>(r);
+    return Navigator.push<T>(c, r);
+  }
+
+  void _deskTab(int v) {
+    activeTab.value = v;
+    _deskNav.currentState?.popUntil((Route<dynamic> r) => r.isFirst);
+  }
+
+  /// فهرست منو (در سیستم داخل Drawer، در ویندوز داخل منوی کناری ثابت)
+  Widget _menuList(BuildContext context) {
+    return ListView(
+      padding: EdgeInsets.zero,
+      children: [
+              if (!Platform.isWindows) ...[
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Text('پسته بازار', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                ),
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: Align(alignment: AlignmentDirectional.centerStart, child: EditionBadge()),
+                ),
+                const Divider(height: 1),
+              ],
               if (StaffPerms.I.can('settings.manage'))
                 ListTile( // S35.T35.1
                   leading: const Icon(Icons.tune_outlined),
                   title: const Text('تنظیمات فرم‌ها'),
                   onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const FormSettingsScreen()));
+                    _closeMenu(context);
+                    _push(context, MaterialPageRoute<void>(builder: (_) => const FormSettingsScreen()));
                   },
                 ),
               if (StaffPerms.I.can('users.manage'))
@@ -202,8 +241,8 @@ class _HomeShellState extends State<HomeShell> {
                   leading: const Icon(Icons.manage_accounts_outlined),
                   title: const Text('کارکنان و نقش‌ها'),
                   onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => const StaffUsersScreen()));
+                    _closeMenu(context);
+                    _push(context, MaterialPageRoute(builder: (_) => const StaffUsersScreen()));
                   },
                 ),
               if (StaffPerms.I.can('audit.view'))
@@ -211,8 +250,8 @@ class _HomeShellState extends State<HomeShell> {
                   leading: const Icon(Icons.fact_check_outlined),
                   title: const Text('گزارش ممیزی'),
                   onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => const AuditLogScreen()));
+                    _closeMenu(context);
+                    _push(context, MaterialPageRoute(builder: (_) => const AuditLogScreen()));
                   },
                 ),
               if (StaffPerms.I.can('audit.view'))
@@ -220,16 +259,16 @@ class _HomeShellState extends State<HomeShell> {
                   leading: const Icon(Icons.health_and_safety_outlined),
                   title: const Text('سلامت داده‌ها'),
                   onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => const DataHealthScreen()));
+                    _closeMenu(context);
+                    _push(context, MaterialPageRoute(builder: (_) => const DataHealthScreen()));
                   },
                 ),
               ListTile(
                 leading: const Icon(Icons.event_note_outlined),
                 title: const Text('سررسیدها'),
                 onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const DuesScreen()));
+                  _closeMenu(context);
+                  _push(context, MaterialPageRoute(builder: (_) => const DuesScreen()));
                 },
               ),
               if (StaffPerms.I.can('payroll.view'))
@@ -237,16 +276,16 @@ class _HomeShellState extends State<HomeShell> {
                   leading: const Icon(Icons.payments_outlined),
                   title: const Text('حقوق و دستمزد'),
                   onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const PayrollHomeScreen()));
+                    _closeMenu(context);
+                    _push(context, MaterialPageRoute<void>(builder: (_) => const PayrollHomeScreen()));
                   },
                 ),
               ListTile(
                 leading: const Icon(Icons.people_alt_outlined),
                 title: const Text('طرف‌حساب‌ها'),
                 onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const PartiesScreen()));
+                  _closeMenu(context);
+                  _push(context, MaterialPageRoute(builder: (_) => const PartiesScreen()));
                 },
               ),
               // S00.T00.4 scaffold: generic entities the server exposes to this account (none for normal accounts)
@@ -262,9 +301,8 @@ class _HomeShellState extends State<HomeShell> {
                           leading: const Icon(Icons.list_alt_outlined),
                           title: Text(kEntityRegistry[n]?.label ?? n),
                           onTap: () {
-                            Navigator.pop(ctx);
-                            Navigator.push(
-                                ctx, MaterialPageRoute<void>(builder: (_) => EntityListScreen(entity: n)));
+                            _closeMenu(ctx);
+                            _push(ctx, MaterialPageRoute<void>(builder: (_) => EntityListScreen(entity: n)));
                           },
                         ),
                     ],
@@ -276,8 +314,8 @@ class _HomeShellState extends State<HomeShell> {
                   leading: const Icon(Icons.point_of_sale),
                   title: const Text('صندوق فروش (POS)'),
                   onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const PosScreen()));
+                    _closeMenu(context);
+                    _push(context, MaterialPageRoute<void>(builder: (_) => const PosScreen()));
                   },
                 ),
               if (StaffPerms.I.can('parties.create'))
@@ -285,15 +323,15 @@ class _HomeShellState extends State<HomeShell> {
                   leading: const Icon(Icons.upload_file),
                   title: const Text('ورود اطلاعات از اکسل'),
                   onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const ImportScreen()));
+                    _closeMenu(context);
+                    _push(context, MaterialPageRoute<void>(builder: (_) => const ImportScreen()));
                   },
                 ),
               ListTile(
                 leading: const Icon(Icons.print_outlined),
                 title: const Text('تنظیمات چاپ'),
                 onTap: () {
-                  Navigator.pop(context);
+                  _closeMenu(context);
                   showPrintSettings(context);
                 },
               ),
@@ -301,40 +339,40 @@ class _HomeShellState extends State<HomeShell> {
                 leading: const Icon(Icons.business_outlined),
                 title: const Text('مشخصات شرکت و قالب فاکتور'),
                 onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const CompanySettingsScreen()));
+                  _closeMenu(context);
+                  _push(context, MaterialPageRoute<void>(builder: (_) => const CompanySettingsScreen()));
                 },
               ),
               ListTile(
                 leading: const Icon(Icons.request_quote_outlined),
                 title: const Text('پیش‌فاکتورها'),
                 onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const ProformaListScreen()));
+                  _closeMenu(context);
+                  _push(context, MaterialPageRoute<void>(builder: (_) => const ProformaListScreen()));
                 },
               ),
               ListTile(
                 leading: const Icon(Icons.receipt_outlined),
                 title: const Text('مدیریت چک'),
                 onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const ChequeListScreen()));
+                  _closeMenu(context);
+                  _push(context, MaterialPageRoute<void>(builder: (_) => const ChequeListScreen()));
                 },
               ),
               ListTile(
                 leading: const Icon(Icons.handshake_outlined),
                 title: const Text('دلال‌ها و کمیسیون'),
                 onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const BrokerScreen()));
+                  _closeMenu(context);
+                  _push(context, MaterialPageRoute<void>(builder: (_) => const BrokerScreen()));
                 },
               ),
               ListTile(
                 leading: const Icon(Icons.assignment_return_outlined),
                 title: const Text('برگشت‌ها'),
                 onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const ReturnsListScreen()));
+                  _closeMenu(context);
+                  _push(context, MaterialPageRoute<void>(builder: (_) => const ReturnsListScreen()));
                 },
               ),
               if (StaffPerms.I.can('stock.view'))
@@ -342,24 +380,24 @@ class _HomeShellState extends State<HomeShell> {
                   leading: const Icon(Icons.inventory_2_outlined),
                   title: const Text('انبارگردانی'),
                   onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const StockCountListScreen()));
+                    _closeMenu(context);
+                    _push(context, MaterialPageRoute<void>(builder: (_) => const StockCountListScreen()));
                   },
                 ),
               ListTile(
                 leading: const Icon(Icons.swap_horiz),
                 title: const Text('انتقال بین انبارها'),
                 onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const StockTransferScreen()));
+                  _closeMenu(context);
+                  _push(context, MaterialPageRoute<void>(builder: (_) => const StockTransferScreen()));
                 },
               ),
               ListTile(
                 leading: const Icon(Icons.assessment_outlined),
                 title: const Text('گزارش سود و زیان'),
                 onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const ReportsScreen()));
+                  _closeMenu(context);
+                  _push(context, MaterialPageRoute(builder: (_) => const ReportsScreen()));
                 },
               ),
               if (Platform.isWindows) ...[
@@ -368,16 +406,16 @@ class _HomeShellState extends State<HomeShell> {
                   leading: const Icon(Icons.backup_outlined),
                   title: const Text('پشتیبان‌گیری'),
                   onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => const BackupScreen()));
+                    _closeMenu(context);
+                    _push(context, MaterialPageRoute(builder: (_) => const BackupScreen()));
                   },
                 ),
                 ListTile(
                   leading: const Icon(Icons.lock_outline),
                   title: const Text('قفل برنامه'),
                   onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute(builder: (_) => const SecurityScreen()));
+                    _closeMenu(context);
+                    _push(context, MaterialPageRoute(builder: (_) => const SecurityScreen()));
                   },
                 ),
               ],
@@ -387,8 +425,8 @@ class _HomeShellState extends State<HomeShell> {
                   leading: const Icon(Icons.currency_exchange_outlined),
                   title: const Text('ارزها'),
                   onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const FxCurrenciesScreen()));
+                    _closeMenu(context);
+                    _push(context, MaterialPageRoute<void>(builder: (_) => const FxCurrenciesScreen()));
                   },
                 ),
               ),
@@ -398,8 +436,8 @@ class _HomeShellState extends State<HomeShell> {
                   leading: const Icon(Icons.trending_up_outlined),
                   title: const Text('نرخ روزانه ارز'),
                   onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const FxRatesScreen()));
+                    _closeMenu(context);
+                    _push(context, MaterialPageRoute<void>(builder: (_) => const FxRatesScreen()));
                   },
                 ),
               ),
@@ -409,8 +447,8 @@ class _HomeShellState extends State<HomeShell> {
                   leading: const Icon(Icons.compare_arrows_outlined),
                   title: const Text('مغایرت نرخ اسناد ارزی'),
                   onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const FxMismatchScreen()));
+                    _closeMenu(context);
+                    _push(context, MaterialPageRoute<void>(builder: (_) => const FxMismatchScreen()));
                   },
                 ),
               ),
@@ -420,8 +458,8 @@ class _HomeShellState extends State<HomeShell> {
                   leading: const Icon(Icons.account_tree_outlined),
                   title: const Text('سرفصل حساب‌ها'),
                   onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const AccountsScreen()));
+                    _closeMenu(context);
+                    _push(context, MaterialPageRoute<void>(builder: (_) => const AccountsScreen()));
                   },
                 ),
               ),
@@ -431,8 +469,8 @@ class _HomeShellState extends State<HomeShell> {
                   leading: const Icon(Icons.receipt_long_outlined),
                   title: const Text('اسناد حسابداری'),
                   onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const VouchersScreen()));
+                    _closeMenu(context);
+                    _push(context, MaterialPageRoute<void>(builder: (_) => const VouchersScreen()));
                   },
                 ),
               ),
@@ -443,8 +481,8 @@ class _HomeShellState extends State<HomeShell> {
                     leading: const Icon(Icons.assessment_outlined),
                     title: const Text('سود و زیان، ترازنامه، مراکز هزینه'),
                     onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const StatementsScreen()));
+                      _closeMenu(context);
+                      _push(context, MaterialPageRoute<void>(builder: (_) => const StatementsScreen()));
                     },
                   ),
                 ),
@@ -455,8 +493,62 @@ class _HomeShellState extends State<HomeShell> {
                     leading: const Icon(Icons.balance_outlined),
                     title: const Text('تراز آزمایشی'),
                     onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const TrialBalanceScreen()));
+                      _closeMenu(context);
+                      _push(context, MaterialPageRoute<void>(builder: (_) => const TrialBalanceScreen()));
+                    },
+                  ),
+                ),
+              if (StaffPerms.I.can('accounting.view'))
+                FeatureGate(
+                  feature: 'gold.treasury',
+                  child: ListTile(
+                    leading: const Icon(Icons.fact_check_outlined),
+                    title: const Text('داشبورد تطبیق روزانه'),
+                    onTap: () {
+                      _closeMenu(context);
+                      _push(context, MaterialPageRoute<void>(builder: (_) => const DailyReconScreen()));
+                    },
+                  ),
+                ),
+              if (EditionService.I.edition.isFx && StaffPerms.I.can('sales.view'))
+                ListTile(
+                  leading: const Icon(Icons.description_outlined),
+                  title: const Text('اعتبارات اسنادی'),
+                  onTap: () {
+                    _closeMenu(context);
+                    _push(context, MaterialPageRoute<void>(builder: (_) => const LcListScreen()));
+                  },
+                ),
+              if (StaffPerms.I.can('reports.view'))
+                ListTile(
+                  leading: const Icon(Icons.speed_outlined),
+                  title: const Text('داشبورد KPI'),
+                  onTap: () {
+                    _closeMenu(context);
+                    _push(context, MaterialPageRoute<void>(builder: (_) => const KpiDashboardScreen()));
+                  },
+                ),
+              if (StaffPerms.I.can('accounting.view'))
+                FeatureGate(
+                  feature: 'gold.treasury',
+                  child: ListTile(
+                    leading: const Icon(Icons.account_balance_outlined),
+                    title: const Text('مغایرت‌گیری بانکی'),
+                    onTap: () {
+                      _closeMenu(context);
+                      _push(context, MaterialPageRoute<void>(builder: (_) => const BankReconScreen()));
+                    },
+                  ),
+                ),
+              if (StaffPerms.I.can('accounting.view'))
+                FeatureGate(
+                  feature: 'gold.vouchers',
+                  child: ListTile(
+                    leading: const Icon(Icons.lock_clock_outlined),
+                    title: const Text('قفل دوره ماهانه'),
+                    onTap: () {
+                      _closeMenu(context);
+                      _push(context, MaterialPageRoute<void>(builder: (_) => const PeriodLockScreen()));
                     },
                   ),
                 ),
@@ -467,8 +559,8 @@ class _HomeShellState extends State<HomeShell> {
                     leading: const Icon(Icons.account_balance_wallet_outlined),
                     title: const Text('موجودی صندوق و بانک'),
                     onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const TreasuryBalancesScreen()));
+                      _closeMenu(context);
+                      _push(context, MaterialPageRoute<void>(builder: (_) => const TreasuryBalancesScreen()));
                     },
                   ),
                 ),
@@ -479,8 +571,8 @@ class _HomeShellState extends State<HomeShell> {
                     leading: const Icon(Icons.menu_book_outlined),
                     title: const Text('روزنامه، کل، معین و تفصیلی'),
                     onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const LedgerReportsScreen()));
+                      _closeMenu(context);
+                      _push(context, MaterialPageRoute<void>(builder: (_) => const LedgerReportsScreen()));
                     },
                   ),
                 ),
@@ -491,8 +583,8 @@ class _HomeShellState extends State<HomeShell> {
                     leading: const Icon(Icons.event_available_outlined),
                     title: const Text('پایان سال مالی'),
                     onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const FyCloseScreen()));
+                      _closeMenu(context);
+                      _push(context, MaterialPageRoute<void>(builder: (_) => const FyCloseScreen()));
                     },
                   ),
                 ),
@@ -503,8 +595,8 @@ class _HomeShellState extends State<HomeShell> {
                     leading: const Icon(Icons.checklist_rtl),
                     title: const Text('ویزارد پایان سال'),
                     onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const FyWizardScreen()));
+                      _closeMenu(context);
+                      _push(context, MaterialPageRoute<void>(builder: (_) => const FyWizardScreen()));
                     },
                   ),
                 ),
@@ -519,8 +611,8 @@ class _HomeShellState extends State<HomeShell> {
                         leading: const Icon(Icons.workspace_premium_outlined),
                         title: Text(ed.isGold ? 'گزارش ارتقا به طلایی' : 'ارتقا به نسخهٔ طلایی'),
                         onTap: () {
-                          Navigator.pop(context);
-                          Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const UpgradeScreen()));
+                          _closeMenu(context);
+                          _push(context, MaterialPageRoute<void>(builder: (_) => const UpgradeScreen()));
                         },
                       );
                     },
@@ -533,8 +625,8 @@ class _HomeShellState extends State<HomeShell> {
                     leading: const Icon(Icons.import_contacts_outlined),
                     title: const Text('دفاتر الکترونیک'),
                     onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const EBooksScreen()));
+                      _closeMenu(context);
+                      _push(context, MaterialPageRoute<void>(builder: (_) => const EBooksScreen()));
                     },
                   ),
                 ),
@@ -544,8 +636,8 @@ class _HomeShellState extends State<HomeShell> {
                   leading: const Icon(Icons.fact_check_outlined),
                   title: const Text('کنترل صحت حسابداری'),
                   onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const IntegrityScreen()));
+                    _closeMenu(context);
+                    _push(context, MaterialPageRoute<void>(builder: (_) => const IntegrityScreen()));
                   },
                 ),
               ),
@@ -556,8 +648,8 @@ class _HomeShellState extends State<HomeShell> {
                     leading: const Icon(Icons.percent),
                     title: const Text('گزارش مالیات بر ارزش افزوده'),
                     onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const VatReportScreen()));
+                      _closeMenu(context);
+                      _push(context, MaterialPageRoute<void>(builder: (_) => const VatReportScreen()));
                     },
                   ),
                 ),
@@ -568,8 +660,8 @@ class _HomeShellState extends State<HomeShell> {
                     leading: const Icon(Icons.request_quote_outlined),
                     title: const Text('فاکتور رسمی فروش'),
                     onTap: () {
-                      Navigator.pop(context);
-                      Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const OfficialInvoicesScreen()));
+                      _closeMenu(context);
+                      _push(context, MaterialPageRoute<void>(builder: (_) => const OfficialInvoicesScreen()));
                     },
                   ),
                 ),
@@ -579,8 +671,8 @@ class _HomeShellState extends State<HomeShell> {
                   leading: const Icon(Icons.calendar_month),
                   title: const Text('سال مالی و مالیات'),
                   onTap: () {
-                    Navigator.pop(context);
-                    Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const FiscalSettingsScreen()));
+                    _closeMenu(context);
+                    _push(context, MaterialPageRoute<void>(builder: (_) => const FiscalSettingsScreen()));
                   },
                 ),
               ),
@@ -589,13 +681,59 @@ class _HomeShellState extends State<HomeShell> {
                 leading: const Icon(Icons.verified_user_outlined),
                 title: const Text('اشتراک من'),
                 onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(
-                      context, MaterialPageRoute(builder: (_) => const SubscriptionScreen()));
+                  _closeMenu(context);
+                  _push(context, MaterialPageRoute(builder: (_) => const SubscriptionScreen()));
                 },
               ),
-            ],
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // S5.T4: کارکن فقط «اتاق انس» → پوستهٔ پذیرش (بقیهٔ تب‌ها پنهان)
+    return ValueListenableBuilder<Map<String, dynamic>?>(
+      valueListenable: StaffPerms.I.current,
+      builder: (BuildContext c, Map<String, dynamic>? _, Widget? __) {
+        if (StaffPerms.I.isOunceRoomOnly) return const OunceRoomShell();
+        return _buildHome(context);
+      },
+    );
+  }
+
+  Widget _buildHome(BuildContext context) {
+    if (!Platform.isWindows) return _buildMobile(context);
+    return DeskShell(
+      navKey: _deskNav,
+      menu: _menuList(context),
+      onTab: _deskTab,
+      content: Navigator(
+        key: _deskNav,
+        onGenerateRoute: (RouteSettings st) => MaterialPageRoute<void>(
+          settings: st,
+          builder: (_) => ValueListenableBuilder<int>(
+            valueListenable: activeTab,
+            builder: (BuildContext c, int v, Widget? _) => IndexedStack(index: v, children: _pages),
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMobile(BuildContext context) {
+    return Scaffold(
+      key: _scaffoldKey,
+      body: IndexedStack(index: _i, children: _pages),
+      floatingActionButtonLocation: FloatingActionButtonLocation.startFloat,
+      floatingActionButton: FloatingActionButton.small(
+        heroTag: 'moreMenu',
+        tooltip: 'بیشتر (سررسید، طرف‌حساب، گزارش، اشتراک)',
+        onPressed: () => _scaffoldKey.currentState?.openDrawer(),
+        child: const Icon(Icons.menu),
+      ),
+      drawer: Drawer(
+        child: SafeArea(
+          child: _menuList(context),
         ),
       ),
       bottomNavigationBar: NavigationBar(

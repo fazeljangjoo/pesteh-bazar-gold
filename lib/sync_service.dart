@@ -1,8 +1,10 @@
+import 'pay_approval_ui.dart' show PayApprovalNotice; // S31.T31.3b
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show AppLifecycleState, WidgetsBinding, WidgetsBindingObserver, WidgetsFlutterBinding;
 import 'package:http/http.dart' as http;
 
 import 'db.dart';
@@ -11,6 +13,7 @@ import 'fx_local.dart';
 import 'license_service.dart';
 import 'money_unit.dart'; // S29.T29.3
 import 'local_backup.dart';
+import 'sync_plan.dart'; // S7
 
 /// وضعیت همگام‌سازی برای نمایش در صفحه‌ها
 class SyncInfo {
@@ -28,6 +31,31 @@ class SyncInfo {
     this.error,
     this.lastOk,
   });
+
+  /// S7: نشانگر وضعیت کاربر
+  SyncStatus get status => offline
+      ? SyncStatus.offline
+      : (running || pending > 0)
+          ? SyncStatus.syncing
+          : SyncStatus.synced;
+}
+
+/// S7: «همگام / در حال همگام‌سازی / آفلاین»
+enum SyncStatus { synced, syncing, offline }
+
+class _Life with WidgetsBindingObserver {
+  final void Function(AppLifecycleState) cb;
+  _Life(this.cb);
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) => cb(state);
+}
+
+class _PingResult {
+  final int ver;
+  final int pollSec;
+  final List<SyncChange> changes;
+  final bool reset;
+  _PingResult(this.ver, this.pollSec, this.changes, this.reset);
 }
 
 class _Unresolved implements Exception {
@@ -68,8 +96,28 @@ class SyncService {
   // آخرین تغییر محلی/ارسال موفق؛ تا ۹۰ ثانیه بعدش دریافتِ خودکار از سرور انجام نمی‌شود
   DateTime _lastActivity = DateTime.fromMillisecondsSinceEpoch(0);
 
-  static const _pullEvery = Duration(minutes: 3);
+  // ---- S7: همگام‌سازی لحظه‌ای (poll سبک + دلتا) ----
+  /// «به‌روزرسانی جدید» از دستگاه دیگر آمده ولی چون فرمی باز است هنوز اعمال نشده (نوار «اعمال»)
+  final ValueNotifier<bool> remotePending = ValueNotifier<bool>(false);
+
+  int? _ver; // آخرین ver سرور که کاملاً اعمال شده (مبنای since_ver)
+  String? _verPhone;
+  int _pollSec = 4;
+  Timer? _pollTimer;
+  Timer? _pendingWatch;
+  bool _polling = false;
+  bool _fg = true;
+  int _fail = 0;
+  bool _pingOk = true; // sync_ping.php در دسترس است؛ وگرنه از app.php `sync.version`
+  bool _rtSupported = true; // سرور sync.* را می‌شناسد؛ وگرنه روش قدیمی (دریافت هر ۳ دقیقه)
+  bool _applyingRemote = false;
+  _Life? _life;
+  DateTime _lastFullPull = DateTime.fromMillisecondsSinceEpoch(0);
+  final List<(String, DateTime)> _own = <(String, DateTime)>[]; // اکشن‌های ارسال‌شدهٔ همین دستگاه
+
   static const _settle = Duration(seconds: 90);
+  static const _minFullGap = Duration(seconds: 8); // حداقل فاصلهٔ دو دریافت کاملِ خودکار
+  Duration get _pullEvery => (_rtSupported && _fail == 0) ? const Duration(minutes: 10) : const Duration(minutes: 3);
 
   String get _url => '${ApiConfig.baseUrl}/app.php';
 
@@ -78,15 +126,27 @@ class SyncService {
     if (_started) return;
     _started = true;
     AppDb.I.version.addListener(_onChanged);
-    _tick = Timer.periodic(const Duration(seconds: 30), (_) => syncNow());
+    _tick = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (_fg) syncNow();
+    });
+    // S7: چرخهٔ حیات (توقف در پس‌زمینه، poll فوری هنگام بازگشت)
+    try {
+      WidgetsFlutterBinding.ensureInitialized();
+      _life = _Life(_onLifecycle);
+      WidgetsBinding.instance.addObserver(_life!);
+    } catch (_) {}
+    _schedulePoll(const Duration(seconds: 2));
   }
 
   void stop() {
     _debounce?.cancel();
+    _pollTimer?.cancel();
+    _pendingWatch?.cancel();
   }
 
   void _onChanged() {
     if (!AppDb.I.hasAccount) return;
+    if (_applyingRemote) return; // تغییرِ ناشی از دریافت، «فعالیت کاربر» نیست
     _lastActivity = DateTime.now();
     _refreshCounts();
     _debounce?.cancel();
@@ -150,6 +210,7 @@ class SyncService {
     // تا وقتی فرم/صفحهٔ ثبتی باز است دریافت از سرور انجام نمی‌شود (شناسه‌ها زیر دست کاربر عوض نشوند)
     if (p == 0 && f == 0 && !AppDb.I.isEditing && (pull == true || (pull == null && due && settled))) {
       _lastPullTry = DateTime.now();
+      _lastFullPull = _lastPullTry;
       await _pull(cred.$1, cred.$2);
     }
     // S27c: کش ارز/نرخ (پلن ارزی) مستقل از وضعیت صف تازه می‌شود تا سند «نرخ ثبت نشده» بعد از ثبت نرخ دوباره ارسال شود
@@ -159,6 +220,253 @@ class SyncService {
     }
     _error = null;
     _lastOk = DateTime.now();
+  }
+
+  // ======================= S7: همگام‌سازی لحظه‌ای =======================
+  // هاست cPanel ⇒ بدون WebSocket. هر `poll_interval` ثانیه (پیش‌فرض ۴) یک ping سبک (`sync_ping.php`) می‌زنیم؛
+  // اگر ver عوض شده بود فهرست تغییرات می‌آید: entityها دلتا (`entity.changes`)، سایر نواحی دریافت کامل.
+  // قواعد: ۱) صف ارسال همیشه قبل از دریافت ۲) وسط ویرایش فرم، تغییر منتظر می‌ماند (نوار «اعمال») ۳) در پس‌زمینه poll نیست.
+
+  void _onLifecycle(AppLifecycleState s) {
+    final bg = s == AppLifecycleState.paused || s == AppLifecycleState.hidden || s == AppLifecycleState.detached;
+    if (bg) {
+      _fg = false;
+      _pollTimer?.cancel();
+    } else if (!_fg) {
+      _fg = true;
+      _fail = 0;
+      _schedulePoll(Duration.zero); // بازگشت به foreground = poll فوری
+      syncNow(pull: false);
+    }
+  }
+
+  void _schedulePoll(Duration d) {
+    _pollTimer?.cancel();
+    if (!_fg || !_rtSupported) return;
+    _pollTimer = Timer(d, _pollOnce);
+  }
+
+  /// دکمهٔ «اعمال» نوار به‌روزرسانی / فراخوانی دستی: همین حالا poll کن
+  Future<void> pollNow() async {
+    _fail = 0;
+    _pollTimer?.cancel();
+    await _pollOnce();
+  }
+
+  Future<void> _loadVer() async {
+    final ph = AppDb.I.phone;
+    if (_ver != null && _verPhone == ph) return;
+    _ver = null;
+    _verPhone = ph;
+    final raw = await AppDb.I.metaGet('sync_ver'); // «phone:ver»
+    if (raw == null) return;
+    final i = raw.lastIndexOf(':');
+    if (i <= 0 || raw.substring(0, i) != ph) return;
+    _ver = int.tryParse(raw.substring(i + 1));
+  }
+
+  Future<void> _setVer(int v) async {
+    _ver = v;
+    _verPhone = AppDb.I.phone;
+    try {
+      await AppDb.I.metaSet('sync_ver', '${AppDb.I.phone}:$v');
+    } catch (_) {}
+  }
+
+  Future<_PingResult> _ping(String phone, String token, int? since) async {
+    if (_pingOk) {
+      final resp = await http
+          .post(Uri.parse('${ApiConfig.baseUrl}/sync_ping.php'),
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode({'phone': phone, 'token': token, if (since != null) 'since_ver': since}))
+          .timeout(const Duration(seconds: 10));
+      if (resp.statusCode == 404 || resp.statusCode == 405) {
+        _pingOk = false; // سرور endpoint سبک را ندارد ⇒ از app.php
+      } else {
+        Map<String, dynamic>? j;
+        try {
+          final d = jsonDecode(utf8.decode(resp.bodyBytes));
+          if (d is Map<String, dynamic>) j = d;
+        } catch (_) {}
+        return _parsePing(_ApiResult(resp.statusCode, j), viaApp: false);
+      }
+    }
+    return _parsePing(await _call(phone, token, 'sync.version', {if (since != null) 'since_ver': since}, timeoutSec: 10), viaApp: true);
+  }
+
+  _PingResult _parsePing(_ApiResult r, {required bool viaApp}) {
+    if (r.code == 401) {
+      LicenseService.I.sessionInvalid.value++; // LicenseGate وضعیت را دوباره بررسی می‌کند
+      throw _ServerError('نشست ورود منقضی شده', 401);
+    }
+    if (r.code == 403) throw _ServerError(r.error, 403);
+    if (viaApp && (r.code == 400 || r.code == 404)) {
+      // سرور قدیمی: اکشن sync.version را نمی‌شناسد ⇒ حالت قدیمی (دریافت دوره‌ای)
+      _rtSupported = false;
+      throw _ServerError('همگام‌سازی لحظه‌ای روی سرور نیست', r.code);
+    }
+    final d = r.data;
+    if (r.code != 200 || d == null || d['ver'] == null) throw _ServerError(r.error, r.code);
+    final ch = <SyncChange>[];
+    final raw = d['changes'];
+    if (raw is List) {
+      for (final e in raw) {
+        if (e is Map) ch.add(SyncChange.fromJson(e));
+      }
+    }
+    return _PingResult(int.tryParse('${d['ver']}') ?? 0, int.tryParse('${d['poll_interval']}') ?? _pollSec, ch, d['reset'] == true);
+  }
+
+  Future<void> _pollOnce() async {
+    if (_polling) return;
+    _polling = true;
+    try {
+      if (!AppDb.I.hasAccount) return;
+      final cred = await LicenseService.I.credentials();
+      if (cred == null) return;
+      await _loadVer();
+      final (p0, _) = await AppDb.I.queueCounts();
+      if (p0 > 0 && !_running) unawaited(syncNow(pull: false)); // صف ارسال همیشه قبل از دریافت
+      final r = await _ping(cred.$1, cred.$2, _ver);
+      _pollSec = r.pollSec < 2 ? 2 : (r.pollSec > 60 ? 60 : r.pollSec);
+      if (_fail > 0 || _offline) {
+        // آفلاین → آنلاین: اول ارسال صف، بعد دریافت
+        _fail = 0;
+        if (_offline) {
+          _offline = false;
+          _emit();
+          unawaited(syncNow(pull: false));
+        }
+      }
+      await _decide(cred.$1, cred.$2, r);
+    } catch (e) {
+      _fail++;
+      if (e is SocketException || e is TimeoutException || e is http.ClientException) {
+        if (!_offline) {
+          _offline = true;
+          _emit();
+        }
+      }
+    } finally {
+      _polling = false;
+      if (_rtSupported) {
+        _schedulePoll(Duration(seconds: SyncPlanner.nextDelaySec(pollSec: _pollSec, failStreak: _fail)));
+      }
+    }
+  }
+
+  Future<void> _decide(String phone, String token, _PingResult r) async {
+    final base = _ver;
+    if (base == r.ver && !r.reset) {
+      if (remotePending.value && !AppDb.I.isEditing) remotePending.value = false;
+      return; // بدون تغییر
+    }
+    _own.removeWhere((e) => DateTime.now().difference(e.$2) > const Duration(minutes: 2));
+    final known = (await EntityStore.I.visibleNames()).toSet();
+    final plan = base == null
+        ? const SyncPlan(entities: <String>{}, fullPull: true, consumedOwn: <String>[], foreignCount: 0) // مبنا نداریم ⇒ کامل
+        : SyncPlanner.plan(
+            changes: r.changes,
+            reset: r.reset,
+            ownKeys: _own.map((e) => e.$1).toList(),
+            isKnownEntity: known.contains,
+          );
+    if (!plan.hasWork) {
+      // همهٔ تغییرات مالِ همین دستگاه بود (یا برای این اپ بی‌اهمیت): فقط مبنا جلو می‌رود
+      for (final k in plan.consumedOwn) {
+        final i = _own.indexWhere((e) => e.$1 == k);
+        if (i >= 0) _own.removeAt(i);
+      }
+      await _setVer(r.ver);
+      if (remotePending.value && !AppDb.I.isEditing) remotePending.value = false;
+      return;
+    }
+    // --- تغییر واقعی از دستگاه دیگر ---
+    final (p, f) = await AppDb.I.queueCounts();
+    if (AppDb.I.isEditing) {
+      _setPending(true); // هیچ‌وقت فرم در حال تایپ دست نمی‌خورد؛ بعد از بستن فرم خودکار اعمال می‌شود
+      return;
+    }
+    if (p > 0 || f > 0 || _running) return; // ارسال صف اول؛ poll بعدی دوباره تصمیم می‌گیرد
+    if (plan.fullPull && DateTime.now().difference(_lastFullPull) < _minFullGap) return; // کنترل بار
+    await _apply(phone, token, plan, r.ver);
+  }
+
+  void _setPending(bool v) {
+    if (remotePending.value != v) remotePending.value = v;
+    if (v) {
+      _pendingWatch ??= Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!AppDb.I.isEditing) {
+          _pendingWatch?.cancel();
+          _pendingWatch = null;
+          unawaited(pollNow()); // فرم بسته شد ⇒ فوراً اعمال
+        }
+      });
+    } else {
+      _pendingWatch?.cancel();
+      _pendingWatch = null;
+    }
+  }
+
+  Future<void> _apply(String phone, String token, SyncPlan plan, int newVer) async {
+    _running = true;
+    _applyingRemote = true;
+    _emit();
+    try {
+      var ok = true;
+      var full = plan.fullPull;
+      if (!full) {
+        for (final e in plan.entities) {
+          if (!await _pullEntity(phone, token, e)) {
+            full = true; // صفحه‌های زیاد/خطا ⇒ دریافت کامل
+            break;
+          }
+        }
+      }
+      if (full) {
+        _lastFullPull = DateTime.now();
+        ok = await _pull(phone, token, baselineVer: newVer); // _pull خودش مبنا را ثبت می‌کند
+      } else {
+        await _setVer(newVer);
+        for (final k in plan.consumedOwn) {
+          final i = _own.indexWhere((e) => e.$1 == k);
+          if (i >= 0) _own.removeAt(i);
+        }
+      }
+      if (ok) {
+        _setPending(false);
+        _error = null;
+        _lastOk = DateTime.now();
+      }
+    } catch (e) {
+      _error = _friendly(e);
+      rethrow;
+    } finally {
+      _applyingRemote = false;
+      _running = false;
+      await _refreshCounts();
+      _emit();
+      if (_again) {
+        _again = false;
+        unawaited(syncNow(pull: false)); // کاربر حین دریافت چیزی ثبت کرده بود
+      }
+    }
+  }
+
+  /// دلتای یک entity با `entity.changes`؛ false = باید دریافت کامل انجام شود
+  Future<bool> _pullEntity(String phone, String token, String entity) async {
+    var since = await EntityStore.I.cursorOf(entity);
+    for (var page = 0; page < 20; page++) {
+      final r = await _call(phone, token, 'entity.changes', {'entity': entity, 'since_rev': since, 'limit': 500}, timeoutSec: 30);
+      if (r.code == 403 || r.code == 404) return true; // دسترسی/entity نیست: چیزی برای آینه‌کردن نیست
+      if (r.code != 200 || r.data == null) throw _ServerError(r.error, r.code);
+      final items = r.data!['items'];
+      final maxRev = int.tryParse('${r.data!['max_rev']}') ?? since;
+      if (items is List && items.isNotEmpty) await EntityStore.I.applyDelta(entity, items, maxRev);
+      if (r.data!['has_more'] != true || maxRev <= since) return true;
+      since = maxRev;
+    }
+    return false;
   }
 
   // ======================= ارسال =======================
@@ -316,7 +624,7 @@ class SyncService {
         final sid = (r.data?['id'] as num?)?.toInt();
         if (mk != null && lid != null && sid != null) {
           await AppDb.I.recordMapping(mk, lid, sid);
-          // اگر وسط ارسال، کاربر همین رکورد را در گوشی حذف کرده باشد، روی سرور هم حذف شود
+          // اگر وسط ارسال، کاربر همین رکورد را در سیستم حذف کرده باشد، روی سرور هم حذف شود
           if (!await AppDb.I.localExists(mk, lid)) {
             final del = switch (action) {
               'mixes.create' => 'mixes.delete',
@@ -333,6 +641,10 @@ class SyncService {
         if (action == 'entity.save') await EntityStore.I.onSaved(payload, r.data);
         await AppDb.I.finishOp(seq, rev);
         _lastActivity = DateTime.now();
+        _own.add((SyncPlanner.keyOf(action, SyncPlanner.entityOfOwn(action, payload)), DateTime.now())); // S7
+        if (action == 'payments.save' && r.data?['pending_approval'] == true) {
+          PayApprovalNotice.I.report((r.data?['amount_rial'] as num?) ?? 0); // S31.T31.3b
+        }
         if (action == 'receipts.save' || action == 'payments.save') {
           await AppDb.I.metaSet('last_tx_push', DateTime.now().toIso8601String());
         }
@@ -407,7 +719,14 @@ class SyncService {
   }
 
   // ======================= دریافت =======================
-  Future<bool> _pull(String phone, String token, {bool discardQueue = false}) async {
+  Future<bool> _pull(String phone, String token, {bool discardQueue = false, int? baselineVer}) async {
+    // S7: ver «قبل از» دریافت ثبت می‌شود؛ تغییری که حین دریافت رخ دهد بعداً دوباره دیده می‌شود (کم‌دریافت‌کردن ممنوع)
+    int? v0 = baselineVer;
+    if (v0 == null && _rtSupported) {
+      try {
+        v0 = (await _ping(phone, token, null)).ver;
+      } catch (_) {}
+    }
     final r = await _call(phone, token, 'backup.export', {}, timeoutSec: 120);
     if (r.code != 200 || r.data == null) throw _ServerError(r.error, r.code);
     final tables = r.data!['tables'];
@@ -425,6 +744,11 @@ class SyncService {
         entities: ents is Map ? Map<String, dynamic>.from(ents) : null,
         docs: r.data!['docs'] is Map ? Map<String, dynamic>.from(r.data!['docs'] as Map) : null);
     if (applied) await AppDb.I.setMoneyUnit(srvUnit); // mirror now holds exactly the server's unit
+    if (applied) {
+      if (v0 != null) await _setVer(v0);
+      _own.clear();
+      remotePending.value = false;
+    }
     return applied;
   }
 
@@ -482,7 +806,7 @@ class SyncService {
     if (e is _ServerError) return e.message;
     if (e is TimeoutException) return 'سرور دیر جواب داد؛ بعداً خودکار دوباره تلاش می‌شود';
     if (e is SocketException || e is http.ClientException) {
-      return 'اینترنت وصل نیست؛ اطلاعات روی گوشی ذخیره است و بعد از اتصال خودکار ارسال می‌شود';
+      return 'اینترنت وصل نیست؛ اطلاعات روی سیستم ذخیره است و بعد از اتصال خودکار ارسال می‌شود';
     }
     if (e is HandshakeException) return 'خطای گواهی امنیتی (SSL)';
     return 'خطا: $e';
