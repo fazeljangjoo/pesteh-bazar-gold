@@ -146,7 +146,7 @@ class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
         label: (d?['label'] ?? key).toString(),
         pct: (p['pct'] as num?)?.toDouble() ?? 0,
         kernelG: (p['kernel_g'] as num?)?.toDouble(),
-        allowed: d != null && d['pricing_allowed'] == true,
+        allowed: true,
       ));
     }
     if (!mounted) return;
