@@ -42,7 +42,7 @@ class StockApi {
   static Future<Map<String, dynamic>> call(String action, [Map<String, dynamic> payload = const <String, dynamic>{}]) async {
     final cred = await LicenseService.I.credentials();
     if (cred == null) throw StockApiException('نیاز به ورود مجدد است');
-    final body = <String, dynamic>{'phone': cred.$1, 'token': cred.$2, 'action': action, 'payload': payload};
+    final body = <String, dynamic>{'phone': cred.$1, 'token': cred.$2, 'action': action, 'payload': payload, 'unit': AppDb.I.moneyUnit}; // S10: واحد پول را مثل SyncService اعلام می‌کند
     http.Response resp;
     try {
       resp = await http
