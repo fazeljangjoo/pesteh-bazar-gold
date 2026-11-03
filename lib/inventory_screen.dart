@@ -3,6 +3,9 @@ import 'package:flutter/material.dart';
 import 'barcode_utils.dart';
 import 'charts.dart';
 import 'consignment_ui.dart';
+import 'feed_ui.dart' show FeedStockScreen;
+import 'perms.dart' show StaffPerms;
+import 'reports_ui.dart' show WorkshopReportsScreen;
 import 'db.dart';
 import 'live_query.dart';
 import 'mix_form.dart';
@@ -184,6 +187,24 @@ class _InventoryScreenState extends State<InventoryScreen> {
               MaterialPageRoute<void>(builder: (_) => const ProcessingScreen()),
             ),
           ),
+          if (StaffPerms.I.can('workshop.feed'))
+            IconButton(
+              tooltip: 'موجودی پستهٔ خرجی (کارگاه‌ها)',
+              icon: const Icon(Icons.inventory_2_outlined),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(builder: (_) => const FeedStockScreen()),
+              ),
+            ),
+          if (StaffPerms.I.can('workshop.feed'))
+            IconButton(
+              tooltip: 'گزارش‌های کارگاه (کارتکس مالک، خلاصه، مقایسه)',
+              icon: const Icon(Icons.assessment_outlined),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(builder: (_) => const WorkshopReportsScreen()),
+              ),
+            ),
           IconButton(
             tooltip: 'امانی (دریافتی و ارسالی)',
             icon: const Icon(Icons.swap_horiz),
