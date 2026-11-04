@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'lot_chain_ui.dart';
+import 'perms.dart' show StaffPerms;
 import 'utils.dart';
 import 'warehouse_ui.dart' show StockApi, StockApiException;
 
@@ -95,7 +97,14 @@ class _LotTraceScreenState extends State<LotTraceScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(title: const Text('ردیابی لات')),
+        appBar: AppBar(title: const Text('ردیابی لات'), actions: <Widget>[
+          if (StaffPerms.I.can('stock.view') && StaffPerms.I.can('purchases.view'))
+            IconButton(
+              tooltip: 'مسیر پسته',
+              icon: const Icon(Icons.timeline),
+              onPressed: () => Navigator.push<void>(context, MaterialPageRoute<void>(builder: (_) => LotChainScreen(code: _c.text.trim().isEmpty ? null : _c.text.trim()))),
+            ),
+        ]),
         body: ListView(padding: const EdgeInsets.all(12), children: <Widget>[
           TextField(
             controller: _c,
