@@ -34,6 +34,16 @@ class StaffPerms {
     return p.every((e) => kOunceRoomPerms.contains(e));
   }
 
+  /// کارگاه ۳-ب: کارکنی که فقط مجوزهای نقش «اپراتور کارگاه» را دارد (workshop.operate الزامی؛ هر مجوز مالی/عمومی دیگر ⇒ false).
+  bool get isWorkshopOperatorOnly {
+    final s = current.value;
+    if (s == null) return false;
+    final p = s['perms'];
+    if (p is! List || p.isEmpty) return false;
+    if (!p.contains('workshop.operate')) return false;
+    return p.every((e) => kWorkshopOperatorPerms.contains(e));
+  }
+
   /// raw = Map کارکن از سرور، یا null برای مالک. روی دستگاه هم ذخیره می‌شود تا آفلاین همان بماند.
   Future<void> apply(dynamic raw) async {
     final Map<String, dynamic>? next = raw is Map ? Map<String, dynamic>.from(raw) : null;
@@ -67,6 +77,9 @@ class StaffPerms {
 
 /// S5.T4: مجوزهای نقش «اتاق انس» (همان نقش سیستمی سرور در permissions.php).
 const Set<String> kOunceRoomPerms = <String>{'ounce.intake', 'ounce.view_own', 'ounce.edit_own', 'ounces.view'};
+
+/// کارگاه (مرحلهٔ ۱): مجوزهای نقش سیستمی «اپراتور کارگاه» (permissions.php: PB_ROLE_WORKSHOP_OPERATOR) — بدون price.view. شِل اپراتور = مرحلهٔ ۳.
+const Set<String> kWorkshopOperatorPerms = <String>{'workshop.operate', 'workshop.view', 'workshop.crack', 'workshop.feed'};
 
 /// برچسب فارسی هر کلید مجوز (ترتیب گروه‌بندی در صفحهٔ نقش‌ها هم از همین فهرست است).
 const Map<String, String> kPermLabels = <String, String>{
@@ -111,6 +124,12 @@ const Map<String, String> kPermLabels = <String, String>{
   'users.manage': 'مدیریت کارکنان و نقش‌ها',
   'audit.view': 'مشاهدهٔ گزارش ممیزی',
   'ounce.intake': 'ثبت پذیرش پسته در اتاق انس',
+  'workshop.view': 'مشاهدهٔ عملیات کارگاه',
+  'workshop.operate': 'ثبت عملیات کارگاه',
+  'workshop.crack': 'ثبت گزارش خط شکست',
+  'workshop.feed': 'مشاهدهٔ موجودی پستهٔ خرجی',
+  'workshop.manage': 'حذف عملیات کارگاه',
+  'workshop.cost': 'مشاهده و ثبت بهای تمام‌شدهٔ کارگاه (نیازمند مشاهدهٔ قیمت‌ها)',
   'ounce.view_own': 'مشاهدهٔ پذیرش‌های خود (اتاق انس)',
   'ounce.view_all': 'مشاهدهٔ همهٔ پذیرش‌های اتاق انس',
   'ounce.edit_own': 'ویرایش پذیرش خود قبل از قطعی‌شدن',

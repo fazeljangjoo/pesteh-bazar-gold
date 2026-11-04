@@ -7,6 +7,7 @@ import 'vouchers_links.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'db.dart';
+import 'outside_ui.dart';
 import 'perms.dart';
 import 'pdf_output.dart';
 import 'pdf_service.dart';
@@ -14,6 +15,8 @@ import 'returns_ui.dart' show ReturnsHelp;
 import 'sync_service.dart';
 import 'utils.dart';
 import 'warehouse_ui.dart' show StockApi, StockApiException, StockLookup, WhOption;
+import 'workshop_calc.dart' show kWsGradeLabels, kWsOpLabels;
+import 'workshop_ui.dart' show WorkshopFormScreen, kWsCostFields, wsCanCost, wsParseNum;
 
 /// S09.T09.3 — processing screens (فراوری): paid (برون‌سپاری) and received (فراوری امانی).
 /// Server: processing.list/get/create/receive/deliver/delete, reports.* (api/processing.php).
@@ -23,6 +26,7 @@ import 'warehouse_ui.dart' show StockApi, StockApiException, StockLookup, WhOpti
 
 const String kProcPaid = 'paid';
 const String kProcReceived = 'received';
+const String kProcInternal = 'internal'; // کارگاه داخلی (مرحلهٔ ۱ کارگاه)
 
 const Map<String, String> _services = <String, String>{
   'hulling': 'پوست‌گیری',
@@ -218,13 +222,21 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('فراوری'),
-        actions: <Widget>[IconButton(tooltip: 'به‌روزرسانی', icon: const Icon(Icons.refresh), onPressed: _load)],
+        actions: <Widget>[
+          if (_dir == kProcPaid)
+            IconButton(
+              tooltip: 'فایل خام شکست کارگاه‌ها',
+              icon: const Icon(Icons.table_chart_outlined),
+              onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const OutsideRawScreen())),
+            ),
+          IconButton(tooltip: 'به‌روزرسانی', icon: const Icon(Icons.refresh), onPressed: _load),
+        ],
       ),
       floatingActionButton: _can('processing.create')
           ? FloatingActionButton.extended(
-              onPressed: () => _open(ProcessingFormScreen(direction: _dir)),
+              onPressed: () => _open(_dir == kProcInternal ? const WorkshopFormScreen() : ProcessingFormScreen(direction: _dir)),
               icon: const Icon(Icons.add),
-              label: Text(_dir == kProcPaid ? 'سفارش برون‌سپاری' : 'سفارش فراوری امانی'),
+              label: Text(_dir == kProcPaid ? 'سفارش برون‌سپاری' : (_dir == kProcInternal ? 'عملیات کارگاه داخلی' : 'سفارش فراوری امانی')),
             )
           : null,
       body: RefreshIndicator(
@@ -244,6 +256,11 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                   label: const Text('فراوری امانی (کالای مشتری نزد ما)'),
                   selected: _dir == kProcReceived,
                   onSelected: (_) => setState(() => _dir = kProcReceived),
+                ),
+                ChoiceChip(
+                  label: const Text('کارگاه داخلی'),
+                  selected: _dir == kProcInternal,
+                  onSelected: (_) => setState(() => _dir = kProcInternal),
                 ),
               ],
             ),
@@ -270,15 +287,30 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
   }
 
   Widget _tile(Map<String, dynamic> o) {
+    if ('${o['direction']}' == kProcInternal) {
+      final bool? ok = o['balance_ok'] is bool ? o['balance_ok'] as bool : null;
+      return Card(
+        child: ListTile(
+          leading: Icon(ok == false ? Icons.warning_amber_rounded : Icons.factory_outlined, color: ok == false ? Colors.orange : null),
+          title: Text('${kWsOpLabels['${o['op_type']}'] ?? o['op_type'] ?? 'کارگاه'}${(o['owner'] ?? '').toString().isEmpty ? '' : '  •  ${o['owner']}'}'),
+          subtitle: Text('${jalaliDate('${o['date']}')}  •  ${ok == null ? '' : (ok ? 'تراز صحیح' : 'نیاز به بررسی (اختلاف ${_kg(o['balance_diff_kg'])})')}\n'
+              'ورودی ${_kg(o['input_kg'])} · خروجی ${_kg(o['output_kg'])} · افت ${_kg(o['loss_kg'])} کیلو'),
+          isThreeLine: true,
+          onTap: () => _open(ProcessingDetailScreen(id: _n(o['id']).toInt())),
+        ),
+      );
+    }
     final bool rec = '${o['direction']}' == kProcReceived;
     final String info = rec
         ? 'ورودی ${_kg(o['input_kg'])} · خروجی ${_kg(o['output_kg'])} · ضایعات ${_kg(o['waste_kg'])} کیلو · مطالبه ${_money(o['charge_amount'])}'
         : 'ورودی ${_kg(o['input_kg'])} · خروجی ${_kg(o['output_kg'])} · ضایعات ${_kg(o['waste_kg'])} کیلو · کرایه ${_money(o['fee_amount'])}';
     final String yieldText = o['yield_pct'] == null ? '' : '  •  بازدهی ${faNum(_n(o['yield_pct']), dec: 1)}٪';
+    final String rno = rec ? '' : '${o['receipt_no'] ?? ''}'; // مرحلهٔ ۴: شمارهٔ قبض کارگاه بیرونی
+    final String own = rec ? '' : '${o['owner'] ?? ''}';
     return Card(
       child: ListTile(
         leading: Icon(rec ? Icons.call_received : Icons.call_made),
-        title: Text('${o['party']}  •  ${_statusLabel('${o['status']}')}'),
+        title: Text('${o['party']}  •  ${_statusLabel('${o['status']}')}${rno.isEmpty ? '' : '  •  قبض $rno'}${own.isEmpty ? '' : '  •  $own'}'),
         subtitle: Text('${jalaliDate('${o['date']}')}$yieldText\n$info'),
         isThreeLine: true,
         onTap: () => _open(ProcessingDetailScreen(id: _n(o['id']).toInt())),
@@ -321,6 +353,7 @@ class _ProcessingFormScreenState extends State<ProcessingFormScreen> {
   final TextEditingController _wcharge = TextEditingController(text: '0');
   final TextEditingController _date = TextEditingController(text: ReturnsHelp.iso(DateTime.now()));
   final List<_ProcLine> _lines = <_ProcLine>[_ProcLine()];
+  final OutsideReceiptCtl _rc = OutsideReceiptCtl(); // مرحلهٔ ۴: قبض کارگاه بیرونی (فقط paid)
   String _service = 'other';
   String _basis = 'per_kg';
   String? _wh;
@@ -363,6 +396,7 @@ class _ProcessingFormScreenState extends State<ProcessingFormScreen> {
     _std.dispose();
     _wcharge.dispose();
     _date.dispose();
+    _rc.dispose();
     for (final _ProcLine l in _lines) {
       l.dispose();
     }
@@ -418,6 +452,7 @@ class _ProcessingFormScreenState extends State<ProcessingFormScreen> {
         'items': items,
       };
       if (!_paid && _wh != null) payload['warehouse_uid'] = _wh;
+      if (_paid) payload.addAll(_rc.sentPayload(clearEmpty: false));
       final bool queued = await ProcessingStore.write('processing.create', payload, '${_paid ? 'برون‌سپاری' : 'فراوری امانی'}: $party');
       if (!mounted) return;
       _snack(queued ? 'آفلاین ذخیره شد؛ پس از اتصال ارسال می‌شود' : 'ثبت شد');
@@ -534,6 +569,12 @@ class _ProcessingFormScreenState extends State<ProcessingFormScreen> {
             ),
           ),
           const SizedBox(height: 14),
+          if (_paid) ...<Widget>[
+            Text('قبض کارگاه بیرونی', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 6),
+            OutsideReceiptFields(ctl: _rc, sentKg: _inKg, onChanged: () => setState(() {})),
+            const SizedBox(height: 14),
+          ],
           Text('ورودی‌ها', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 6),
           for (int i = 0; i < _lines.length; i++) _lineCard(i),
@@ -679,6 +720,7 @@ class _ProcessingDetailScreenState extends State<ProcessingDetailScreen> {
   void _snack(String m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
 
   bool get _rec => '${_d['direction']}' == kProcReceived;
+  bool get _int => '${_d['direction']}' == kProcInternal;
   bool get _open => '${_d['status']}' == 'in_progress';
 
   Future<void> _run(String action, Map<String, dynamic> payload, String label) async {
@@ -790,7 +832,7 @@ class _ProcessingDetailScreenState extends State<ProcessingDetailScreen> {
           title: Text(_d['party'] == null ? 'سفارش فراوری' : '${_d['party']}'),
           actions: <Widget>[
             if (_d.isNotEmpty) IconButton(tooltip: 'برگه کار', icon: const Icon(Icons.print_outlined), onPressed: () => _print(fee: false)),
-            if (_d.isNotEmpty) IconButton(tooltip: 'پیش‌فاکتور کرایه', icon: const Icon(Icons.receipt_outlined), onPressed: () => _print(fee: true)),
+            if (_d.isNotEmpty && !_int) IconButton(tooltip: 'پیش‌فاکتور کرایه', icon: const Icon(Icons.receipt_outlined), onPressed: () => _print(fee: true)),
             if (_d['deletable'] == true && canManage) IconButton(tooltip: 'حذف', icon: const Icon(Icons.delete_outline), onPressed: _delete),
           ],
         ),
@@ -802,7 +844,7 @@ class _ProcessingDetailScreenState extends State<ProcessingDetailScreen> {
                   padding: const EdgeInsets.all(14),
                   children: <Widget>[
                     if (widget.id > 0 && _rec) VoucherLinkButton(sourceType: 'proc_toll', sourceId: '${widget.id}'),
-                    if (widget.id > 0 && !_rec) ...<Widget>[
+                    if (widget.id > 0 && !_rec && !_int) ...<Widget>[
                       VoucherLinkButton(sourceType: 'proc_send', sourceId: '${widget.id}', label: 'سند ارسال'),
                       VoucherLinkButton(sourceType: 'proc_recv', sourceId: '${widget.id}', label: 'سند دریافت'),
                     ], // T16.7
@@ -818,17 +860,39 @@ class _ProcessingDetailScreenState extends State<ProcessingDetailScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: <Widget>[
-                              Text('${_rec ? 'مشتری' : 'فراوری‌کننده'}: ${_d['party'] ?? ''}'),
-                              Text('تاریخ: ${jalaliDate('${_d['date'] ?? ''}')}'),
-                              Text('وضعیت: ${_statusLabel('${_d['status'] ?? ''}')}'),
-                              Text('کرایه (${_feeBasis[_d['fee_basis']] ?? ''}): ${_money(_d['fee_amount'])}'),
-                              if (_rec) Text('مطالبه از مشتری: ${_money(_d['charge_amount'])}'),
+                              if (_int) ...<Widget>[
+                                Text('عملیات: ${kWsOpLabels['${_d['op_type']}'] ?? _d['op_type'] ?? ''}'),
+                                Text('تاریخ: ${jalaliDate('${_d['date'] ?? ''}')}'),
+                                if ('${_d['owner'] ?? ''}'.isNotEmpty) Text('مالک: ${_d['owner']}'),
+                                if ('${_d['pistachio_type'] ?? ''}'.isNotEmpty) Text('نوع پسته: ${_d['pistachio_type']}'),
+                                if ('${_d['defect_note'] ?? ''}'.isNotEmpty) Text('ایراد بار: ${_d['defect_note']}'),
+                                if (_d['initial_kg'] != null) Text('وزن خالص اولیه: ${_kg(_d['initial_kg'])} کیلو'),
+                                if (_d['undelivered_kg'] != null) Text('مانده تحویل‌نشده: ${_kg(_d['undelivered_kg'])} کیلو'),
+                                if (_d['bale_count'] != null) Text('تعداد عدل: ${faNum(_n(_d['bale_count']), dec: 0)}'),
+                                Text('افت وزن: ${_kg(_d['loss_kg'])} کیلو'),
+                                if (_d['sound_pct'] != null) Text('درصد سالم: ${faNum(_n(_d['sound_pct']), dec: 1)}٪'),
+                                Text(
+                                  _d['balance_ok'] == true ? 'تراز صحیح' : 'نیاز به بررسی — اختلاف ${_kg(_d['balance_diff_kg'])} کیلو',
+                                  style: TextStyle(fontWeight: FontWeight.bold, color: _d['balance_ok'] == true ? Colors.green : Colors.orange),
+                                ),
+                              ] else ...<Widget>[
+                                Text('${_rec ? 'مشتری' : 'فراوری‌کننده'}: ${_d['party'] ?? ''}'),
+                                Text('تاریخ: ${jalaliDate('${_d['date'] ?? ''}')}'),
+                                Text('وضعیت: ${_statusLabel('${_d['status'] ?? ''}')}'),
+                                Text('کرایه (${_feeBasis[_d['fee_basis']] ?? ''}): ${_money(_d['fee_amount'])}'),
+                                if (_rec) Text('مطالبه از مشتری: ${_money(_d['charge_amount'])}'),
+                              ],
                             ],
                           ),
                         ),
                       ),
                       const SizedBox(height: 8),
-                      _massCard(),
+                      if (!_int && !_rec) ...<Widget>[
+                        OutsideReceiptCard(order: _d, canEdit: canManage, onEdit: _editReceipt),
+                        const SizedBox(height: 8),
+                      ],
+                      if (!_int) _massCard(),
+                      if (_int && wsCanCost()) _costCard(),
                       const SizedBox(height: 8),
                       Text('ورودی‌ها', style: Theme.of(context).textTheme.titleMedium),
                       for (final dynamic x in (_d['inputs'] is List ? _d['inputs'] as List<dynamic> : <dynamic>[]))
@@ -836,7 +900,7 @@ class _ProcessingDetailScreenState extends State<ProcessingDetailScreen> {
                           ListTile(
                             dense: true,
                             title: Text('${x['code'] ?? ''}  ${x['type_name'] ?? ''}'),
-                            subtitle: Text('${_kg(x['kg'])} کیلو${x['cost'] != null ? '  •  بهای تمام‌شده ${_money(x['cost'])}' : ''}'),
+                            subtitle: Text('${_kg(x['kg'])} کیلو${(x['cost'] != null && !_int) ? '  •  بهای تمام‌شده ${_money(x['cost'])}' : ''}'),
                           ),
                       if ((_d['outputs'] is List) && (_d['outputs'] as List<dynamic>).isNotEmpty) ...<Widget>[
                         const SizedBox(height: 8),
@@ -846,7 +910,9 @@ class _ProcessingDetailScreenState extends State<ProcessingDetailScreen> {
                             ListTile(
                               dense: true,
                               title: Text('${x['code'] ?? ''}  ${x['type_name'] ?? ''}'),
-                              subtitle: Text('${_kg(x['kg'])} کیلو${_rec ? '' : '  •  بهای تمام‌شده ${_money(x['cost'])}'}'),
+                              subtitle: Text(_int
+                                  ? '${_kg(x['kg'])} کیلو  •  ${kWsGradeLabels['${x['grade']}'] ?? ''}${(wsCanCost() && x['cost'] != null) ? '  •  بها ${_money(x['cost'])}' : ''}${'${x['owner'] ?? ''}'.isEmpty ? '' : '  •  مالک ${x['owner']}'}${'${x['source_code'] ?? ''}'.isEmpty ? '' : '  •  لات اصلی ${x['source_code']}'}'
+                                  : '${_kg(x['kg'])} کیلو${_rec ? '' : '  •  بهای تمام‌شده ${_money(x['cost'])}'}'),
                             ),
                       ],
                       const SizedBox(height: 16),
@@ -874,6 +940,104 @@ class _ProcessingDetailScreenState extends State<ProcessingDetailScreen> {
               ),
       ),
     );
+  }
+
+  /// مرحلهٔ ۴: ویرایش قبض کارگاه بیرونی (processing.receipt_save؛ ذخیرهٔ کامل فیلدهای قبض، خالی = پاک‌کردن).
+  Future<void> _editReceipt() async {
+    final OutsideReceiptCtl rc = OutsideReceiptCtl(_d);
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => StatefulBuilder(
+        builder: (BuildContext ctx2, StateSetter setSt) => AlertDialog(
+          title: const Text('ویرایش قبض'),
+          content: SingleChildScrollView(
+            child: OutsideReceiptFields(ctl: rc, sentKg: _n(_d['input_kg']), showRecv: true, onChanged: () => setSt(() {})),
+          ),
+          actions: <Widget>[
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('انصراف')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('ذخیره')),
+          ],
+        ),
+      ),
+    );
+    final Map<String, dynamic> payload = <String, dynamic>{'id': _d['id'], 'uid': ReturnsHelp.newUid('prcpt')};
+    if (ok == true) {
+      payload.addAll(rc.sentPayload(clearEmpty: true));
+      payload.addAll(rc.recvPayload(clearEmpty: true));
+    }
+    rc.dispose();
+    if (ok != true) return;
+    await _run('processing.receipt_save', payload, 'قبض کارگاه بیرونی: ${_d['party'] ?? ''}');
+  }
+
+  /// بهای کارگاه داخلی (مرحلهٔ ۲؛ مقادیر سرور). فقط با price.view + workshop.cost دیده می‌شود.
+  Widget _costCard() {
+    final bool has = _d['cost_sound'] != null;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text('بها (${Fmt.unitLabel()})', style: Theme.of(context).textTheme.titleMedium),
+            if (!has) const Text('بها هنوز ثبت نشده است.')
+            else ...<Widget>[
+              Text('ارزش ورودی (W): ${_money(_d['value_in'])}'),
+              Text('هزینه تولید (Z): ${_money(_d['cost_total'])}'),
+              Text('ارزش محصولات فرعی (AF): ${_money(_d['recovery_value'])}'),
+              Text('بهای تمام‌شدهٔ سالم (AG): ${_money(_d['cost_sound'])}', style: const TextStyle(fontWeight: FontWeight.bold)),
+              Text(_d['cost_per_kg_sound'] == null ? 'بهای هر کیلو سالم: —' : 'بهای هر کیلو سالم (AH): ${_money(_d['cost_per_kg_sound'])}'),
+              if ('${_d['cost_warning'] ?? ''}'.isNotEmpty) const Text('هشدار: بهای سالم منفی است (ارزش فرعی بیش از هزینه).', style: TextStyle(color: Colors.orange)),
+            ],
+            const SizedBox(height: 8),
+            OutlinedButton.icon(onPressed: _editCost, icon: const Icon(Icons.edit_outlined), label: Text(has ? 'ویرایش بها' : 'ثبت بها')),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _editCost() async {
+    final Map<String, TextEditingController> ctl = <String, TextEditingController>{
+      for (final List<String> f in kWsCostFields) f[0]: TextEditingController(text: _d[f[0]] == null ? '' : '${_d[f[0]]}'),
+    };
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('ثبت بهای کارگاه'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              for (final List<String> f in kWsCostFields)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: TextField(
+                    controller: ctl[f[0]],
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    decoration: InputDecoration(labelText: f[1], border: const OutlineInputBorder()),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        actions: <Widget>[
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('انصراف')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('ذخیره')),
+        ],
+      ),
+    );
+    final Map<String, dynamic> payload = <String, dynamic>{'id': _d['id']};
+    if (ok == true) {
+      ctl.forEach((String k, TextEditingController c) {
+        if (c.text.trim().isNotEmpty) payload[k] = wsParseNum(c.text);
+      });
+    }
+    for (final TextEditingController c in ctl.values) {
+      c.dispose();
+    }
+    if (ok != true) return;
+    await _run('workshop.cost_save', payload, 'بهای کارگاه');
   }
 
   /// Mass balance and yield of the order (server values; balance must be 0 once received).
@@ -937,7 +1101,10 @@ class _ProcessingReceivePageState extends State<ProcessingReceivePage> {
   final TextEditingController _waste = TextEditingController(text: '0');
   final TextEditingController _date = TextEditingController(text: ReturnsHelp.iso(DateTime.now()));
   final List<_OutLine> _outs = <_OutLine>[_OutLine()];
+  late final OutsideReceiptCtl _rc = OutsideReceiptCtl(widget.order); // مرحلهٔ ۴: مغز/گرم دریافتی (فقط paid)
   bool _saving = false;
+
+  bool get _paidOrder => '${widget.order['direction']}' == kProcPaid;
 
   double get _inKg => _n(widget.order['input_kg']);
   double get _outKg => _outs.fold<double>(0.0, (double s, _OutLine l) => s + _numText(l.kg.text));
@@ -950,6 +1117,7 @@ class _ProcessingReceivePageState extends State<ProcessingReceivePage> {
   void dispose() {
     _waste.dispose();
     _date.dispose();
+    _rc.dispose();
     for (final _OutLine l in _outs) {
       l.dispose();
     }
@@ -984,6 +1152,7 @@ class _ProcessingReceivePageState extends State<ProcessingReceivePage> {
         'date': _en(_date.text.trim()),
         'waste_kg': _wasteKg,
         'outputs': outputs,
+        if (_paidOrder) ..._rc.recvPayload(clearEmpty: false),
       }, 'دریافت خروجی فراوری: ${widget.order['party'] ?? ''}');
       if (!mounted) return;
       _snack(queued ? 'آفلاین ذخیره شد؛ پس از اتصال ارسال می‌شود' : 'دریافت ثبت شد');
@@ -1044,6 +1213,12 @@ class _ProcessingReceivePageState extends State<ProcessingReceivePage> {
             controller: _date,
             decoration: const InputDecoration(labelText: 'تاریخ دریافت (yyyy-mm-dd)', border: OutlineInputBorder()),
           ),
+          if (_paidOrder) ...<Widget>[
+            const SizedBox(height: 14),
+            Text('مغز و گرم دریافتی (اختیاری)', style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 6),
+            OutsideReceiptFields(ctl: _rc, sentKg: _inKg, showSent: false, showRecv: true, onChanged: () => setState(() {})),
+          ],
           const SizedBox(height: 14),
           Text('خروجی‌ها', style: Theme.of(context).textTheme.titleMedium),
           for (int i = 0; i < _outs.length; i++)
