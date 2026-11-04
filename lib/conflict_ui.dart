@@ -170,7 +170,7 @@ class _ConflictsScreenState extends State<ConflictsScreen> {
 
   Future<void> _discard(Map<String, dynamic> op) async {
     final bool ok = await confirm(context,
-        'این تغییر کنار گذاشته می‌شود و به سرور ارسال نخواهد شد.\nبعد از همگام‌سازی، نسخهٔ سرور جای آن روی گوشی می‌نشیند.\n\nادامه می‌دهید؟');
+        'این تغییر کنار گذاشته می‌شود و به سرور ارسال نخواهد شد.\nبعد از همگام‌سازی، نسخهٔ سرور جای آن روی سیستم می‌نشیند.\n\nادامه می‌دهید؟');
     if (!ok || !mounted) return;
     await AppDb.I.discardOneOp((op['seq'] as num).toInt());
     await _sync('تغییر کنار گذاشته شد');
@@ -189,7 +189,7 @@ class _ConflictsScreenState extends State<ConflictsScreen> {
         padding: const EdgeInsets.all(16),
         children: <Widget>[
           const Text(
-            'این تغییرات روی گوشی ثبت شده‌اند ولی سرور نپذیرفته است. تا وقتی حل نشوند، دریافت اطلاعات جدید از سرور متوقف می‌ماند.',
+            'این تغییرات روی سیستم ثبت شده‌اند ولی سرور نپذیرفته است. تا وقتی حل نشوند، دریافت اطلاعات جدید از سرور متوقف می‌ماند.',
             style: TextStyle(color: Colors.black54),
           ),
           const SizedBox(height: 12),

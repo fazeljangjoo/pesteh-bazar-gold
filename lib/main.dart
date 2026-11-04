@@ -212,7 +212,7 @@ class _HomeShellState extends State<HomeShell> {
     _deskNav.currentState?.popUntil((Route<dynamic> r) => r.isFirst);
   }
 
-  /// فهرست منو (در گوشی داخل Drawer، در ویندوز داخل منوی کناری ثابت)
+  /// فهرست منو (در سیستم داخل Drawer، در ویندوز داخل منوی کناری ثابت)
   Widget _menuList(BuildContext context) {
     return ListView(
       padding: EdgeInsets.zero,

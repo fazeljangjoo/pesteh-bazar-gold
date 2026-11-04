@@ -973,7 +973,7 @@ class AppDb {
   }
 
   /// اگر شناسهٔ موقتِ منفیِ این رکورد در دریافت از سرور به شناسهٔ واقعی تبدیل شده باشد، آن را برمی‌گرداند
-  /// (فقط وقتی رکوردی با همین شناسه در گوشی نیست؛ وگرنه null).
+  /// (فقط وقتی رکوردی با همین شناسه در سیستم نیست؛ وگرنه null).
   Future<int?> aliasOf(String kind, int id) async {
     if (id >= 0) return null;
     if (await localExists(kind, id)) return null;
@@ -1110,7 +1110,7 @@ class AppDb {
   }
 
   /// همهٔ داده‌های محلی را با خروجی `backup.export` سرور جایگزین می‌کند.
-  /// (فقط وقتی صف ارسال خالی است صدا زده می‌شود.) عکس‌هایی که از قبل روی گوشی هست نگه داشته می‌شود.
+  /// (فقط وقتی صف ارسال خالی است صدا زده می‌شود.) عکس‌هایی که از قبل روی سیستم هست نگه داشته می‌شود.
   ///
   /// [discardQueue]=false: اگر همزمان عملیاتی در صف باشد (کاربر حین دریافت چیزی ثبت کرده)
   /// چیزی جایگزین نمی‌شود و false برمی‌گردد تا هیچ تغییر محلی گم نشود.
@@ -1128,8 +1128,8 @@ class AppDb {
         final n = Sqflite.firstIntValue(await t.rawQuery('SELECT COUNT(*) FROM sync_ops')) ?? 0;
         if (n > 0) return;
         // سپر ایمنی: اگر در ۱۵ دقیقهٔ اخیر پرداخت/دریافت (قسط، چک، تراکنش) به سرور فرستاده‌ایم
-        // و سرور ردیف کمتری از گوشی دارد، یعنی آن ارسال روی سرور ثبت نشده. به‌جای پاک‌کردنِ
-        // داده‌ی گوشی، وضعیت کامل پرداخت/دریافت‌ها دوباره به صف می‌رود تا دوباره ارسال شود.
+        // و سرور ردیف کمتری از سیستم دارد، یعنی آن ارسال روی سرور ثبت نشده. به‌جای پاک‌کردنِ
+        // داده‌ی سیستم، وضعیت کامل پرداخت/دریافت‌ها دوباره به صف می‌رود تا دوباره ارسال شود.
         final lp = await t.query('meta', columns: ['v'], where: 'k=?', whereArgs: ['last_tx_push'], limit: 1);
         final lastPush = lp.isEmpty ? null : DateTime.tryParse((lp.first['v'] as String?) ?? '');
         if (lastPush != null && DateTime.now().difference(lastPush) < const Duration(minutes: 15)) {
@@ -1334,7 +1334,7 @@ class AppDb {
     return r.isNotEmpty;
   }
 
-  /// حذفِ رکوردی که وسط ارسال «ساخت» آن، در گوشی حذف شده بود
+  /// حذفِ رکوردی که وسط ارسال «ساخت» آن، در سیستم حذف شده بود
   /// (action: purchases.delete | mixes.delete | sales.delete)
   Future<void> enqueueServerDelete(String action, int serverId) async {
     final d = await db;
