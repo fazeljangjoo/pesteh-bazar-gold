@@ -269,6 +269,7 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() {
       _step = s;
       _error = null;
+      if (s == _LoginStep.phone) _asStaff = false;
     });
     if (s == _LoginStep.phone || s == _LoginStep.pass) {
       _timer?.cancel();
@@ -418,7 +419,7 @@ class _LoginScreenState extends State<LoginScreen> {
               const SizedBox(height: 4),
               Text(
                   _step == _LoginStep.pass
-                      ? 'ورود با شماره موبایل و رمز عبور'
+                      ? (_asStaff ? 'ورود پرسنل: شمارهٔ مالک، نام کاربری و رمز' : 'ورود با شماره موبایل و رمز عبور')
                       : 'ورود با شماره موبایل و کد پیامکی',
                   style: const TextStyle(color: Colors.black54)),
               const SizedBox(height: 24),
@@ -433,13 +434,31 @@ class _LoginScreenState extends State<LoginScreen> {
                   onSubmitted: (_) {
                     if (_step != _LoginStep.pass) _submit();
                   },
-                  decoration: const InputDecoration(
-                    labelText: 'شماره موبایل',
+                  decoration: InputDecoration(
+                    labelText: (_step == _LoginStep.pass && _asStaff) ? 'شمارهٔ موبایل مالک (صاحب حساب)' : 'شماره موبایل',
                     hintText: '09xxxxxxxxx',
                     border: OutlineInputBorder(),
                     prefixIcon: Icon(Icons.phone_outlined),
                   ),
                 ),
+              if (_step == _LoginStep.pass && _asStaff) ...[
+                const SizedBox(height: 12),
+                TextField(
+                  key: const ValueKey('login_user'),
+                  controller: _user,
+                  autocorrect: false,
+                  enableSuggestions: false,
+                  maxLength: 60,
+                  textDirection: TextDirection.ltr,
+                  textInputAction: TextInputAction.next,
+                  decoration: const InputDecoration(
+                    labelText: 'نام کاربری',
+                    counterText: '',
+                    border: OutlineInputBorder(),
+                    prefixIcon: Icon(Icons.badge_outlined),
+                  ),
+                ),
+              ],
               if (_step == _LoginStep.pass) ...[
                 const SizedBox(height: 12),
                 TextField(
@@ -464,33 +483,6 @@ class _LoginScreenState extends State<LoginScreen> {
                       onPressed: () => setState(() => _showPass = !_showPass),
                     ),
                   ),
-                ),
-              ],
-              if (_step == _LoginStep.pass) ...[
-                const SizedBox(height: 4),
-                if (_asStaff)
-                  TextField(
-                    key: const ValueKey('login_user'),
-                    controller: _user,
-                    autocorrect: false,
-                    enableSuggestions: false,
-                    maxLength: 60,
-                    textDirection: TextDirection.ltr,
-                    decoration: const InputDecoration(
-                      labelText: 'نام کاربری کارکن',
-                      counterText: '',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.badge_outlined),
-                    ),
-                  ),
-                TextButton(
-                  onPressed: _loading
-                      ? null
-                      : () => setState(() {
-                            _asStaff = !_asStaff;
-                            _error = null;
-                          }),
-                  child: Text(_asStaff ? 'ورود با حساب مالک' : 'ورود کارکن'),
                 ),
               ],
               if (_step == _LoginStep.code) ...[
@@ -629,6 +621,34 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ),
               if (_step == _LoginStep.phone || _step == _LoginStep.pass) ...[
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton.icon(
+                    key: const ValueKey('login_staff_btn'),
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                    ),
+                    icon: Icon(_asStaff ? Icons.arrow_back : Icons.badge_outlined),
+                    label: Text(_asStaff ? 'بازگشت به ورود مالک' : 'ورود پرسنل'),
+                    onPressed: _loading
+                        ? null
+                        : () {
+                            if (_step == _LoginStep.phone) {
+                              _goStep(_LoginStep.pass);
+                              setState(() => _asStaff = true);
+                            } else {
+                              setState(() {
+                                _asStaff = !_asStaff;
+                                _error = null;
+                              });
+                            }
+                          },
+                  ),
+                ),
+              ],
+              if (_step == _LoginStep.phone || (_step == _LoginStep.pass && !_asStaff)) ...[
                 const SizedBox(height: 4),
                 Center(
                   child: TextButton(

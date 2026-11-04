@@ -17,7 +17,7 @@ const String kLicensePublicKeyB64 = 'yJIcf36ObarEC9K6mj51zSvMMUzcZ2lkYbP5b/7qDk0
 /// (بعد از آن یک‌بار اتصال به اینترنت لازم است؛ تمدید/لغو اشتراک هم همان موقع اعمال می‌شود.)
 const int kMaxOfflineDays = 45;
 
-/// نسخهٔ ویندوز از «مجوز امضادار» استفاده می‌کند (روی سیستم رفتار قبلی حفظ شده است).
+/// نسخهٔ ویندوز از «مجوز امضادار» استفاده می‌کند (روی گوشی رفتار قبلی حفظ شده است).
 bool get kStrictLicense => Platform.isWindows;
 
 enum GuardVerdict {

@@ -7,7 +7,7 @@ import 'package:printing/printing.dart';
 
 import 'excel_io.dart';
 
-/// خروجی PDF: کاربر انتخاب می‌کند فایل را ببیند (پیش‌نمایش)، مستقیم ارسال کند یا در حافظهٔ سیستم ذخیره کند.
+/// خروجی PDF: کاربر انتخاب می‌کند فایل را ببیند (پیش‌نمایش)، مستقیم ارسال کند یا در حافظهٔ گوشی ذخیره کند.
 class PdfOutput {
   PdfOutput._();
 
@@ -52,7 +52,7 @@ class PdfOutput {
             ),
           ListTile(
             leading: const Icon(Icons.save_alt_outlined),
-            title: const Text('ذخیره در حافظهٔ سیستم'),
+            title: const Text('ذخیره در حافظهٔ گوشی'),
             subtitle: const Text('در پنجرهٔ بعد گزینهٔ «Save as PDF» را بزنید و محل ذخیره را انتخاب کنید'),
             onTap: () => Navigator.pop(ctx, 'save'),
           ),
