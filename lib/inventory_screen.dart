@@ -4,6 +4,7 @@ import 'barcode_utils.dart';
 import 'charts.dart';
 import 'code_kind.dart';
 import 'consignment_ui.dart';
+import 'crack_ui.dart' show CrackListScreen; // CP7
 import 'feed_ui.dart' show FeedStockScreen;
 import 'perms.dart' show StaffPerms;
 import 'reports_ui.dart' show WorkshopReportsScreen;
@@ -190,6 +191,15 @@ class _InventoryScreenState extends State<InventoryScreen> {
               MaterialPageRoute<void>(builder: (_) => const ProcessingScreen()),
             ),
           ),
+          if (StaffPerms.I.can('workshop.manage')) // CP7: مدیر کارگاه ⇒ ثبت/فهرست گزارش‌های خط شکست
+            IconButton(
+              tooltip: 'گزارش‌های خط شکست (ثبت جدید و فهرست)',
+              icon: const Icon(Icons.factory_outlined),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(builder: (_) => const CrackListScreen(pushed: true)),
+              ),
+            ),
           if (StaffPerms.I.can('workshop.feed'))
             IconButton(
               tooltip: 'موجودی پستهٔ خرجی (کارگاه‌ها)',

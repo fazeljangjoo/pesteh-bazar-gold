@@ -1175,11 +1175,20 @@ class _CrackListScreenState extends State<CrackListScreen> {
     if (ok == true) _load();
   }
 
+  /// CP7: ثبت گزارش جدید برای مدیر (workshop.manage) وقتی فهرست به‌صورت صفحهٔ جدا باز شده؛ پوستهٔ اپراتور فرم خودش را دارد.
+  Future<void> _new() async {
+    final bool? ok = await Navigator.of(context).push<bool>(MaterialPageRoute<bool>(builder: (_) => const CrackFormScreen()));
+    if (ok == true) _load();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      floatingActionButton: (widget.pushed && StaffPerms.I.can('workshop.manage')) // CP7
+          ? FloatingActionButton.extended(onPressed: _new, icon: const Icon(Icons.add), label: const Text('ثبت گزارش جدید'))
+          : null,
       appBar: AppBar(
-        title: const Text('گزارش‌های خط شکست من'),
+        title: Text(widget.pushed ? 'گزارش‌های خط شکست' : 'گزارش‌های خط شکست من'),
         automaticallyImplyLeading: widget.pushed,
         actions: <Widget>[IconButton(tooltip: 'بازخوانی', icon: const Icon(Icons.refresh), onPressed: _load)],
       ),
