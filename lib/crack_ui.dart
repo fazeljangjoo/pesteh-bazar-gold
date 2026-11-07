@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'crack_lots.dart';
+import 'crack_profit_ui.dart' show CrackProfitCard, cpPoolInfoCard, cpPoolInfoLine; // CP4
 import 'db.dart' show AppDb;
 import 'perms.dart' show StaffPerms;
 import 'processing_ui.dart' show ProcessingStore, ProcWriteResult;
@@ -143,6 +144,9 @@ class _CrackFormScreenState extends State<CrackFormScreen> {
   List<_LotSrc> _lotSources = <_LotSrc>[];
   List<_LotCat> _lotCats = <_LotCat>[];
   List<WhOption> _lotWhs = <WhOption>[];
+  // CP4: «تبدیل کامل» (consume=full؛ هزینهٔ افت روی همین گروه). پیش‌فرض روشن؛ در ویرایش ردیفِ دارای لات = حالت فعلی از pool_info.
+  bool _consumeFull = true;
+  String? _origConsume; // pool_info.consume هنگام باز شدن (فقط مدیر)
 
   bool get _editing => widget.existing != null;
 
@@ -153,6 +157,13 @@ class _CrackFormScreenState extends State<CrackFormScreen> {
     _loadPctPref();
     final Map<String, dynamic>? e = widget.existing;
     if (e == null) return;
+    final dynamic pi = e['pool_info']; // CP4
+    if (pi is Map && '${pi['consume']}'.isNotEmpty && '${pi['consume']}' != 'null') {
+      _origConsume = '${pi['consume']}';
+      _consumeFull = _origConsume == 'full';
+    } else if (e['lots'] is List && (e['lots'] as List).isNotEmpty) {
+      _consumeFull = false; // لات دارد ولی حالت معلوم نیست ⇒ چیزی عوض نکن
+    }
     _runDate = _crParseDate(e['run_date']) ?? DateTime.now();
     _endDate = _crParseDate(e['end_date']);
     _start = _crParseTime('${e['start_time'] ?? ''}');
@@ -590,6 +601,11 @@ class _CrackFormScreenState extends State<CrackFormScreen> {
           ),
         if (_canLots) ...<Widget>[
           const Text('ویرایش مقدار خروجی‌های لات‌شده، لات‌ها را به‌روز می‌کند (اگر دست‌نخورده باشند؛ کد لات ممکن است عوض شود).'),
+          if (_origConsume != null && !_removeLots) ...<Widget>[
+            _consumeSwitch(),
+            if ((_consumeFull ? 'full' : 'lots_only') != _origConsume) const Text('تغییر حالت مصرف، لات‌ها را دوباره می‌سازد (فقط اگر دست‌نخورده باشند؛ کد لات ممکن است عوض شود).', style: TextStyle(color: Colors.orange)), // CP4
+            ..._consumeHints(_existingPlanTotalG()),
+          ],
           SwitchListTile(
             contentPadding: EdgeInsets.zero,
             title: const Text('حذف لات‌های ساخته‌شده هنگام ذخیره'),
@@ -681,13 +697,15 @@ class _CrackFormScreenState extends State<CrackFormScreen> {
               onChanged: (String? v) => setState(() => _lotWh = v),
             ),
             const SizedBox(height: 10),
+            _consumeSwitch(), // CP4
             if (_lotFields.isEmpty)
               const Text('خروجی‌ای انتخاب نشده است')
             else if (!plan.ok)
               _lotsRedLine(plan.error!)
             else ...<Widget>[
-              Text('از لات مبدأ ${faNum(plan.totalKg, dec: 3)} کیلو کم می‌شود', style: const TextStyle(fontWeight: FontWeight.bold)),
-              if (src != null && plan.totalKg > src.remaining + 1e-9) _lotsRedLine('این مقدار از موجودی لات مبدأ (${faNum(src.remaining, dec: 3)} کیلو) بیشتر است؛ سرور رد می‌کند'),
+              Text(_consumeFull && wsGrams(_inputKg) > 0 ? 'از لات مبدأ ${faNum(wsGrams(_inputKg) / 1000, dec: 3)} کیلو (کل ورودی) کم می‌شود' : 'از لات مبدأ ${faNum(plan.totalKg, dec: 3)} کیلو کم می‌شود', style: const TextStyle(fontWeight: FontWeight.bold)),
+              ..._consumeHints(plan.totalG),
+              if (src != null && (_consumeFull ? wsGrams(_inputKg) / 1000 : plan.totalKg) > src.remaining + 1e-9) _lotsRedLine('این مقدار از موجودی لات مبدأ (${faNum(src.remaining, dec: 3)} کیلو) بیشتر است؛ سرور رد می‌کند'),
             ],
             const SizedBox(height: 6),
             const Text('کد لات‌ها را سرور تعیین می‌کند و پس از ثبتِ موفق نشان داده می‌شود. بهای لات‌ها ۰ است.', style: TextStyle(color: Colors.grey)),
@@ -701,21 +719,92 @@ class _CrackFormScreenState extends State<CrackFormScreen> {
   String? _addLotsPayload(Map<String, dynamic> p) {
     if (!_canLots) return null;
     if (_hasExistingLots) {
-      if (_removeLots) p['lots'] = <String, dynamic>{'enabled': false};
-      return null; // بدون کلید lots ⇒ سرور همان انتخاب را با وزن‌های جدید به‌روز می‌کند
+      if (_removeLots) {
+        p['lots'] = <String, dynamic>{'enabled': false};
+        return null;
+      }
+      // CP4: بدون کلید lots ⇒ سرور همان انتخاب و همان حالت مصرفِ استخر را با وزن‌های جدید به‌روز می‌کند (قدیمی‌ها مثل قبل).
+      final String want = _consumeFull ? 'full' : 'lots_only';
+      if (_origConsume == null) return null;
+      if (want == 'full') {
+        final String? fe = _fullRuleError(_existingPlanTotalG());
+        if (fe != null) return fe;
+      }
+      if (want != _origConsume) {
+        // تغییر صریح حالت مصرف ⇒ همان لات مبدأ و همان خروجی‌ها + consume
+        final List<Map<String, dynamic>> ex = _existingLots;
+        final dynamic sid = ex.first['source_lot_id'];
+        if (sid == null) return 'لات مبدأ این گزارش معلوم نیست؛ حالت مصرف را تغییر ندهید';
+        p['lots'] = <String, dynamic>{
+          'enabled': true,
+          'source_lot_id': sid,
+          'fields': <String>[for (final Map<String, dynamic> l in ex) '${l['field_key']}'],
+          'consume': want,
+        };
+      }
+      return null;
     }
     if (!_lotsOn) return null;
     final CrLotsPlan plan = _lotsPlanNow;
     if (!plan.ok) return plan.error;
     if (_lotSource == null) return '«لات مبدأ» را انتخاب کنید';
+    final String? fullErr = _fullRuleError(plan.totalG); // CP4
+    if (fullErr != null) return fullErr;
     p['lots'] = <String, dynamic>{
       'enabled': true,
       'source_lot_id': int.tryParse(_lotSource!) ?? _lotSource,
       'fields': <String>[for (final CrLotItem i in plan.items) i.field],
+      'consume': _consumeFull ? 'full' : 'lots_only', // CP4
       if (_lotCat != null) 'category_id': _lotCat,
       if (_lotWh != null) 'warehouse_uid': _lotWh,
     };
     return null;
+  }
+
+  // --- CP4: تبدیل کامل ---
+
+  /// جمع وزن لات‌های ساخته‌شدهٔ همین ردیف با وزن‌های فعلی فرم (گرم)؛ نامعتبر ⇒ -1 (سرور تصمیم می‌گیرد).
+  int _existingPlanTotalG() {
+    final CrLotsPlan pl = crLotsPlan(_kgByField, <String>[for (final Map<String, dynamic> l in _existingLots) '${l['field_key']}']);
+    return pl.ok ? pl.totalG : -1;
+  }
+
+  /// null = معتبر. حالت full: «ورودی (کیلو)» الزامی و Σلات‌ها ≤ ورودی (سرور هم چک می‌کند).
+  String? _fullRuleError(int totalG) {
+    if (!_consumeFull) return null;
+    final int inG = wsGrams(_inputKg);
+    if (inG <= 0) return 'در حالت «تبدیل کامل» وارد کردن «ورودی (کیلو)» الزامی است';
+    if (totalG >= 0 && totalG > inG) return 'جمع وزن لات‌ها (${faNum(totalG / 1000, dec: 3)} کیلو) از ورودی (${faNum(inG / 1000, dec: 3)} کیلو) بیشتر است';
+    return null;
+  }
+
+  Widget _consumeSwitch() => SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        title: const Text('تبدیل کامل (هزینهٔ افت روی همین گروه)'),
+        subtitle: const Text('روشن: کل «ورودی» از لات مبدأ کم می‌شود و هزینهٔ افت روی لات‌های خروجی می‌افتد. خاموش: فقط جمع وزن لات‌ها کم می‌شود.'),
+        value: _consumeFull,
+        onChanged: _saving ? null : (bool v) => setState(() => _consumeFull = v),
+      );
+
+  /// افت = ورودی − Σلات‌ها (فقط نمایش) و خطای الزامی/سرریز در حالت full.
+  List<Widget> _consumeHints(int totalG) {
+    if (!_consumeFull) return const <Widget>[];
+    final String? err = _fullRuleError(totalG);
+    if (err != null) return <Widget>[_lotsRedLine(err)];
+    if (totalG < 0) return const <Widget>[];
+    final int loss = wsGrams(_inputKg) - totalG;
+    return <Widget>[Padding(padding: const EdgeInsets.only(top: 4), child: Text('افت = ورودی − جمع لات‌ها = ${faNum(loss / 1000, dec: 3)} کیلو'))];
+  }
+
+  /// کارت‌های مصرف/سود در ویرایش (فقط وقتی سرور pool_info داده؛ کارت سود خودش gold + profit.view را چک می‌کند).
+  List<Widget> _poolCards() {
+    if (!_editing) return const <Widget>[];
+    final Widget? info = cpPoolInfoCard(widget.existing?['pool_info']);
+    final int? rid = int.tryParse('${widget.existing?['id']}');
+    return <Widget>[
+      if (info != null) info,
+      if (rid != null && _hasExistingLots) CrackProfitCard(runId: rid),
+    ];
   }
 
   Future<void> _msgDialog(String title, String body) => showDialog<void>(
@@ -979,6 +1068,7 @@ class _CrackFormScreenState extends State<CrackFormScreen> {
               _readOnly('تعداد توقفات (AN)', faNum(c.stopCount, dec: 0)),
             ]),
             _lotsCard(), // S6
+            ..._poolCards(), // CP4
             _warnings(c),
             _realBalanceCard(c),
             _textField('note'),
@@ -1003,7 +1093,10 @@ class _CrackFormScreenState extends State<CrackFormScreen> {
 class CrackListScreen extends StatefulWidget {
   /// تغییر این عدد ⇒ بارگذاری مجدد (برای حالت تب بعد از ثبت جدید).
   final int refreshToken;
-  const CrackListScreen({super.key, this.refreshToken = 0});
+
+  /// CP4: وقتی از صفحهٔ سود (مدیر) باز می‌شود دکمهٔ بازگشت دارد.
+  final bool pushed;
+  const CrackListScreen({super.key, this.refreshToken = 0, this.pushed = false});
 
   @override
   State<CrackListScreen> createState() => _CrackListScreenState();
@@ -1087,7 +1180,7 @@ class _CrackListScreenState extends State<CrackListScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('گزارش‌های خط شکست من'),
-        automaticallyImplyLeading: false,
+        automaticallyImplyLeading: widget.pushed,
         actions: <Widget>[IconButton(tooltip: 'بازخوانی', icon: const Icon(Icons.refresh), onPressed: _load)],
       ),
       body: Directionality(
@@ -1148,6 +1241,7 @@ class _CrackListScreenState extends State<CrackListScreen> {
       if ('${it['line_code'] ?? ''}'.isNotEmpty) 'خط ${it['line_code']}',
       if ('${it['pistachio_type'] ?? ''}'.isNotEmpty) '${it['pistachio_type']}',
     ];
+    final String? poolLine = cpPoolInfoLine(it['pool_info']); // CP4: فقط مدیر؛ بدون مبلغ
     final List<String> sub = <String>[
       'ورودی ${faNum(ReturnsHelp.d(calc['input_kg']), dec: 3)} کیلو',
       if (it['kernel_kg'] != null) 'مغز ${faNum(ReturnsHelp.d(it['kernel_kg']), dec: 3)}',
@@ -1155,6 +1249,7 @@ class _CrackListScreenState extends State<CrackListScreen> {
       if (calc['loss_pct'] != null) 'مغزِ نشده ${faNum(ReturnsHelp.d(calc['loss_pct']), dec: 2)}٪',
       'توقف ${faNum(ReturnsHelp.d(calc['stop_count']), dec: 0)}',
       if (it['lots'] is List && (it['lots'] as List).isNotEmpty) 'لات: ${ReturnsHelp.maps(it['lots']).map((Map<String, dynamic> l) => '${l['code'] ?? ''}').join('، ')}',
+      if (poolLine != null) poolLine, // CP4
     ];
     return ListTile(
       title: Text(head.join(' · ')),
