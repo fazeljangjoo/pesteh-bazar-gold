@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'fmt.dart' show Fmt;
 
 import 'edition.dart';
+import 'crack_profit_ui.dart' show CrackProfitScreen, cpCanProfit; // CP4
 import 'margin_ui.dart';
 import 'excel_io.dart';
 import 'pdf_output.dart';
@@ -203,6 +204,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
         appBar: AppBar(
           title: Text(_titles[_tab], style: const TextStyle(fontSize: 16)),
           actions: <Widget>[
+            if (cpCanProfit()) IconButton(tooltip: 'سود خط شکست', onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const CrackProfitScreen())), icon: const Icon(Icons.local_fire_department_outlined)), // CP4: فقط مدیر gold + profit.view
             IconButton(tooltip: 'حاشیه سود (لات/نوع/اونس)', onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const MarginScreen())), icon: const Icon(Icons.pie_chart_outline)),
             if (StaffPerms.I.can('settings.manage')) IconButton(tooltip: 'نگاشت حساب‌ها به سطرها', onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const StatementMapScreen())), icon: const Icon(Icons.tune)),
             IconButton(tooltip: 'خروجی PDF', onPressed: _rep == null || _loading ? null : _pdf, icon: const Icon(Icons.picture_as_pdf_outlined)),
