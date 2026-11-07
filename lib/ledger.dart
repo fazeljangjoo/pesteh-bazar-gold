@@ -304,6 +304,18 @@ Future<List<PartyAccount>> loadParties() async {
     ));
   }
 
+  // برگشت از فروش: ارزش کالای برگشتی (V) از طلب ما کم می‌شود؛ مبلغی که نقد/چکی به خریدار پس داده‌ایم (R) دوباره به طلب اضافه می‌شود.
+  // اثر روی تراز = −(V − R) (همان منطق سرور: sold −= V، received −= R). قبلاً برگشت‌ها اینجا اصلاً حساب نمی‌شد و خریدار بعد از برگشت هم بدهکار می‌ماند.
+  final saleReturns = await d.rawQuery('''
+      SELECT r.party AS party, COALESCE(r.refund_amount, 0) AS refund,
+             COALESCE((SELECT SUM(i.kg * i.unit_price) FROM sale_return_items i WHERE i.return_id = r.id), 0) AS total
+      FROM sale_returns r''');
+  for (final r in saleReturns) {
+    final a = acc(r['party'] as String?);
+    a.sold -= (r['total'] as num).toDouble();
+    a.received -= (r['refund'] as num).toDouble();
+  }
+
   // طرف‌حساب‌هایی که دستی تعریف شده‌اند (حتی اگر هنوز خرید/فروشی نداشته باشند)
   for (final r in await d.query('parties')) {
     acc(r['name'] as String?);

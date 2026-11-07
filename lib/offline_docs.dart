@@ -63,6 +63,8 @@ class OfflineDocs {
           return await _getReturn(false, p);
         case 'sale_returns.summary':
           return await _summary(p);
+        case 'sale_returns.profit_lines':
+          return <String, dynamic>{'items': await _profitLines(p)};
         case 'proformas.list':
           return await _pfList(p);
         case 'proformas.get':
@@ -334,12 +336,16 @@ class OfflineDocs {
     return <String, dynamic>{..._retRow(r.first, total), 'items': items};
   }
 
-  /// Local equivalent of `sale_returns.summary` (revenue/COGS reversed in a period, by return date).
-  static Future<Map<String, dynamic>> _summary(Map<String, dynamic> p) async {
+  /// Local equivalent of `sale_returns.profit_lines`: one row per returned item (by return date) with the
+  /// original lot cost per kg + purchase extras per kg, so a return cancels exactly the profit the sale made.
+  static Future<List<Map<String, dynamic>>> _profitLines(Map<String, dynamic> p) async {
     final Database d = await AppDb.I.db;
     final StringBuffer sql = StringBuffer(
-        'SELECT COALESCE(SUM(i.kg * i.unit_price),0) AS rev, COALESCE(SUM(i.kg * COALESCE(pu.price,0)),0) AS cogs, COUNT(DISTINCT r.id) AS n '
-        'FROM sale_returns r JOIN sale_return_items i ON i.return_id=r.id LEFT JOIN purchases pu ON pu.id=i.lot_id WHERE 1=1');
+        'SELECT r.id AS return_id, r.number AS number, r.date AS date, i.sale_id AS sale_id, i.lot_id AS lot_id, i.kg AS kg, i.unit_price AS unit_price, '
+        'pu.code AS code, pu.type_name AS type_name, pu.base_type AS base_type, pu.labor_cost AS p_labor_cost, pu.transport_cost AS p_transport_cost, '
+        'pu.net_weight AS p_net_weight, pu.price AS cost_price, pu.price_usd AS cost_price_usd, c.name AS category_name, s.usd_rate AS usd_rate, s.date AS sale_date '
+        'FROM sale_returns r JOIN sale_return_items i ON i.return_id=r.id JOIN purchases pu ON pu.id=i.lot_id '
+        'LEFT JOIN categories c ON c.id=pu.category_id LEFT JOIN sales s ON s.id=i.sale_id WHERE 1=1');
     final List<Object?> args = <Object?>[];
     if ('${p['from'] ?? ''}'.isNotEmpty) {
       sql.write(' AND r.date>=?');
@@ -349,10 +355,39 @@ class OfflineDocs {
       sql.write(' AND r.date<=?');
       args.add(_date(p['to']));
     }
-    final List<Map<String, Object?>> r = await d.rawQuery(sql.toString(), args);
-    final double rev = _d(r.first['rev']);
-    final double cogs = _d(r.first['cogs']);
-    return <String, dynamic>{'count': _i(r.first['n']), 'revenue_reversed': rev, 'cogs_reversed': cogs, 'profit_reversed': rev - cogs};
+    sql.write(' ORDER BY r.date, r.id, i.id');
+    final String code = '${p['code'] ?? ''}'.trim().toLowerCase();
+    final List<Map<String, dynamic>> out = <Map<String, dynamic>>[];
+    for (final Map<String, Object?> r in await d.rawQuery(sql.toString(), args)) {
+      if (code.isNotEmpty && !'${r['code'] ?? ''}'.toLowerCase().contains(code)) continue;
+      final double net = _d(r['p_net_weight']);
+      final double extra = net > 0 ? (_d(r['p_labor_cost']) + _d(r['p_transport_cost'])) / net : 0.0;
+      out.add(<String, dynamic>{
+        'return_id': _i(r['return_id']), 'number': _i(r['number']), 'date': '${r['date']}',
+        'sale_id': _i(r['sale_id']), 'lot_id': _i(r['lot_id']),
+        'kg': _d(r['kg']), 'unit_price': _d(r['unit_price']),
+        'cost_price': _d(r['cost_price']), 'extra_per_kg': extra,
+        'code': r['code'], 'type_name': r['type_name'], 'base_type': r['base_type'], 'category_name': r['category_name'],
+        'cost_price_usd': r['cost_price_usd'] == null ? null : _d(r['cost_price_usd']),
+        'usd_rate': r['usd_rate'] == null ? null : _d(r['usd_rate']),
+        'sale_date': r['sale_date'] == null ? null : '${r['sale_date']}',
+      });
+    }
+    return out;
+  }
+
+  /// Local equivalent of `sale_returns.summary` (revenue/COGS reversed in a period, by return date).
+  /// COGS = lot cost + purchase extras per kg (same basis as the sale's own cost in the profit report).
+  static Future<Map<String, dynamic>> _summary(Map<String, dynamic> p) async {
+    final List<Map<String, dynamic>> lines = await _profitLines(p);
+    double rev = 0, cogs = 0;
+    final Set<int> ids = <int>{};
+    for (final Map<String, dynamic> l in lines) {
+      rev += _d(l['kg']) * _d(l['unit_price']);
+      cogs += _d(l['kg']) * (_d(l['cost_price']) + _d(l['extra_per_kg']));
+      ids.add(_i(l['return_id']));
+    }
+    return <String, dynamic>{'count': ids.length, 'revenue_reversed': rev, 'cogs_reversed': cogs, 'profit_reversed': rev - cogs};
   }
 
   // ======================= pro-formas =======================
