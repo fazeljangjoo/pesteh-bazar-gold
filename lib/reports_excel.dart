@@ -26,15 +26,15 @@ class ReportsExcel {
   static const Map<String, String> eventLabels = <String, String>{'send': 'ارسال', 'receive': 'دریافت'};
   static const Map<String, String> sourceLabels = <String, String>{'internal': 'کارگاه داخلی', 'outside': 'کارگاه بیرونی', 'crack': 'خط شکست'};
 
-  static const List<String> cartexHeads = <String>['تاریخ', 'رویداد', 'مالک', 'عدل', 'ورود (کیلو)', 'خروج (کیلو)', 'انس', 'گرم', 'دهنبست', 'مانده مالک (کیلو)', 'توضیحات'];
+  static const List<String> cartexHeads = <String>['تاریخ', 'رویداد', 'مالک', 'عدل', 'ورود (کیلو)', 'خروج (کیلو)', 'انس', 'گرم', 'دهنبست', 'مانده مالک (کیلو)', 'مانده کل همهٔ مالک‌ها (کیلو)', 'توضیحات'];
 
   /// ستون‌های A..K برگهٔ «کارتکس»؛ انس/دهنبست خالی؛ ردیف جمع در انتها.
   static ReportTable cartex(List<Map<String, dynamic>> rows, Map<String, dynamic> totals) {
     final List<List<String>> out = <List<String>>[
       for (final Map<String, dynamic> r in rows)
-        <String>[_date(r['date']), eventLabels['${r['event']}'] ?? _t(r['event']), _owner(r['owner']), _n(r['bale_count']), _n(r['in_kg']), _n(r['out_kg']), _n(r['ounce']), _n(r['gram_pct']), _n(r['dahanbast']), _n(r['balance_kg']), _t(r['note'])],
+        <String>[_date(r['date']), eventLabels['${r['event']}'] ?? _t(r['event']), _owner(r['owner']), _n(r['bale_count']), _n(r['in_kg']), _n(r['out_kg']), _n(r['ounce']), _n(r['gram_pct']), _n(r['dahanbast']), _n(r['balance_kg']), _n(r['balance_total_kg']), _t(r['note'])],
     ];
-    if (rows.isNotEmpty) out.add(<String>['جمع', '', '', '', _n(totals['in_kg']), _n(totals['out_kg']), '', '', '', _n(totals['balance_kg']), '']);
+    if (rows.isNotEmpty) out.add(<String>['جمع', '', '', '', _n(totals['in_kg']), _n(totals['out_kg']), '', '', '', _n(totals['balance_kg']), _n(totals['balance_total_kg']), '']);
     return ReportTable(columns: cartexHeads, rows: out, sheet: 'کارتکس مالک', prefix: 'cartex');
   }
 
@@ -46,7 +46,7 @@ class ReportsExcel {
   ];
   static const List<List<String>> summaryCrack = <List<String>>[
     <String>['runs_count', 'تعداد نوبت کار'], <String>['input_kg', 'وزن ورودی (کیلو)'], <String>['kernel_kg', 'مغز خروجی (کیلو)'], <String>['hull_kg', 'پوست (کیلو)'], <String>['soil_kg', 'خاک (کیلو)'],
-    <String>['sub_kernel_kg', 'مجموع زیرمجموعه‌های مغز (کیلو)'], <String>['returned_all_kg', 'برگشتی همهٔ خروجی‌ها (کیلو)'], <String>['loss_kg', 'افت (کیلو)'], <String>['loss_pct', 'افت (٪)'],
+    <String>['sub_kernel_kg', 'مجموع زیرمجموعه‌های مغز (کیلو)'], <String>['returned_all_kg', 'برگشتی همهٔ خروجی‌ها (کیلو)'], <String>['loss_kg', 'مغزِ نشده = افت + پوست + خاک (کیلو)'], <String>['loss_pct', 'مغزِ نشده ٪ (از ورودی)'],
     <String>['kernel_pct', 'مغز از ورودی (٪)'], <String>['capacity_kgh', 'ظرفیت واقعی (کیلو/ساعت)'], <String>['run_minutes', 'زمان کارکرد (دقیقه)'], <String>['stop_minutes', 'مجموع توقف (دقیقه)'],
   ];
   static const String crackWarning = '«برگشتی همهٔ خروجی‌ها» = مغز + پوست + خاک + زیرمجموعه‌های مغز است؛ اگر زیرمجموعه‌ها بخشی از وزن مغز باشند دوبار شمرده می‌شود.';

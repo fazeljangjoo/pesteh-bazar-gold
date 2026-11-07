@@ -200,7 +200,7 @@ class _CartexBodyState extends State<_CartexBody> with AutomaticKeepAliveClientM
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    const List<String> heads = <String>['تاریخ', 'رویداد', 'مالک', 'عدل', 'ورود (کیلو)', 'خروج (کیلو)', 'انس', 'گرم', 'دهنبست', 'مانده مالک (کیلو)', 'توضیحات'];
+    const List<String> heads = <String>['تاریخ', 'رویداد', 'مالک', 'عدل', 'ورود (کیلو)', 'خروج (کیلو)', 'انس', 'گرم', 'دهنبست', 'مانده مالک (کیلو)', 'مانده کل همهٔ مالک‌ها (کیلو)', 'توضیحات'];
     final List<DataRow> rows = <DataRow>[
       for (final Map<String, dynamic> r in _rows)
         DataRow(cells: <DataCell>[
@@ -214,6 +214,7 @@ class _CartexBodyState extends State<_CartexBody> with AutomaticKeepAliveClientM
           _rcell(_rnum(r['gram_pct'])),
           _rcell(_rnum(r['dahanbast'])),
           _rcell(_rkg(r['balance_kg']), bold: true),
+          _rcell(_rnum(r['balance_total_kg']), bold: true), // S3-ج (S7: بازسازی)؛ کلید نبود ⇒ «—»
           _rcell(_rtxt(r['note'])),
         ]),
     ];
@@ -229,6 +230,7 @@ class _CartexBodyState extends State<_CartexBody> with AutomaticKeepAliveClientM
         _rcell(''),
         _rcell(''),
         _rcell(_rkg(_tot['balance_kg']), bold: true),
+        _rcell(_rnum(_tot['balance_total_kg']), bold: true),
         _rcell(''),
       ]));
     }
@@ -275,7 +277,8 @@ class _CartexBodyState extends State<_CartexBody> with AutomaticKeepAliveClientM
             _rstat('مانده افتتاحیه', _tot['opening_kg']),
             _rstat('ورود', _tot['in_kg']),
             _rstat('خروج', _tot['out_kg']),
-            _rstat('مانده', _tot['balance_kg'], strong: true),
+            _rstat('جمع مانده مالک‌ها', _tot['balance_kg']),
+            if (_tot['balance_total_kg'] != null) _rstat('مانده کل (سراسری)', _tot['balance_total_kg'], strong: true),
           ]),
           if (_owners.isNotEmpty) ...<Widget>[
             const SizedBox(height: 8),
@@ -288,7 +291,7 @@ class _CartexBodyState extends State<_CartexBody> with AutomaticKeepAliveClientM
         ],
         const SizedBox(height: 8),
         const Text(
-          'فقط کارگاه بیرونی با قبض: ارسال = خروج در تاریخ سفارش، دریافت = ورود در تاریخ دریافت. مانده هر مالک جدا و تجمعی است و مانده منفی یعنی پسته‌ای که هنوز بیرون است. '
+          'فقط کارگاه بیرونی با قبض: ارسال = خروج در تاریخ سفارش، دریافت = ورود در تاریخ دریافت. «مانده مالک» برای هر مالک جدا و تجمعی است؛ «مانده کل» تجمعی همهٔ مالک‌ها با همان ترتیب تاریخ است (مثل ستون J اکسل) و با فیلتر مالک/کارگاه فقط روی همان رویدادهاست. مانده منفی یعنی پسته‌ای که هنوز بیرون است. '
           'ضایعات برنمی‌گردد و فقط در توضیحات ردیف دریافت می‌آید. ستون‌های انس و دهنبست در این نسخه خالی‌اند. این گزارش هیچ قیمتی ندارد.',
           style: TextStyle(fontSize: 12),
         ),
@@ -424,8 +427,8 @@ class _SummaryBodyState extends State<_SummaryBody> with AutomaticKeepAliveClien
             _rkv('خاک', _rkg(k['soil_kg'])),
             _rkv('مجموع زیرمجموعه‌های مغز (سالم، گندمی، گلدار، لپه و …)', _rkg(k['sub_kernel_kg'])),
             _rkv('برگشتی همهٔ خروجی‌ها', _rkg(k['returned_all_kg']), bold: true),
-            _rkv('افت (کیلو)', _rkg(k['loss_kg'])),
-            _rkv('افت (٪)', k['loss_pct'] == null ? '—' : '${_rnum(k['loss_pct'])}٪'),
+            _rkv('مغزِ نشده = افت + پوست + خاک (کیلو)', _rkg(k['loss_kg'])),
+            _rkv('مغزِ نشده ٪ (از ورودی)', k['loss_pct'] == null ? '—' : '${_rnum(k['loss_pct'])}٪'),
             _rkv('مغز از ورودی (٪)', k['kernel_pct'] == null ? '—' : '${_rnum(k['kernel_pct'])}٪'),
             _rkv('ظرفیت واقعی (کیلو/ساعت)', _rnum(k['capacity_kgh'])),
             _rkv('زمان کارکرد (دقیقه)', _rnum(k['run_minutes'])),
@@ -569,7 +572,7 @@ class _CompareBodyState extends State<_CompareBody> with AutomaticKeepAliveClien
         ),
         const SizedBox(height: 4),
         const Text(
-          'بازده = خروجی خوب ÷ ورودی (سالم در داخلی، خروجی برگشتی در بیرونی، مغز در خط شکست). ظرفیت فقط برای خط شکست و میانگین افت گرم فقط برای کارگاه بیرونی است. بدون قیمت.',
+          'بازده = خروجی خوب ÷ ورودی (سالم در داخلی، خروجی برگشتی در بیرونی، مغز در خط شکست). ظرفیت فقط برای خط شکست و میانگین افت گرم فقط برای کارگاه بیرونی است. «افت» در ردیف‌های خط شکست = ورودی − مغز (مغزِ نشده؛ شامل پوست و خاک) است، نه افت واقعی. بدون قیمت.',
           style: TextStyle(fontSize: 12),
         ),
       ],

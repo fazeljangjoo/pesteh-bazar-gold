@@ -177,6 +177,8 @@ List<double> wsAlloc(List<Map<String, Object>> outs, Map<String, num> pr, WsCost
 /// مرحلهٔ ۳-الف — گزارش خط شکست (برگهٔ اکسل «گزارش خط شکست»). آینهٔ `pb_cr_calc` در سرور (workshop_calc.php)؛ تست مشترک: test/crack_cases.json.
 ///   N = L*M/100 · X = U/T*60 (T خالی/۰ ⇒ null) · AJ = L · AL = L−U · loss% = AL/AJ*100 · AP = M − AK*100/AJ (تأییدنشده؛ AK/M خالی یا AJ=۰ ⇒ null)
 ///   AN = تعداد توقف‌ها · مجموع دقیقهٔ توقف. kg روی گرم صحیح؛ دقیقه روی صدم صحیح؛ خروجی‌ها ۳ رقم اعشار.
+/// S2 (افزودنی): sub_sum = ΣAA..AH · non_kernel = L−U · real_loss = L−(U+V+W) (V,W خالی=۰؛ U خالی ⇒ null) · shortfall = N−U (M یا U خالی ⇒ null)
+///   sound_pct_input = AA/L · sound_pct_kernel = AA/U · sub_mismatch/over_output مطابق CHANGELOG_S2a.
 double _crR3(double v) {
   final double r = (v * 1000).round() / 1000;
   return r == 0 ? 0.0 : r;
@@ -191,6 +193,17 @@ class CrackCalc {
   final double? apUnconfirmed; // AP (معنی تأییدنشده)
   final int stopCount; // AN
   final double stopTotalMin;
+  // --- S2 ---
+  final double? subSumKg; // AA+…+AH؛ هیچ‌کدام وارد نشده ⇒ null
+  final bool? subMismatch; // U یا sub_sum خالی ⇒ null
+  final double nonKernelKg; // L−U (= lossKg)
+  final double? realLossKg; // L−(U+V+W)؛ U خالی ⇒ null
+  final double? realLossPct;
+  final bool overOutput; // real_loss < 0
+  final double? shortfallKg; // N−U؛ M یا U خالی ⇒ null
+  final double? shortfallPct; // ÷N×۱۰۰ (N>0)
+  final double? soundPctInput; // AA/L
+  final double? soundPctKernel; // AA/U
   const CrackCalc({
     required this.estimatedKernelKg,
     required this.capacityKgh,
@@ -200,6 +213,16 @@ class CrackCalc {
     required this.apUnconfirmed,
     required this.stopCount,
     required this.stopTotalMin,
+    this.subSumKg,
+    this.subMismatch,
+    required this.nonKernelKg,
+    this.realLossKg,
+    this.realLossPct,
+    this.overOutput = false,
+    this.shortfallKg,
+    this.shortfallPct,
+    this.soundPctInput,
+    this.soundPctKernel,
   });
 }
 
@@ -210,9 +233,20 @@ CrackCalc crackCalc({
   num? runMinutes,
   num? initialKernelKg,
   List<num> stopMinutes = const <num>[],
+  num? hullKg,
+  num? soilKg,
+  num? soundKg,
+  num? wheatKg,
+  num? superFineKg,
+  num? flowerKg,
+  num? splitKg,
+  num? unbreakableKg,
+  num? pinkKg,
+  num? wasteKernelKg,
 }) {
   final int lg = wsGrams(inputKg);
   final int ug = wsGrams(kernelKg);
+  final int? uN = kernelKg == null ? null : ug; // U خالی ⇒ null (برای کلیدهای تراز)
   final double? m = gramPct?.toDouble();
   final double? t = runMinutes?.toDouble();
   final double? ak = initialKernelKg?.toDouble();
@@ -221,7 +255,37 @@ CrackCalc crackCalc({
     stopCents += (s * 100).round();
   }
   final int lossG = lg - ug;
+  // --- S2: تراز واقعی ---
+  int subG = 0;
+  bool subAny = false;
+  for (final num? v in <num?>[soundKg, wheatKg, superFineKg, flowerKg, splitKg, unbreakableKg, pinkKg, wasteKernelKg]) {
+    if (v != null) {
+      subG += wsGrams(v);
+      subAny = true;
+    }
+  }
+  final int? aaG = soundKg == null ? null : wsGrams(soundKg);
+  final int vG = hullKg == null ? 0 : wsGrams(hullKg); // V خالی = ۰
+  final int wG = soilKg == null ? 0 : wsGrams(soilKg); // W خالی = ۰
+  final int? nG = m == null ? null : (lg * m / 100).round();
+  final int? realG = uN == null ? null : lg - (uN + vG + wG);
+  final int? shortG = (nG == null || uN == null) ? null : nG - uN;
+  bool? mismatch;
+  if (uN != null && subAny) {
+    final double tol = 1000 > uN * 0.001 ? 1000.0 : uN * 0.001;
+    mismatch = subG > 0 && uN > 0 && (uN - subG).abs() > tol;
+  }
   return CrackCalc(
+    subSumKg: subAny ? subG / 1000 : null,
+    subMismatch: mismatch,
+    nonKernelKg: lossG / 1000,
+    realLossKg: realG == null ? null : realG / 1000,
+    realLossPct: (realG == null || lg <= 0) ? null : _crR3(realG / lg * 100),
+    overOutput: realG != null && realG < 0,
+    shortfallKg: shortG == null ? null : shortG / 1000,
+    shortfallPct: (shortG == null || nG == null || nG <= 0) ? null : _crR3(shortG / nG * 100),
+    soundPctInput: (aaG == null || lg <= 0) ? null : _crR3(aaG / lg * 100),
+    soundPctKernel: (aaG == null || uN == null || uN <= 0) ? null : _crR3(aaG / uN * 100),
     estimatedKernelKg: m == null ? null : (lg * m / 100).round() / 1000,
     capacityKgh: (t == null || t <= 0) ? null : _crR3((ug / 1000) * 60 / t),
     inputKg: lg / 1000,
@@ -253,33 +317,47 @@ OutsideCalc outsideCalc({num? sentKg, num? sentGramPct, num? recvKernelKg, num? 
   );
 }
 
-/// ردیف جمع: هر ردیف {sent_kg, sent_gram_pct, recv_kernel_kg, recv_gram_pct}.
+/// ردیف جمع: هر ردیف {sent_kg, sent_gram_pct, recv_kernel_kg, recv_gram_pct}. آینهٔ PHP `pb_ow_totals`.
+/// S3-الف: `sent_gram_avg`/`recv_gram_avg` = میانگین ساده F و I فقط روی ردیف‌هایی که هر دو را دارند؛ `gram_pair_count` = تعداد آن ردیف‌ها؛
+/// `loss_gram` = sent_gram_avg − recv_gram_avg. `sent_gram_sum`/`recv_gram_sum` قدیمی‌اند (UI استفاده نکند). بدون جفت ⇒ avg/loss = null.
+/// درصدها روی «هزارم» صحیح حساب می‌شوند (همان PHP).
 Map<String, double?> outsideTotals(List<Map<String, num?>> rows) {
-  int eG = 0, gG = 0, hG = 0;
-  double f = 0, i = 0;
+  int eG = 0, gG = 0, hG = 0, f = 0, i = 0, pf = 0, pi = 0, pn = 0;
   bool hasF = false, hasI = false;
   for (final Map<String, num?> r in rows) {
     final OutsideCalc c = outsideCalc(sentKg: r['sent_kg'], sentGramPct: r['sent_gram_pct'], recvKernelKg: r['recv_kernel_kg'], recvGramPct: r['recv_gram_pct']);
     eG += wsGrams(r['sent_kg']);
     if (c.estKernelKg != null) gG += wsGrams(c.estKernelKg);
     if (r['recv_kernel_kg'] != null) hG += wsGrams(r['recv_kernel_kg']);
-    if (r['sent_gram_pct'] != null) {
-      f += r['sent_gram_pct']!.toDouble();
+    final int? fm = r['sent_gram_pct'] == null ? null : (r['sent_gram_pct']!.toDouble() * 1000).round();
+    final int? im = r['recv_gram_pct'] == null ? null : (r['recv_gram_pct']!.toDouble() * 1000).round();
+    if (fm != null) {
+      f += fm;
       hasF = true;
     }
-    if (r['recv_gram_pct'] != null) {
-      i += r['recv_gram_pct']!.toDouble();
+    if (im != null) {
+      i += im;
       hasI = true;
     }
+    if (fm != null && im != null) {
+      pf += fm;
+      pi += im;
+      pn++;
+    }
   }
+  final int? fAvg = pn > 0 ? (pf / pn).round() : null;
+  final int? iAvg = pn > 0 ? (pi / pn).round() : null;
   return <String, double?>{
     'sent_kg': eG / 1000,
     'est_kernel_kg': gG / 1000,
     'recv_kernel_kg': hG / 1000,
     'remaining_kernel_kg': (gG - hG) / 1000,
-    'sent_gram_sum': hasF ? _crR3(f) : null,
-    'recv_gram_sum': hasI ? _crR3(i) : null,
-    'loss_gram': (hasF && hasI) ? _crR3(f - i) : null,
+    'sent_gram_sum': hasF ? f / 1000 : null,
+    'recv_gram_sum': hasI ? i / 1000 : null,
+    'sent_gram_avg': fAvg == null ? null : fAvg / 1000,
+    'recv_gram_avg': iAvg == null ? null : iAvg / 1000,
+    'gram_pair_count': pn.toDouble(),
+    'loss_gram': fAvg == null ? null : (fAvg - iAvg!) / 1000,
   };
 }
 
@@ -350,9 +428,10 @@ Map<String, double> feedTotals(List<Map<String, dynamic>> rows) {
 /// مرحلهٔ ۶ — «کارتکس مالک» (آینهٔ PHP `pb_cartex_build`؛ تست مشترک: test/cartex_cases.json).
 /// رویداد: {date 'YYYY-MM-DD', ord, event (send|receive)، owner, bale_count?, in_kg?, out_kg?, gram_pct?, note?, ref_id?}.
 /// مانده (balanceKg) = مانده قبلیِ همان مالک + ورود − خروج؛ رویدادهای قبل از `from` فقط در openingKg می‌آیند و بعد از `to` حذف می‌شوند.
+/// S3-ب: balanceTotalKg هر ردیف = مانده تجمعی همهٔ مالک‌ها با همان ترتیب (زنجیرهٔ J اکسل)؛ رویدادهای قبل از `from` هم لحاظ می‌شوند.
 /// انس و دهنبست همیشه null (تصمیم کاربر). هیچ قیمتی در گزارش نیست.
 class CartexRow {
-  const CartexRow({required this.date, required this.event, required this.owner, this.baleCount, required this.inKg, required this.outKg, this.gramPct, required this.balanceKg, required this.note, this.refId});
+  const CartexRow({required this.date, required this.event, required this.owner, this.baleCount, required this.inKg, required this.outKg, this.gramPct, required this.balanceKg, this.balanceTotalKg, required this.note, this.refId});
   final String date;
   final String event;
   final String owner;
@@ -360,7 +439,8 @@ class CartexRow {
   final double inKg;
   final double outKg;
   final double? gramPct;
-  final double balanceKg;
+  final double balanceKg; // مانده به‌ازای همان مالک
+  final double? balanceTotalKg; // S3-ب: مانده سراسری همهٔ مالک‌ها (زنجیرهٔ J اکسل)؛ null فقط برای ردیف‌های قدیمیِ بدون کلید
   final String note;
   final Object? refId;
 }
@@ -375,13 +455,15 @@ class CartexOwner {
 }
 
 class CartexResult {
-  const CartexResult({required this.rows, required this.owners, required this.openingKg, required this.inKg, required this.outKg, required this.balanceKg});
+  const CartexResult({required this.rows, required this.owners, required this.openingKg, required this.inKg, required this.outKg, required this.balanceKg, this.openingTotalKg, this.balanceTotalKg});
   final List<CartexRow> rows;
   final List<CartexOwner> owners; // به ترتیب اولین ظهور
   final double openingKg;
   final double inKg;
   final double outKg;
   final double balanceKg;
+  final double? openingTotalKg; // S3-ب
+  final double? balanceTotalKg; // S3-ب: آخرین مانده سراسری
 }
 
 CartexResult cartexBuild(List<Map<String, dynamic>> events, {String? from, String? to}) {
@@ -397,6 +479,7 @@ CartexResult cartexBuild(List<Map<String, dynamic>> events, {String? from, Strin
   final Map<String, int> bal = <String, int>{}, open = <String, int>{}, inn = <String, int>{}, out = <String, int>{};
   final List<String> order = <String>[];
   final List<CartexRow> rows = <CartexRow>[];
+  int gbal = 0; // S3-ب: مانده سراسری همهٔ مالک‌ها
   for (final MapEntry<int, Map<String, dynamic>> x in idx) {
     final Map<String, dynamic> e = x.value;
     final String d = (e['date'] ?? '').toString();
@@ -411,6 +494,7 @@ CartexResult cartexBuild(List<Map<String, dynamic>> events, {String? from, Strin
     }
     final int ig = wsGrams(e['in_kg'] as num?), og = wsGrams(e['out_kg'] as num?);
     bal[o] = bal[o]! + ig - og;
+    gbal += ig - og;
     if (f != null && d.compareTo(f) < 0) {
       open[o] = open[o]! + ig - og;
       continue;
@@ -428,6 +512,7 @@ CartexResult cartexBuild(List<Map<String, dynamic>> events, {String? from, Strin
       outKg: og / 1000,
       gramPct: (gp is num) ? (gp.toDouble() * 1000).round() / 1000 : null,
       balanceKg: bal[o]! / 1000,
+      balanceTotalKg: gbal / 1000,
       note: (e['note'] ?? '').toString(),
       refId: e['ref_id'],
     ));
@@ -441,7 +526,7 @@ CartexResult cartexBuild(List<Map<String, dynamic>> events, {String? from, Strin
     tb += bal[o]!;
     owners.add(CartexOwner(owner: o, openingKg: open[o]! / 1000, inKg: inn[o]! / 1000, outKg: out[o]! / 1000, balanceKg: bal[o]! / 1000));
   }
-  return CartexResult(rows: rows, owners: owners, openingKg: to0 / 1000, inKg: ti / 1000, outKg: tu / 1000, balanceKg: tb / 1000);
+  return CartexResult(rows: rows, owners: owners, openingKg: to0 / 1000, inKg: ti / 1000, outKg: tu / 1000, balanceKg: tb / 1000, openingTotalKg: to0 / 1000, balanceTotalKg: gbal / 1000);
 }
 
 // ───────────── مرحلهٔ ۶-۲ — خلاصهٔ مدیریتی و مقایسه (آینهٔ PHP؛ تست مشترک: test/summary_cases.json و test/compare_cases.json) ─────────────
@@ -569,4 +654,95 @@ List<WcmpRow> wcmpBuild(List<Map<String, dynamic>> items) {
     return c != 0 ? c : a.source.compareTo(b.source);
   });
   return rows;
+}
+
+// ---------------------------------------------------------------------------
+// S1 — پارس ورودی عددی «گزارش خط شکست». آینهٔ `pb_cr_num` در workshop_crack.php؛ تست مشترک: test/crack_parse_cases.json.
+//   خالی یا فقط خط‌تیره (- – — ‒ _) ⇒ خالی (null و crIsBlank=true).
+//   `عدد(عدد)` (مثل 500(190)) ⇒ فقط عدد اول؛ عدد داخل پرانتز فعلاً دور ریخته می‌شود (تصمیم کاربر).
+//   ارقام فارسی/عربی، ٫ (اعشار) و جداکنندهٔ هزارگان (, ٬ ،) پشتیبانی می‌شود. هر چیز غیرعددی دیگر ⇒ null با crIsBlank=false (خطای «نامعتبر»).
+// ---------------------------------------------------------------------------
+String crNormDigits(String s) {
+  const String fa = '۰۱۲۳۴۵۶۷۸۹';
+  const String ar = '٠١٢٣٤٥٦٧٨٩';
+  final StringBuffer b = StringBuffer();
+  for (final int rune in s.runes) {
+    final String ch = String.fromCharCode(rune);
+    final int fi = fa.indexOf(ch);
+    final int ai = ar.indexOf(ch);
+    if (fi >= 0) {
+      b.write(fi);
+    } else if (ai >= 0) {
+      b.write(ai);
+    } else if (ch == '٫') {
+      b.write('.');
+    } else if (ch == '٬' || ch == ',' || ch == '،') {
+      // thousands separator
+    } else if (ch == '（') {
+      b.write('(');
+    } else if (ch == '）') {
+      b.write(')');
+    } else if (ch == '\u2212') {
+      b.write('-');
+    } else {
+      b.write(ch);
+    }
+  }
+  return b.toString();
+}
+
+bool crIsBlank(String s) {
+  final String t = crNormDigits(s).trim();
+  return t.isEmpty || RegExp(r'^[-\u2013\u2014\u2012_]+$').hasMatch(t);
+}
+
+double? crParseNum(String s) {
+  if (crIsBlank(s)) return null;
+  String t = crNormDigits(s).trim();
+  final RegExpMatch? m = RegExp(r'^(-?\d+(?:\.\d+)?)\s*\([^()]*\)$').firstMatch(t);
+  if (m != null) t = m.group(1)!;
+  final double? v = double.tryParse(t);
+  return (v == null || !v.isFinite) ? null : v;
+}
+
+// ---------------------------------------------------------------------------
+// S4 — حالت «ورود درصدی» خط شکست (تابع‌های خالص؛ آینهٔ JS در app/modules_crack.js).
+// مبنا = وزن ورودی L (کیلو). فقط کیلو ذخیره می‌شود؛ درصد فقط برای ورود/نمایش است.
+// تبدیل روی «گرم صحیح»: گرم = round(L_گرم × درصد ÷ ۱۰۰) (نیم رو به بالا)؛ خروجی کیلو با ≤۳ رقم اعشار.
+// ---------------------------------------------------------------------------
+
+/// فیلدهای مجاز ورود درصدی: U, V, W, Z, AA..AH. (L، M، دقیقه‌ها و بقیه هرگز درصدی نیستند.)
+const List<String> kCrPctKeys = <String>[
+  'kernel_kg', // U
+  'hull_kg', // V
+  'soil_kg', // W
+  'hull_left_kg', // Z
+  'sound_kg', // AA
+  'wheat_kg', // AB
+  'super_fine_kg', // AC
+  'flower_kg', // AD
+  'split_kg', // AE
+  'unbreakable_kg', // AF
+  'pink_kg', // AG
+  'waste_kernel_kg', // AH
+];
+
+/// درصد معتبر = عددِ متناهی در بازهٔ ۰..۱۰۰ (هر دو سر بسته).
+bool crPctOk(double? p) => p != null && p.isFinite && p >= 0 && p <= 100;
+
+/// درصد (از وزن ورودی) ⇒ کیلو. L خالی/≤۰ یا درصد نامعتبر ⇒ null.
+double? crPctToKg(double? inputKg, double? pct) {
+  if (inputKg == null || !crPctOk(pct)) return null;
+  final int lg = wsGrams(inputKg);
+  if (lg <= 0) return null;
+  final int g = (lg * pct! / 100 + 0.5 + 1e-6).floor();
+  return g / 1000;
+}
+
+/// کیلو ⇒ درصد از وزن ورودی (۴ رقم اعشار؛ برای نمایش در ویرایش ردیف قدیمی). L خالی/≤۰ یا kg خالی ⇒ null.
+double? crKgToPct(double? inputKg, double? kg) {
+  if (inputKg == null || kg == null) return null;
+  final int lg = wsGrams(inputKg);
+  if (lg <= 0) return null;
+  return ((wsGrams(kg) * 100 / lg) * 10000).round() / 10000;
 }

@@ -63,6 +63,8 @@ String _kindLabel(String k) {
     'adjust': 'اصلاح',
     'transfer_in': 'انتقال ورودی',
     'transfer_out': 'انتقال خروجی',
+    'crack_out': 'کسر برای لات خط شکست',
+    'crack_in': 'ورود لات خط شکست',
   };
   return m[k] ?? k;
 }

@@ -3,10 +3,13 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'processing_ui.dart' show ProcessingStore;
+import 'crack_lots.dart';
+import 'db.dart' show AppDb;
+import 'perms.dart' show StaffPerms;
+import 'processing_ui.dart' show ProcessingStore, ProcWriteResult;
 import 'returns_ui.dart' show ReturnsHelp;
 import 'utils.dart';
-import 'warehouse_ui.dart' show StockApi, StockApiException;
+import 'warehouse_ui.dart' show StockApi, StockApiException, StockLookup, WhOption;
 import 'widgets.dart' show pickDate;
 import 'workshop_calc.dart';
 
@@ -16,34 +19,8 @@ import 'workshop_calc.dart';
 /// AO حذف شده و AP (معنی تأییدنشده) عمداً در UI نشان داده نمی‌شود.
 /// تاریخ: شمسی در UI، میلادی (yyyy-mm-dd) در API.
 
-String _crEn(String s) {
-  const String fa = '۰۱۲۳۴۵۶۷۸۹';
-  const String ar = '٠١٢٣٤٥٦٧٨٩';
-  final StringBuffer b = StringBuffer();
-  for (final int c in s.runes) {
-    final String ch = String.fromCharCode(c);
-    final int fi = fa.indexOf(ch);
-    final int ai = ar.indexOf(ch);
-    if (fi >= 0) {
-      b.write(fi);
-    } else if (ai >= 0) {
-      b.write(ai);
-    } else if (ch == '٫') {
-      b.write('.');
-    } else if (ch == '٬' || ch == ',') {
-      // thousands separator
-    } else {
-      b.write(ch);
-    }
-  }
-  return b.toString();
-}
-
-/// خالی ⇒ null؛ نامعتبر ⇒ null.
-double? _crNum(String s) {
-  final String t = _crEn(s).trim();
-  return t.isEmpty ? null : double.tryParse(t);
-}
+/// S1: خالی یا «-» ⇒ null؛ `عدد(عدد)` ⇒ عدد اول؛ نامعتبر ⇒ null (با crIsBlank از خالی تشخیص داده می‌شود). منطق در workshop_calc.dart.
+double? _crNum(String s) => crParseNum(s);
 
 String _crFmt(num? v) {
   if (v == null) return '';
@@ -66,6 +43,8 @@ DateTime? _crParseDate(dynamic s) {
 }
 
 const String _kCrackListCache = 'crack_list_v1';
+/// S4: انتخاب کاربر برای «ورود به‌صورت درصد»؛ روی دستگاه ماندگار (پیش‌فرض خاموش).
+const String _kCrackPctPref = 'crack_pct_mode_v1';
 
 class _StopRow {
   final TextEditingController reason = TextEditingController();
@@ -137,6 +116,12 @@ class _CrackFormScreenState extends State<CrackFormScreen> {
   final Map<String, TextEditingController> _n = <String, TextEditingController>{
     for (final List<String> f in _kNumFields) f[0]: TextEditingController(),
   };
+  /// S4: متن درصدی هر فیلد مجاز (فقط برای نمایش/ورود؛ حقیقتِ ذخیره همیشه کیلو در [_n] است).
+  final Map<String, TextEditingController> _p = <String, TextEditingController>{
+    for (final String k in kCrPctKeys) k: TextEditingController(),
+  };
+  final Set<String> _pctTouched = <String>{}; // فیلدهایی که کاربر درصدشان را دست زده؛ بقیه از kg/L مشتق‌اند
+  bool _pctPref = false;
   final List<_StopRow> _stops = <_StopRow>[];
   late final String _uid;
   DateTime _runDate = DateTime.now();
@@ -145,12 +130,27 @@ class _CrackFormScreenState extends State<CrackFormScreen> {
   TimeOfDay? _end;
   bool _saving = false;
 
+  // --- S6: ثبت خروجی‌ها به‌عنوان لات جدید (فقط workshop.manage؛ پیش‌فرض خاموش؛ سرور مرجع نهایی است) ---
+  bool _lotsOn = false;
+  bool _removeLots = false;
+  final Set<String> _lotFields = <String>{};
+  String? _lotSource; // شناسهٔ سرورِ لات مبدأ
+  int? _lotCat; // شناسهٔ سرورِ دسته؛ null = هم‌دستهٔ لات مبدأ
+  String? _lotWh; // uid انبار؛ null = انبار اصلی
+  bool _lotsLoading = false;
+  bool _lotOptsLoaded = false;
+  String? _lotsLoadError;
+  List<_LotSrc> _lotSources = <_LotSrc>[];
+  List<_LotCat> _lotCats = <_LotCat>[];
+  List<WhOption> _lotWhs = <WhOption>[];
+
   bool get _editing => widget.existing != null;
 
   @override
   void initState() {
     super.initState();
     _uid = ReturnsHelp.newUid('cr');
+    _loadPctPref();
     final Map<String, dynamic>? e = widget.existing;
     if (e == null) return;
     _runDate = _crParseDate(e['run_date']) ?? DateTime.now();
@@ -179,6 +179,9 @@ class _CrackFormScreenState extends State<CrackFormScreen> {
     for (final TextEditingController c in _n.values) {
       c.dispose();
     }
+    for (final TextEditingController c in _p.values) {
+      c.dispose();
+    }
     for (final _StopRow r in _stops) {
       r.dispose();
     }
@@ -186,6 +189,99 @@ class _CrackFormScreenState extends State<CrackFormScreen> {
   }
 
   void _snack(String m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+
+  // --- S4: ورود درصدی (کیلو همیشه حقیقت است؛ ذخیره/سرور/محاسبات بدون تغییر) ---
+
+  double? get _inputKg => _crNum(_n['input_kg']!.text);
+
+  /// L>۰ (روی گرم صحیح).
+  bool get _pctAvailable => wsGrams(_inputKg) > 0;
+
+  /// حالت درصدی فقط وقتی فعال است که کاربر روشن کرده باشد و L>۰ باشد.
+  bool get _pctActive => _pctPref && _pctAvailable;
+
+  Future<void> _loadPctPref() async {
+    try {
+      final SharedPreferences sp = await SharedPreferences.getInstance();
+      final bool v = sp.getBool(_kCrackPctPref) ?? false;
+      if (!mounted || v == _pctPref) return;
+      setState(() {
+        _pctPref = v;
+        _pctRefresh();
+      });
+    } catch (_) {
+      // ذخیره‌سازی در دسترس نیست ⇒ پیش‌فرض (خاموش)
+    }
+  }
+
+  Future<void> _setPctPref(bool v) async {
+    setState(() {
+      _pctPref = v;
+      _pctTouched.clear(); // همهٔ درصدها از kg فعلی مشتق می‌شوند
+      _pctRefresh();
+    });
+    try {
+      final SharedPreferences sp = await SharedPreferences.getInstance();
+      await sp.setBool(_kCrackPctPref, v);
+    } catch (_) {}
+  }
+
+  /// درصدِ نمایشیِ مشتق از kg/L (برای فیلد دست‌نخورده)؛ بدون اثر بر مقدار ذخیره.
+  void _pctSyncFromKg(String key) {
+    final double? pct = crKgToPct(_inputKg, _crNum(_n[key]!.text));
+    _p[key]!.text = pct == null ? '' : _crFmt(pct);
+  }
+
+  /// کاربر درصد را نوشته ⇒ kg = round(L×pct/100, 3). خالی/«-» ⇒ خالی؛ نامعتبر ⇒ kg خالی (ثبت با پیام رد می‌شود).
+  void _pctApply(String key) {
+    final String raw = _p[key]!.text;
+    final double? kg = crPctToKg(_inputKg, _crNum(raw));
+    _n[key]!.text = (crIsBlank(raw) || kg == null) ? '' : _crFmt(kg);
+  }
+
+  /// با تغییر L یا تغییر حالت: فیلد دست‌خورده از درصدش kg تازه می‌گیرد؛ بقیه درصدشان از kg مشتق می‌شود.
+  void _pctRefresh() {
+    if (!_pctActive) return;
+    for (final String k in kCrPctKeys) {
+      if (_pctTouched.contains(k)) {
+        _pctApply(k);
+      } else {
+        _pctSyncFromKg(k);
+      }
+    }
+  }
+
+  /// null = معتبر. فقط فیلد دست‌خورده بررسی می‌شود (ردیف قدیمی با kg>L نباید بی‌دلیل رد شود).
+  String? _pctError(String key) {
+    if (!_pctActive || !_pctTouched.contains(key)) return null;
+    final String raw = _p[key]!.text;
+    if (crIsBlank(raw)) return null;
+    final double? v = _crNum(raw);
+    if (v == null) return 'مقدار عددی نامعتبر';
+    if (!crPctOk(v)) return 'درصد باید بین ۰ و ۱۰۰ باشد';
+    return null;
+  }
+
+  double? _pctValue(String key) {
+    if (_pctTouched.contains(key)) {
+      final double? v = _crNum(_p[key]!.text);
+      return crPctOk(v) ? v : null;
+    }
+    return crKgToPct(_inputKg, _crNum(_n[key]!.text));
+  }
+
+  /// جمع درصد U+V+W (برای هشدار غیرمسدود)؛ هیچ‌کدام مقدار نداشت ⇒ null.
+  double? _pctSumUvw() {
+    double sum = 0;
+    bool any = false;
+    for (final String k in const <String>['kernel_kg', 'hull_kg', 'soil_kg']) {
+      final double? v = _pctValue(k);
+      if (v == null) continue;
+      sum += v;
+      any = true;
+    }
+    return any ? sum : null;
+  }
 
   List<double> get _stopMinutes => <double>[
         for (final _StopRow r in _stops) if ((_crNum(r.minutes.text) ?? 0) > 0) _crNum(r.minutes.text)!,
@@ -198,6 +294,16 @@ class _CrackFormScreenState extends State<CrackFormScreen> {
         runMinutes: _crNum(_n['run_minutes']!.text),
         initialKernelKg: _crNum(_n['initial_kernel_kg']!.text),
         stopMinutes: _stopMinutes,
+        hullKg: _crNum(_n['hull_kg']!.text),
+        soilKg: _crNum(_n['soil_kg']!.text),
+        soundKg: _crNum(_n['sound_kg']!.text),
+        wheatKg: _crNum(_n['wheat_kg']!.text),
+        superFineKg: _crNum(_n['super_fine_kg']!.text),
+        flowerKg: _crNum(_n['flower_kg']!.text),
+        splitKg: _crNum(_n['split_kg']!.text),
+        unbreakableKg: _crNum(_n['unbreakable_kg']!.text),
+        pinkKg: _crNum(_n['pink_kg']!.text),
+        wasteKernelKg: _crNum(_n['waste_kernel_kg']!.text),
       );
 
   Future<void> _pickRun(bool isEnd) async {
@@ -232,7 +338,71 @@ class _CrackFormScreenState extends State<CrackFormScreen> {
     setState(() => _n['run_minutes']!.text = _crFmt(double.parse(v.toStringAsFixed(2))));
   }
 
+  /// S2: پر کردن «مغز خروجی (U)» از جمع تفکیک AA..AH — فقط با کلیک کاربر و با اعلام صریح (بی‌صدا نیست).
+  void _fillKernelFromSub() {
+    final double? sub = _calc.subSumKg;
+    if (sub == null || sub <= 0 || !crIsBlank(_n['kernel_kg']!.text)) return;
+    setState(() {
+      _n['kernel_kg']!.text = _crFmt(double.parse(sub.toStringAsFixed(3)));
+      _pctTouched.remove('kernel_kg');
+      if (_pctActive) _pctSyncFromKg('kernel_kg');
+    });
+    _snack('مغز خروجی با جمع تفکیک پر شد: ${faNum(sub, dec: 3)} کیلو');
+  }
+
+  Widget _warnLine(String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+          const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 20),
+          const SizedBox(width: 6),
+          Expanded(child: Text(text, style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold))),
+        ]),
+      );
+
+  /// S2: هشدارهای غیرمسدودکننده (ثبت همیشه ممکن است).
+  Widget _warnings(CrackCalc c) {
+    final List<Widget> w = <Widget>[
+      if (c.subMismatch == true) _warnLine('مغز خروجی با جمع تفکیک نمی‌خواند (جمع تفکیک: ${faNum(c.subSumKg ?? 0, dec: 3)} کیلو)'),
+      if (c.overOutput) _warnLine('جمع خروجی‌ها از ورودی بیشتر است'),
+      if (_pctActive && (_pctSumUvw() ?? 0) > 100 + 1e-9) _warnLine('جمع درصدهای مغز + پوست + خاک (U+V+W) برابر ${faNum(_pctSumUvw()!, dec: 2)}٪ است و از ۱۰۰٪ بیشتر است'),
+    ];
+    if (w.isEmpty) return const SizedBox.shrink();
+    return Card(
+      margin: const EdgeInsets.only(bottom: 14),
+      color: Colors.orange.withOpacity(0.10),
+      child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: w)),
+    );
+  }
+
+  /// S2: کارت «تراز واقعی» (فقط‌خواندنی؛ آینهٔ pb_cr_calc).
+  Widget _realBalanceCard(CrackCalc c) {
+    String kgPct(double? kg, double? pct) {
+      if (kg == null) return '';
+      return '${faNum(kg, dec: 3)} کیلو${pct == null ? '' : ' (${faNum(pct, dec: 2)}٪)'}';
+    }
+
+    String pct(double? v) => v == null ? '' : '${faNum(v, dec: 2)}٪';
+    return _group('تراز واقعی', <Widget>[
+      _readOnly('افت واقعی = L−(U+V+W)', kgPct(c.realLossKg, c.realLossPct)),
+      _gap(),
+      _readOnly('کسری مغز نسبت به برآورد (N−U)', kgPct(c.shortfallKg, c.shortfallPct)),
+      _gap(),
+      _row2(_readOnly('سالم از ورودی (AA÷L)', pct(c.soundPctInput)), _readOnly('سالم از مغز (AA÷U)', pct(c.soundPctKernel))),
+    ]);
+  }
+
   Map<String, dynamic>? _buildPayload() {
+    if (_pctActive) {
+      // S4: درصدِ دست‌خورده باید ۰..۱۰۰ و عددی باشد؛ پس از آن فقط kg ذخیره می‌شود.
+      for (final String k in kCrPctKeys) {
+        final String? err = _pctError(k);
+        if (err != null) {
+          final String label = _kNumFields.firstWhere((List<String> f) => f[0] == k)[1];
+          _snack('$err: $label');
+          return null;
+        }
+      }
+    }
     final Map<String, dynamic> p = <String, dynamic>{
       'run_date': ReturnsHelp.iso(_runDate),
       'end_date': _endDate == null ? '' : ReturnsHelp.iso(_endDate!),
@@ -245,7 +415,7 @@ class _CrackFormScreenState extends State<CrackFormScreen> {
     for (final List<String> f in _kNumFields) {
       final String raw = _n[f[0]]!.text.trim();
       final double? v = _crNum(raw);
-      if (raw.isNotEmpty && v == null) {
+      if (!crIsBlank(raw) && v == null) {
         _snack('مقدار عددی نامعتبر: ${f[1]}');
         return null;
       }
@@ -273,31 +443,51 @@ class _CrackFormScreenState extends State<CrackFormScreen> {
       stops.add(<String, dynamic>{'reason': reason, 'minutes': m});
     }
     p['stops'] = stops;
+    final String? lotsErr = _addLotsPayload(p); // S6
+    if (lotsErr != null) {
+      _snack(lotsErr);
+      return null;
+    }
     return p;
   }
 
   Future<void> _submit() async {
     final Map<String, dynamic>? p = _buildPayload();
     if (p == null) return;
+    final bool lotsAsked = p['lots'] is Map; // S6
     setState(() => _saving = true);
     try {
-      bool queued;
+      ProcWriteResult r;
       if (_editing) {
         p['id'] = widget.existing!['id'];
-        queued = await ProcessingStore.write('workshop.crack_update', p, 'خط شکست: ویرایش');
+        r = await ProcessingStore.writeWithResult('workshop.crack_update', p, 'خط شکست: ویرایش');
       } else {
         p['uid'] = _uid; // ایدمپوتنت: تکرار ارسال/صف آفلاین ردیف دوم نمی‌سازد
-        queued = await ProcessingStore.write('workshop.crack_create', p, 'خط شکست: ${jalaliDateFromDt(_runDate)}');
+        r = await ProcessingStore.writeWithResult('workshop.crack_create', p, 'خط شکست: ${jalaliDateFromDt(_runDate)}');
       }
       if (!mounted) return;
-      _snack(queued ? 'آفلاین ذخیره شد؛ پس از اتصال ارسال می‌شود' : (_editing ? 'ویرایش شد' : 'ثبت شد'));
+      if (lotsAsked && r.queued) {
+        // ساخت/حذف لات سمت سرور است؛ تا همگام‌سازی نه کدی هست نه لاتی
+        await _msgDialog('در انتظار همگام‌سازی', 'گزارش آفلاین ذخیره شد. لات‌ها فقط پس از اتصال و همگام‌سازی در سرور ساخته (یا حذف) می‌شوند و کدشان آن‌جا مشخص می‌شود؛ بعد از آن در جزئیات همین گزارش می‌بینید. اگر سرور آن را رد کند، پیامش در فهرست گزارش‌ها می‌آید.');
+      } else if (lotsAsked) {
+        await _msgDialog('ثبت شد', _lotsResultText(p['lots'] as Map<String, dynamic>, r.data));
+      } else {
+        _snack(r.queued ? 'آفلاین ذخیره شد؛ پس از اتصال ارسال می‌شود' : (_editing ? 'ویرایش شد' : 'ثبت شد'));
+      }
+      if (!mounted) return;
       if (widget.onSaved != null) {
         widget.onSaved!();
       } else {
         Navigator.pop(context, true);
       }
     } on StockApiException catch (e) {
-      _snack(e.message);
+      if (!mounted) return;
+      if (lotsAsked || _hasExistingLots) {
+        // پیام‌های رد S5 (لات فروخته‌شده، موجودی ناکافی، مجوز، …) طولانی‌اند؛ در دیالوگ می‌آیند
+        await _msgDialog('ثبت نشد', '${e.message}\n\nهیچ تغییری ذخیره نشد.');
+      } else {
+        _snack(e.message);
+      }
     } catch (e) {
       _snack('خطا: $e');
     } finally {
@@ -305,17 +495,306 @@ class _CrackFormScreenState extends State<CrackFormScreen> {
     }
   }
 
+  // --- S6: لات‌های خروجی ---
+
+  bool get _canLots => StaffPerms.I.can('workshop.manage');
+
+  List<Map<String, dynamic>> get _existingLots => widget.existing?['lots'] is List ? ReturnsHelp.maps(widget.existing!['lots']) : <Map<String, dynamic>>[];
+
+  bool get _hasExistingLots => _existingLots.isNotEmpty;
+
+  Map<String, double?> get _kgByField => <String, double?>{for (final String k in kCrLotLabels.keys) k: _crNum(_n[k]!.text)};
+
+  CrLotsPlan get _lotsPlanNow => crLotsPlan(_kgByField, _lotFields);
+
+  _LotSrc? get _selectedSource {
+    for (final _LotSrc s in _lotSources) {
+      if (s.id == _lotSource) return s;
+    }
+    return null;
+  }
+
+  void _setLotsOn(bool v) {
+    setState(() => _lotsOn = v);
+    if (v) _loadLotOptions();
+  }
+
+  /// لات‌های مبدأ از workshop.lots (مانده از سرور)؛ اگر مجوز/اتصال نبود ⇒ فهرست محلی با شناسهٔ سرور. دسته و انبار از دادهٔ محلی.
+  Future<void> _loadLotOptions() async {
+    if (_lotOptsLoaded || _lotsLoading) return;
+    setState(() {
+      _lotsLoading = true;
+      _lotsLoadError = null;
+    });
+    final List<_LotSrc> srcs = <_LotSrc>[];
+    String? err;
+    try {
+      final Map<String, dynamic> r = await StockApi.call('workshop.lots');
+      for (final Map<String, dynamic> l in ReturnsHelp.maps(r['items'])) {
+        final double rem = ReturnsHelp.d(l['remaining']);
+        if (rem <= 0) continue;
+        srcs.add(_LotSrc('${l['id']}', '${l['code'] ?? ''} · ${l['type_name'] ?? ''} · ${faNum(rem, dec: 3)} کیلو', rem));
+      }
+    } on StockApiException catch (e) {
+      try {
+        for (final Map<String, dynamic> r in await AppDb.I.inventoryAll()) {
+          final double rem = ReturnsHelp.d(r['remaining']);
+          if (rem <= 0 || ReturnsHelp.d(r['is_mix']) == 3) continue;
+          final int lid = (r['id'] as num).toInt();
+          final int? sid = await AppDb.I.serverIdOf('pur', lid) ?? await AppDb.I.aliasOf('pur', lid);
+          if (sid == null || sid <= 0) continue; // هنوز به سرور نرسیده
+          srcs.add(_LotSrc('$sid', '${r['code'] ?? ''} · ${r['type_name'] ?? ''} · ${faNum(rem, dec: 3)} کیلو', rem));
+        }
+      } catch (_) {}
+      if (srcs.isEmpty) err = e.message;
+    }
+    final List<_LotCat> cats = <_LotCat>[];
+    try {
+      for (final Map<String, dynamic> c in await AppDb.I.categories()) {
+        final int lid = (c['id'] as num).toInt();
+        final int? sid = await AppDb.I.serverIdOf('cat', lid) ?? await AppDb.I.aliasOf('cat', lid);
+        if (sid == null || sid <= 0) continue;
+        cats.add(_LotCat(sid, '${c['name'] ?? ''}'));
+      }
+    } catch (_) {}
+    List<WhOption> whs = <WhOption>[];
+    try {
+      whs = await StockLookup.warehouses();
+    } catch (_) {}
+    if (!mounted) return;
+    setState(() {
+      _lotSources = srcs;
+      _lotCats = cats;
+      _lotWhs = whs;
+      _lotsLoadError = err;
+      _lotOptsLoaded = err == null;
+      _lotsLoading = false;
+      if (_lotSource != null && _selectedSource == null) _lotSource = null;
+    });
+  }
+
+  Widget _lotsRedLine(String t) => Padding(padding: const EdgeInsets.only(top: 6), child: Text(t, style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)));
+
+  /// بخش «لات‌های ساخته‌شده» (ردیف دارای لات) یا سوییچ ساخت لات (ردیف بدون لات؛ فقط مجاز به workshop.manage).
+  Widget _lotsCard() {
+    final List<Map<String, dynamic>> made = _existingLots;
+    if (made.isNotEmpty) {
+      return _group('لات‌های ساخته‌شده', <Widget>[
+        for (final Map<String, dynamic> l in made)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Row(children: <Widget>[
+              Expanded(child: Text('${l['code'] ?? ''} · ${kCrLotLabels['${l['field_key']}'] ?? '${l['field_key']}'}', style: const TextStyle(fontWeight: FontWeight.bold))),
+              Text('${faNum(ReturnsHelp.d(l['kg']), dec: 3)} کیلو'),
+            ]),
+          ),
+        if (_canLots) ...<Widget>[
+          const Text('ویرایش مقدار خروجی‌های لات‌شده، لات‌ها را به‌روز می‌کند (اگر دست‌نخورده باشند؛ کد لات ممکن است عوض شود).'),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('حذف لات‌های ساخته‌شده هنگام ذخیره'),
+            subtitle: const Text('فقط اگر فروخته/منتقل/مصرف نشده باشند؛ وزن به لات مبدأ برمی‌گردد. در غیر این صورت سرور رد می‌کند.'),
+            value: _removeLots,
+            onChanged: (bool v) => setState(() => _removeLots = v),
+          ),
+        ] else
+          const Text('ویرایش مقدار خروجی‌های لات‌شده فقط با مجوز مدیریت کارگاه ممکن است.'),
+      ]);
+    }
+    if (!_canLots) return const SizedBox.shrink();
+    final CrLotsPlan plan = _lotsPlanNow;
+    final _LotSrc? src = _selectedSource;
+    final List<Widget> boxes = <Widget>[];
+    for (final MapEntry<String, String> e in kCrLotLabels.entries) {
+      final double? kg = _crNum(_n[e.key]!.text);
+      if (wsGrams(kg) <= 0) continue;
+      final bool checked = _lotFields.contains(e.key);
+      final bool conflict = !checked && crLotsConflict(_lotFields, e.key);
+      boxes.add(CheckboxListTile(
+        dense: true,
+        contentPadding: EdgeInsets.zero,
+        controlAffinity: ListTileControlAffinity.leading,
+        value: checked,
+        onChanged: conflict
+            ? null
+            : (bool? v) => setState(() {
+                  if (v == true) {
+                    _lotFields.add(e.key);
+                  } else {
+                    _lotFields.remove(e.key);
+                  }
+                }),
+        title: Text('${e.value} — ${faNum(kg!, dec: 3)} کیلو'),
+        subtitle: conflict ? Text(e.key == 'kernel_kg' ? 'همراه تفکیک مغز (AA..AH) لات نمی‌شود' : 'همراه مغز خروجی (U) لات نمی‌شود') : null,
+      ));
+    }
+    return Card(
+      margin: const EdgeInsets.only(bottom: 14),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: <Widget>[
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('ثبت خروجی‌ها به‌عنوان لات جدید'),
+            subtitle: const Text('هر خروجی انتخاب‌شده یک لات با کد جدید می‌شود؛ وزنش از «لات مبدأ» کم می‌شود'),
+            value: _lotsOn,
+            onChanged: _saving ? null : _setLotsOn,
+          ),
+          if (_lotsOn) ...<Widget>[
+            const Divider(),
+            const Text('خروجی‌هایی که لات می‌شوند', style: TextStyle(fontWeight: FontWeight.bold)),
+            if (boxes.isEmpty) const Padding(padding: EdgeInsets.only(top: 6), child: Text('اول وزن خروجی‌ها را وارد کنید')) else ...boxes,
+            const SizedBox(height: 10),
+            if (_lotsLoading) const LinearProgressIndicator(),
+            if (_lotsLoadError != null) ...<Widget>[
+              _lotsRedLine(_lotsLoadError!),
+              TextButton.icon(onPressed: _loadLotOptions, icon: const Icon(Icons.refresh), label: const Text('تلاش دوباره')),
+            ],
+            DropdownButtonFormField<String>(
+              value: _lotSource,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'لات مبدأ (الزامی)', border: OutlineInputBorder()),
+              items: <DropdownMenuItem<String>>[for (final _LotSrc s in _lotSources) DropdownMenuItem<String>(value: s.id, child: Text(s.label, overflow: TextOverflow.ellipsis))],
+              onChanged: (String? v) => setState(() => _lotSource = v),
+            ),
+            if (src != null) Padding(padding: const EdgeInsets.only(top: 6), child: Text('موجودی لات مبدأ: ${faNum(src.remaining, dec: 3)} کیلو')),
+            _gap(),
+            DropdownButtonFormField<int?>(
+              value: _lotCat,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'دستهٔ لات‌ها', border: OutlineInputBorder()),
+              items: <DropdownMenuItem<int?>>[
+                const DropdownMenuItem<int?>(value: null, child: Text('هم‌دستهٔ لات مبدأ (پیش‌فرض)')),
+                for (final _LotCat c in _lotCats) DropdownMenuItem<int?>(value: c.id, child: Text(c.name)),
+              ],
+              onChanged: (int? v) => setState(() => _lotCat = v),
+            ),
+            _gap(),
+            DropdownButtonFormField<String?>(
+              value: _lotWh,
+              isExpanded: true,
+              decoration: const InputDecoration(labelText: 'انبار لات‌ها', border: OutlineInputBorder()),
+              items: <DropdownMenuItem<String?>>[
+                const DropdownMenuItem<String?>(value: null, child: Text('انبار اصلی (پیش‌فرض)')),
+                for (final WhOption w in _lotWhs) DropdownMenuItem<String?>(value: w.uid, child: Text(w.name)),
+              ],
+              onChanged: (String? v) => setState(() => _lotWh = v),
+            ),
+            const SizedBox(height: 10),
+            if (_lotFields.isEmpty)
+              const Text('خروجی‌ای انتخاب نشده است')
+            else if (!plan.ok)
+              _lotsRedLine(plan.error!)
+            else ...<Widget>[
+              Text('از لات مبدأ ${faNum(plan.totalKg, dec: 3)} کیلو کم می‌شود', style: const TextStyle(fontWeight: FontWeight.bold)),
+              if (src != null && plan.totalKg > src.remaining + 1e-9) _lotsRedLine('این مقدار از موجودی لات مبدأ (${faNum(src.remaining, dec: 3)} کیلو) بیشتر است؛ سرور رد می‌کند'),
+            ],
+            const SizedBox(height: 6),
+            const Text('کد لات‌ها را سرور تعیین می‌کند و پس از ثبتِ موفق نشان داده می‌شود. بهای لات‌ها ۰ است.', style: TextStyle(color: Colors.grey)),
+          ],
+        ]),
+      ),
+    );
+  }
+
+  /// null = معتبر (و p['lots'] در صورت لزوم پر می‌شود)؛ وگرنه پیام خطا.
+  String? _addLotsPayload(Map<String, dynamic> p) {
+    if (!_canLots) return null;
+    if (_hasExistingLots) {
+      if (_removeLots) p['lots'] = <String, dynamic>{'enabled': false};
+      return null; // بدون کلید lots ⇒ سرور همان انتخاب را با وزن‌های جدید به‌روز می‌کند
+    }
+    if (!_lotsOn) return null;
+    final CrLotsPlan plan = _lotsPlanNow;
+    if (!plan.ok) return plan.error;
+    if (_lotSource == null) return '«لات مبدأ» را انتخاب کنید';
+    p['lots'] = <String, dynamic>{
+      'enabled': true,
+      'source_lot_id': int.tryParse(_lotSource!) ?? _lotSource,
+      'fields': <String>[for (final CrLotItem i in plan.items) i.field],
+      if (_lotCat != null) 'category_id': _lotCat,
+      if (_lotWh != null) 'warehouse_uid': _lotWh,
+    };
+    return null;
+  }
+
+  Future<void> _msgDialog(String title, String body) => showDialog<void>(
+        context: context,
+        builder: (BuildContext c) => Directionality(
+          textDirection: TextDirection.rtl,
+          child: AlertDialog(
+            title: Text(title),
+            content: SingleChildScrollView(child: Text(body)),
+            actions: <Widget>[TextButton(onPressed: () => Navigator.pop(c), child: const Text('باشه'))],
+          ),
+        ),
+      );
+
+  /// فقط پس از تأیید واقعی سرور: کدها از پاسخ می‌آیند، نه از حدس کلاینت.
+  String _lotsResultText(Map<String, dynamic> lotsReq, Map<String, dynamic> data) {
+    final List<Map<String, dynamic>> got = data['lots'] is List ? ReturnsHelp.maps(data['lots']) : <Map<String, dynamic>>[];
+    if (lotsReq['enabled'] != true) {
+      return got.isEmpty ? 'لات‌های ساخته‌شده حذف شد و وزن آن‌ها به لات مبدأ برگشت.' : 'درخواست حذف لات ارسال شد اما سرور هنوز ${faNum(got.length, dec: 0)} لات برای این گزارش گزارش می‌کند؛ جزئیات گزارش را بررسی کنید.';
+    }
+    final List<String> want = (lotsReq['fields'] as List<dynamic>).cast<String>();
+    final Set<String> have = <String>{for (final Map<String, dynamic> l in got) '${l['field_key']}'};
+    final List<String> lines = <String>[
+      for (final Map<String, dynamic> l in got) '${l['code'] ?? ''} — ${kCrLotLabels['${l['field_key']}'] ?? '${l['field_key']}'} — ${faNum(ReturnsHelp.d(l['kg']), dec: 3)} کیلو',
+    ];
+    if (got.isEmpty) return 'گزارش ثبت شد اما سرور لاتی در پاسخ برنگرداند؛ لات‌ها را در جزئیات گزارش/انبار بررسی کنید.';
+    final String miss = want.any((String f) => !have.contains(f)) ? '\n\nتوجه: همهٔ خروجی‌های انتخابی در پاسخ سرور نبود؛ جزئیات گزارش را بررسی کنید.' : '';
+    return 'لات‌های جدید ساخته شد:\n${lines.join('\n')}$miss';
+  }
+
   // --- ویجت‌های کمکی ---
 
   Widget _numField(String key, {bool live = true}) {
     final String label = _kNumFields.firstWhere((List<String> f) => f[0] == key)[1];
+    if (_pctActive && kCrPctKeys.contains(key)) return _pctField(key, label);
     return TextField(
       controller: _n[key],
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
       decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
-      onChanged: live ? (_) => setState(() {}) : null,
+      onChanged: (live || key == 'input_kg')
+          ? (_) => setState(() {
+                if (key == 'input_kg') _pctRefresh(); // S4: تغییر L ⇒ معادل‌ها دوباره
+              })
+          : null,
     );
   }
+
+  /// S4: فیلد درصدی با معادل کیلویی زنده (kg = round(L×٪/۱۰۰، ۳)).
+  Widget _pctField(String key, String label) {
+    final String? err = _pctError(key);
+    final double? kg = _crNum(_n[key]!.text);
+    final bool blank = crIsBlank(_p[key]!.text);
+    return TextField(
+      controller: _p[key],
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      decoration: InputDecoration(
+        labelText: '${label.replaceAll(' — کیلو', '')} — ٪ از ورودی',
+        border: const OutlineInputBorder(),
+        suffixText: '٪',
+        errorText: err,
+        helperText: err != null || blank || kg == null ? null : '= ${faNum(kg, dec: 3)} کیلو',
+      ),
+      onChanged: (_) => setState(() {
+        _pctTouched.add(key);
+        _pctApply(key);
+      }),
+    );
+  }
+
+  /// S4: سوییچ «ورود به‌صورت درصد (از وزن ورودی)»؛ فقط با L>۰ فعال.
+  Widget _pctSwitch() => Card(
+        margin: const EdgeInsets.only(bottom: 14),
+        child: SwitchListTile(
+          title: const Text('ورود به‌صورت درصد (از وزن ورودی)'),
+          subtitle: Text(_pctAvailable ? 'فیلدهای U, V, W, Z, AA..AH به‌صورت ٪ وارد می‌شوند؛ فقط کیلو ذخیره می‌شود' : 'اول وزن ورودی را وارد کنید'),
+          value: _pctActive,
+          onChanged: _pctAvailable ? _setPctPref : null,
+        ),
+      );
 
   Widget _textField(String key) {
     final String label = _kTextFields.firstWhere((List<String> f) => f[0] == key)[1];
@@ -443,6 +922,7 @@ class _CrackFormScreenState extends State<CrackFormScreen> {
               _gap(),
               _textField('ounce_by'),
             ]),
+            _pctSwitch(),
             _group('اطلاعات دستگاه (R..Z)', <Widget>[
               _row2(_timeBtn('ساعت شروع (R)', _start, false), _timeBtn('ساعت پایان (S)', _end, true)),
               _gap(),
@@ -456,9 +936,18 @@ class _CrackFormScreenState extends State<CrackFormScreen> {
                 ),
               ),
               _gap(4),
-              _row2(_numField('kernel_kg'), _numField('hull_kg', live: false)),
+              _row2(_numField('kernel_kg'), _numField('hull_kg')),
+              if (crIsBlank(_n['kernel_kg']!.text) && (c.subSumKg ?? 0) > 0)
+                Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: TextButton.icon(
+                    onPressed: _fillKernelFromSub,
+                    icon: const Icon(Icons.playlist_add_check),
+                    label: Text('پر کردن مغز خروجی از جمع تفکیک (${faNum(c.subSumKg!, dec: 3)} کیلو)'),
+                  ),
+                ),
               _gap(),
-              _row2(_numField('soil_kg', live: false), _numField('hull_left_kg', live: false)),
+              _row2(_numField('soil_kg'), _numField('hull_left_kg', live: false)),
               _gap(),
               _readOnly('ظرفیت واقعی (X)', c.capacityKgh == null ? '' : '${faNum(c.capacityKgh!, dec: 3)} کیلو/ساعت'),
               _gap(),
@@ -466,13 +955,13 @@ class _CrackFormScreenState extends State<CrackFormScreen> {
             ]),
             _stopsCard(c),
             _group('وزن بار خروجی دستگاه (AA..AI)', <Widget>[
-              _row2(_numField('sound_kg', live: false), _numField('wheat_kg', live: false)),
+              _row2(_numField('sound_kg'), _numField('wheat_kg')),
               _gap(),
-              _row2(_numField('super_fine_kg', live: false), _numField('flower_kg', live: false)),
+              _row2(_numField('super_fine_kg'), _numField('flower_kg')),
               _gap(),
-              _row2(_numField('split_kg', live: false), _numField('unbreakable_kg', live: false)),
+              _row2(_numField('split_kg'), _numField('unbreakable_kg')),
               _gap(),
-              _row2(_numField('pink_kg', live: false), _numField('waste_kernel_kg', live: false)),
+              _row2(_numField('pink_kg'), _numField('waste_kernel_kg')),
               _gap(),
               _textField('analyst'),
             ]),
@@ -481,12 +970,17 @@ class _CrackFormScreenState extends State<CrackFormScreen> {
               _gap(),
               _numField('initial_kernel_kg'),
               _gap(),
-              _row2(_readOnly('افت کیلویی (AL)', kg(c.lossKg)), _readOnly('افت درصدی', c.lossPct == null ? '' : '${faNum(c.lossPct!, dec: 2)}٪')),
+              _readOnly('مغزِ نشده = افت + پوست + خاک (L−U)', kg(c.nonKernelKg)),
+              _gap(),
+              _readOnly('مغزِ نشده ٪ (از ورودی)', c.lossPct == null ? '' : '${faNum(c.lossPct!, dec: 2)}٪'),
               _gap(),
               _numField('power_kwh', live: false),
               _gap(),
               _readOnly('تعداد توقفات (AN)', faNum(c.stopCount, dec: 0)),
             ]),
+            _lotsCard(), // S6
+            _warnings(c),
+            _realBalanceCard(c),
             _textField('note'),
             const SizedBox(height: 16),
             FilledButton.icon(
@@ -658,8 +1152,9 @@ class _CrackListScreenState extends State<CrackListScreen> {
       'ورودی ${faNum(ReturnsHelp.d(calc['input_kg']), dec: 3)} کیلو',
       if (it['kernel_kg'] != null) 'مغز ${faNum(ReturnsHelp.d(it['kernel_kg']), dec: 3)}',
       if (calc['capacity_kgh'] != null) 'ظرفیت ${faNum(ReturnsHelp.d(calc['capacity_kgh']), dec: 1)} کیلو/ساعت',
-      if (calc['loss_pct'] != null) 'افت ${faNum(ReturnsHelp.d(calc['loss_pct']), dec: 2)}٪',
+      if (calc['loss_pct'] != null) 'مغزِ نشده ${faNum(ReturnsHelp.d(calc['loss_pct']), dec: 2)}٪',
       'توقف ${faNum(ReturnsHelp.d(calc['stop_count']), dec: 0)}',
+      if (it['lots'] is List && (it['lots'] as List).isNotEmpty) 'لات: ${ReturnsHelp.maps(it['lots']).map((Map<String, dynamic> l) => '${l['code'] ?? ''}').join('، ')}',
     ];
     return ListTile(
       title: Text(head.join(' · ')),
@@ -668,4 +1163,19 @@ class _CrackListScreenState extends State<CrackListScreen> {
       onTap: () => _open(it),
     );
   }
+}
+
+/// S6: گزینهٔ لات مبدأ (شناسهٔ سرور + برچسب + مانده).
+class _LotSrc {
+  final String id;
+  final String label;
+  final double remaining;
+  const _LotSrc(this.id, this.label, this.remaining);
+}
+
+/// S6: دستهٔ کالا (شناسهٔ سرور).
+class _LotCat {
+  final int id;
+  final String name;
+  const _LotCat(this.id, this.name);
 }

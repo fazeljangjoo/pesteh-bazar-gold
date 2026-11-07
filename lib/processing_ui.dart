@@ -84,6 +84,13 @@ String _statusLabel(String s) {
   }
 }
 
+/// S6: نتیجهٔ [ProcessingStore.writeWithResult].
+class ProcWriteResult {
+  final bool queued;
+  final Map<String, dynamic> data;
+  const ProcWriteResult(this.queued, this.data);
+}
+
 /// Queue + cache for processing writes.
 class ProcessingStore {
   ProcessingStore._();
@@ -137,6 +144,22 @@ class ProcessingStore {
     }
     SyncService.I.syncNow(pull: true);
     return false;
+  }
+
+  /// S6: مثل [write] ولی پاسخ سرور را هم برمی‌گرداند (برای نمایش کد لات‌های ساخته‌شده). آفلاین ⇒ queued=true و data خالی.
+  static Future<ProcWriteResult> writeWithResult(String action, Map<String, dynamic> payload, String label) async {
+    Map<String, dynamic> data;
+    try {
+      data = await StockApi.call(action, payload);
+    } on StockApiException catch (e) {
+      if (!isNetworkError(e.message)) rethrow;
+      final List<Map<String, dynamic>> ops = await pendingOps();
+      ops.add(<String, dynamic>{'uid': payload['uid'] ?? payload['id'], 'action': action, 'payload': payload, 'label': label});
+      await _saveOps(ops);
+      return const ProcWriteResult(true, <String, dynamic>{});
+    }
+    SyncService.I.syncNow(pull: true);
+    return ProcWriteResult(false, data);
   }
 
   /// Replays queued writes in order; stops at the first network failure, drops server-rejected ops and reports them.
