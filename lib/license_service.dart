@@ -308,7 +308,7 @@ class LicenseService {
     final daysLeft = (r.data['days_left'] is num) ? (r.data['days_left'] as num).toInt() : 0;
     if (isNew) {
       _pendingWelcome =
-          'خوش آمدید! ${faNum(daysLeft > 0 ? daysLeft : 20, dec: 0)} روز اشتراک آزمایشی رایگان برای شما فعال شد';
+          'خوش آمدید! ${faNum(daysLeft > 0 ? daysLeft : 10, dec: 0)} روز اشتراک آزمایشی رایگان برای شما فعال شد';
     }
     return OtpVerifyResult(isNew: isNew, daysLeft: daysLeft);
   }
