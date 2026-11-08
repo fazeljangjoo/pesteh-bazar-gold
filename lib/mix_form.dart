@@ -42,6 +42,7 @@ class _MixFormState extends State<MixForm> with EditGuard<MixForm> {
   String _query = '';
   String? _warehouseUid; // S01
   String? _ounceUid; // S01
+  bool _showAvg = false; // «مشاهده میانگین کوت‌ریزی» (فقط نمایش؛ چیزی ذخیره نمی‌شود)
 
   bool get _isEdit => widget.existing != null;
 
@@ -166,6 +167,79 @@ class _MixFormState extends State<MixForm> with EditGuard<MixForm> {
         ]),
       ),
     );
+  }
+
+  /// میانگین وزنیِ گرم و انسِ اجناسِ مبدأ (همان فرمول «محاسبه کوت‌ریزی» دستیار):
+  /// میانگین گرم = Σ(g·w) ÷ Σw ؛ میانگین انس = Σ(o·w) ÷ Σw — w = وزنِ برداشته‌شده از هر جنس.
+  /// جنسی که گرم (یا انس) ندارد، میانگینِ همان مقدار را غیرقابل‌محاسبه می‌کند.
+  Widget _avgCard(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    double sumW = 0, sumGW = 0, sumOW = 0, sumPW = 0;
+    final noGram = <String>[];
+    final noOunce = <String>[];
+    final noPrice = <String>[];
+    for (final e in _selected) {
+      final w = parseNum(_rows[e['id'] as int]?.weight.text) ?? 0;
+      if (w <= 0) continue;
+      final String name = '${e['category_name']} - ${e['type_name']}';
+      final g = e['gram'] as num?;
+      final o = e['ounce'] as num?;
+      final pr = e['price'] as num?;
+      sumW += w;
+      if (pr == null || pr <= 0) {
+        noPrice.add(name);
+      } else {
+        sumPW += pr.toDouble() * w;
+      }
+      if (g == null) {
+        noGram.add(name);
+      } else {
+        sumGW += g.toDouble() * w;
+      }
+      if (o == null || o <= 0) {
+        noOunce.add(name);
+      } else {
+        sumOW += o.toDouble() * w;
+      }
+    }
+    final Widget body;
+    if (sumW <= 0) {
+      body = const Text('وزنِ برداشته‌شده از هر جنس را وارد کنید تا میانگین محاسبه شود.');
+    } else {
+      final bool gramOk = noGram.isEmpty;
+      final bool ounceOk = noOunce.isEmpty;
+      final bool priceOk = noPrice.isEmpty;
+      body = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        infoRow('میانگین گرم', gramOk ? faNum(sumGW / sumW, dec: 2) : 'قابل محاسبه نیست',
+            valueColor: gramOk ? null : scheme.error),
+        infoRow('میانگین انس', ounceOk ? faNum(sumOW / sumW, dec: 2) : 'قابل محاسبه نیست',
+            valueColor: ounceOk ? null : scheme.error),
+        infoRow('میانگین قیمت (فی)', priceOk ? faNum(sumPW / sumW, dec: 0) : 'قابل محاسبه نیست',
+            valueColor: priceOk ? null : scheme.error),
+        if (!gramOk)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text('⚠ میانگین گرم قابل محاسبه نیست؛ این اجناس گرم ندارند: ${noGram.join('، ')}',
+                style: TextStyle(color: scheme.error)),
+          ),
+        if (!ounceOk)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text('⚠ میانگین انس قابل محاسبه نیست؛ این اجناس انس ندارند: ${noOunce.join('، ')}',
+                style: TextStyle(color: scheme.error)),
+          ),
+        if (!priceOk)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text('⚠ میانگین قیمت قابل محاسبه نیست؛ این اجناس قیمت ندارند: ${noPrice.join('، ')}',
+                style: TextStyle(color: scheme.error)),
+          ),
+        const SizedBox(height: 4),
+        Text('میانگین وزنی بر اساس وزنِ برداشته‌شده از هر جنس (${faNum(sumW)} کیلو).',
+            style: const TextStyle(color: Colors.black54, fontSize: 12)),
+      ]);
+    }
+    return Card(child: Padding(padding: const EdgeInsets.all(12), child: body));
   }
 
   void _toggle(int id, bool v) {
@@ -381,6 +455,15 @@ class _MixFormState extends State<MixForm> with EditGuard<MixForm> {
                   child: infoRow('جمع وزن برداشته‌شده (خالص)', '${faNum(_takenSum)} کیلو'),
                 ),
               ),
+              Card(
+                child: SwitchListTile(
+                  value: _showAvg,
+                  onChanged: (v) => setState(() => _showAvg = v),
+                  title: const Text('مشاهده میانگین کوت‌ریزی'),
+                  subtitle: const Text('میانگین گرم، انس و قیمت اجناس انتخاب‌شده، بر اساس وزن هرکدام'),
+                ),
+              ),
+              if (_showAvg) _avgCard(context),
               const SizedBox(height: 8),
               sectionTitle(context, '۳) مشخصات قلم تازه (مخلوط/جداسازی)'),
               Row(children: [
