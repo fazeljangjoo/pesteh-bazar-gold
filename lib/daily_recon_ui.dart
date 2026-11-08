@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'utils.dart';
+import 'widgets.dart' show pickDate;
 import 'warehouse_ui.dart' show StockApi, StockApiException;
 
 /// S31.T31.4b — daily reconciliation dashboard (online only, gold). Server action: daily_recon.get {date?}.
@@ -49,7 +50,7 @@ class _DailyReconScreenState extends State<DailyReconScreen> {
   }
 
   Future<void> _pickDate() async {
-    final DateTime? p = await showDatePicker(context: context, initialDate: _date, firstDate: DateTime(2015), lastDate: DateTime.now());
+    final DateTime? p = await pickDate(context, initial: _date, firstDate: DateTime(2015), lastDate: DateTime.now());
     if (p != null) {
       _date = p;
       await _load();

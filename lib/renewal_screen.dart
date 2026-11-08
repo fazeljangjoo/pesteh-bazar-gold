@@ -398,7 +398,7 @@ class _RenewalScreenState extends State<RenewalScreen> with WidgetsBindingObserv
     final gDate = jalaliToGregorian(_payJy, _payJm, _payJd);
     final whenDt = DateTime(gDate.year, gDate.month, gDate.day, _payHour, _payMin);
     final paidAt = '$_payJy/${_two(_payJm)}/${_two(_payJd)} ${_two(_payHour)}:${_two(_payMin)}';
-    final amount = enDigits(_amountCtl.text).trim();
+    final amount = enDigits(_amountCtl.text).replaceAll(',', '').trim();
     final track = enDigits(_trackCtl.text).trim();
     String? v;
     if (payer.length < 2) {
@@ -841,6 +841,7 @@ class _RenewalScreenState extends State<RenewalScreen> with WidgetsBindingObserv
         TextField(
           controller: _amountCtl,
           keyboardType: TextInputType.number,
+          inputFormatters: [ThousandsInputFormatter()],
           decoration: const InputDecoration(labelText: 'مبلغ واریزی (تومان)', border: OutlineInputBorder()),
         ),
         const SizedBox(height: 8),

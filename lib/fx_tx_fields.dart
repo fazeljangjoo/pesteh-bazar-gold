@@ -118,7 +118,7 @@ class FxTxFields extends StatelessWidget {
       ),
     ];
     if (c.active) {
-      w.add(numField(c.ccyAmount, 'مبلغ ارزی', required: true, onChanged: () {
+      w.add(numField(c.ccyAmount, 'مبلغ ارزی', required: true, thousands: true, onChanged: () {
         c.recompute();
         onChanged();
       }));

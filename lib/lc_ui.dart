@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'perms.dart';
 import 'utils.dart';
-import 'widgets.dart' show snack;
+import 'widgets.dart' show snack, pickDate;
 import 'warehouse_ui.dart' show StockApi, StockApiException;
 
 /// S31.T31.12b — letters of credit (lc.list|save|set_status|delete|deadlines). FX plan only, online.
@@ -24,7 +24,7 @@ String _iso(DateTime d) => '${d.year.toString().padLeft(4, '0')}-${d.month.toStr
 Future<String?> _pickIso(BuildContext context, String? initial) async {
   final DateTime now = DateTime.now();
   final DateTime init = DateTime.tryParse(initial ?? '') ?? now;
-  final DateTime? d = await showDatePicker(context: context, initialDate: init, firstDate: DateTime(now.year - 5), lastDate: DateTime(now.year + 10));
+  final DateTime? d = await pickDate(context, initial: init, firstDate: DateTime(now.year - 5), lastDate: DateTime(now.year + 10));
   return d == null ? null : _iso(d);
 }
 

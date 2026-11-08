@@ -584,6 +584,7 @@ class _ConsignmentFormScreenState extends State<ConsignmentFormScreen> {
                     child: TextField(
                       controller: _value,
                       keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: _ctype == 'percent' ? null : [ThousandsInputFormatter()],
                       decoration: const InputDecoration(labelText: 'مقدار کمیسیون', border: OutlineInputBorder()),
                     ),
                   ),
@@ -593,6 +594,7 @@ class _ConsignmentFormScreenState extends State<ConsignmentFormScreen> {
               TextField(
                 controller: _agreed,
                 keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                inputFormatters: [ThousandsInputFormatter()],
                 decoration: const InputDecoration(labelText: 'قیمت توافقی هر کیلو', border: OutlineInputBorder()),
               ),
             const SizedBox(height: 10),

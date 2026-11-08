@@ -9,6 +9,7 @@ import 'party_master_screen.dart';
 import 'party_statement_screen.dart';
 import 'perms.dart';
 import 'utils.dart';
+import 'widgets.dart' show pickDate;
 import 'warehouse_ui.dart';
 
 /// T03.4 — CRM: یادداشت‌ها و پیگیری‌های هر طرف‌حساب (آفلاین، از طریق EntityStore: crm_notes / crm_tasks)،
@@ -313,8 +314,8 @@ class _TasksTab extends StatelessWidget {
                 label: Text(day == null ? 'تاریخ موعد' : jalaliDateFromDt(day!)),
                 onPressed: () async {
                   final DateTime now = DateTime.now();
-                  final DateTime? p = await showDatePicker(
-                      context: ctx, initialDate: day ?? now, firstDate: now.subtract(const Duration(days: 30)), lastDate: now.add(const Duration(days: 1825)));
+                  final DateTime? p = await pickDate(
+                      ctx, initial: day ?? now, firstDate: now.subtract(const Duration(days: 30)), lastDate: now.add(const Duration(days: 1825)));
                   if (p != null) setS(() => day = p);
                 },
               ),

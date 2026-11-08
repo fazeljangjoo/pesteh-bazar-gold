@@ -94,7 +94,7 @@ class _FxRatesScreenState extends State<FxRatesScreen> {
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 dateField(ctx2, 'تاریخ نرخ', date, (DateTime d) => setDlg(() => date = d)),
-                numField(rate, 'نرخ (ریال به‌ازای یک $ccy)', required: true),
+                numField(rate, 'نرخ (ریال به‌ازای یک $ccy)', required: true, thousands: true),
                 textField(source, 'منبع (اختیاری، مثل بانک یا بازار آزاد)'),
               ],
             ),

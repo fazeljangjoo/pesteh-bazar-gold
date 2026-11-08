@@ -6,6 +6,7 @@ import 'fmt.dart' show Fmt;
 import 'pdf_output.dart';
 import 'pdf_service.dart';
 import 'utils.dart';
+import 'widgets.dart' show pickDate;
 import 'warehouse_ui.dart';
 
 /// T03.2 — صورت‌حساب طرف‌حساب و سن بدهی/مطالبات. آنلاین از طریق StockApi
@@ -105,9 +106,9 @@ class _PartyStatementScreenState extends State<PartyStatementScreen> {
 
   Future<void> _pick(bool isFrom) async {
     final DateTime now = DateTime.now();
-    final DateTime? d = await showDatePicker(
-      context: context,
-      initialDate: (isFrom ? _from : _to) ?? now,
+    final DateTime? d = await pickDate(
+      context,
+      initial: (isFrom ? _from : _to) ?? now,
       firstDate: DateTime(now.year - 15),
       lastDate: DateTime(now.year + 5),
     );

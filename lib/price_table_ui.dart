@@ -175,7 +175,7 @@ class _PriceTableScreenState extends State<PriceTableScreen> {
                 ],
                 onChanged: (String? v) => set(() => grade = v),
               ),
-              TextField(controller: price, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'قیمت هر کیلو')),
+              TextField(controller: price, keyboardType: TextInputType.number, inputFormatters: [ThousandsInputFormatter()], decoration: const InputDecoration(labelText: 'قیمت هر کیلو')),
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 title: Text('تاریخ: ${jalaliDateFromDt(day)}'),

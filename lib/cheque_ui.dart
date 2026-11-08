@@ -396,9 +396,9 @@ class _ChequeListScreenState extends State<ChequeListScreen> with SingleTickerPr
                 Padding(
                   padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
                   child: Row(children: <Widget>[
-                    Expanded(child: TextField(controller: _minAmt, keyboardType: TextInputType.number, decoration: const InputDecoration(hintText: 'حداقل مبلغ', isDense: true), onChanged: (_) => setState(() {}))),
+                    Expanded(child: TextField(controller: _minAmt, keyboardType: TextInputType.number, inputFormatters: [ThousandsInputFormatter()], decoration: const InputDecoration(hintText: 'حداقل مبلغ', isDense: true), onChanged: (_) => setState(() {}))),
                     const SizedBox(width: 6),
-                    Expanded(child: TextField(controller: _maxAmt, keyboardType: TextInputType.number, decoration: const InputDecoration(hintText: 'حداکثر مبلغ', isDense: true), onChanged: (_) => setState(() {}))),
+                    Expanded(child: TextField(controller: _maxAmt, keyboardType: TextInputType.number, inputFormatters: [ThousandsInputFormatter()], decoration: const InputDecoration(hintText: 'حداکثر مبلغ', isDense: true), onChanged: (_) => setState(() {}))),
                   ]),
                 ),
                 Padding(

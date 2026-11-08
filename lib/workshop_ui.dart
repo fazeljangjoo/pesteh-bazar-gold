@@ -208,9 +208,10 @@ class _WorkshopFormScreenState extends State<WorkshopFormScreen> {
     }
   }
 
-  Widget _numField(TextEditingController c, String label, {bool live = true}) => TextField(
+  Widget _numField(TextEditingController c, String label, {bool live = true, bool money = false}) => TextField(
         controller: c,
         keyboardType: const TextInputType.numberWithOptions(decimal: true),
+        inputFormatters: money ? [ThousandsInputFormatter()] : null,
         decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
         onChanged: live ? (_) => setState(() {}) : null,
       );
@@ -239,7 +240,7 @@ class _WorkshopFormScreenState extends State<WorkshopFormScreen> {
             Text('بها (${Fmt.unitLabel()})', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 8),
             for (final List<String> f in kWsCostFields)
-              Padding(padding: const EdgeInsets.only(bottom: 8), child: _numField(_cost[f[0]]!, f[1])),
+              Padding(padding: const EdgeInsets.only(bottom: 8), child: _numField(_cost[f[0]]!, f[1], money: true)),
             if (!hasV) const Text('قیمت خرید خالی است: سرور از میانگین بهای لات‌های ورودی استفاده می‌کند.')
             else ...<Widget>[
               Text('ارزش ورودی (W): ${m(c.valueIn)} · هزینه تولید (Z): ${m(c.costTotal)}'),

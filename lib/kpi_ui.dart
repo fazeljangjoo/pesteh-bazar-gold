@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'fmt.dart' show Fmt;
 import 'utils.dart';
+import 'widgets.dart' show pickDate;
 import 'warehouse_ui.dart' show StockApi, StockApiException;
 
 /// S31.T31.13b — KPI dashboard (kpi.dashboard {from,to}), all editions, online. Amounts are STORED units (shown via Fmt.money).
@@ -55,7 +56,7 @@ class _KpiDashboardScreenState extends State<KpiDashboardScreen> {
   Future<void> _pick(bool isFrom) async {
     final DateTime now = DateTime.now();
     final DateTime init = DateTime.tryParse((isFrom ? _from : _to) ?? '') ?? now;
-    final DateTime? d = await showDatePicker(context: context, initialDate: init, firstDate: DateTime(now.year - 6), lastDate: now);
+    final DateTime? d = await pickDate(context, initial: init, firstDate: DateTime(now.year - 6), lastDate: now);
     if (d == null) return;
     _from ??= _iso(d);
     _to ??= _iso(d);

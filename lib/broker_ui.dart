@@ -183,7 +183,7 @@ class _BrokerDialogState extends State<_BrokerDialog> {
               onChanged: (String? v) => setState(() => _basis = v ?? 'percent'),
             ),
             const SizedBox(height: 12),
-            numField(_value, _basis == 'percent' ? 'درصد' : 'مبلغ (ریال)', onChanged: () => setState(() {})),
+            numField(_value, _basis == 'percent' ? 'درصد' : 'مبلغ (ریال)', thousands: _basis != 'percent', onChanged: () => setState(() {})),
             DropdownButtonFormField<String>(
               value: _payer,
               decoration: const InputDecoration(labelText: 'پرداخت‌کننده'),
@@ -351,7 +351,7 @@ class _BrokerScreenState extends State<BrokerScreen> {
                   onChanged: (String? v) => set(() => basis = v ?? 'percent'),
                 ),
                 const SizedBox(height: 8),
-                numField(value, basis == 'percent' ? 'درصد' : 'مبلغ (ریال)'),
+                numField(value, basis == 'percent' ? 'درصد' : 'مبلغ (ریال)', thousands: basis != 'percent'),
                 DropdownButtonFormField<String>(
                   value: applies,
                   decoration: const InputDecoration(labelText: 'برای'),

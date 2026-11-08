@@ -412,11 +412,12 @@ class _SeparationFormState extends State<SeparationForm> with EditGuard<Separati
     }
   }
 
-  Widget _num(TextEditingController c, String label, {String? suffix, bool wide = false}) => Padding(
+  Widget _num(TextEditingController c, String label, {String? suffix, bool wide = false, bool money = false}) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: TextField(
           controller: c,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: money ? [ThousandsInputFormatter()] : null,
           decoration: InputDecoration(labelText: label, suffixText: suffix, border: const OutlineInputBorder(), isDense: true),
           onChanged: (_) => setState(() {}),
         ),
@@ -487,7 +488,7 @@ class _SeparationFormState extends State<SeparationForm> with EditGuard<Separati
             Expanded(child: _num(o.ounce, 'انس (اختیاری)')),
             if (_alloc == 'by_value') ...<Widget>[
               const SizedBox(width: 6),
-              Expanded(child: _num(o.price, 'فی مبنا (برای تسهیم)')),
+              Expanded(child: _num(o.price, 'فی مبنا (برای تسهیم)', money: true)),
             ],
           ]),
           if (i < c.outCost.length && (parseNum(o.kg.text) ?? 0) > 0)

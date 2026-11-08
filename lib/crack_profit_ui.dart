@@ -254,7 +254,7 @@ class _CrackProfitCardState extends State<CrackProfitCard> {
             content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: <Widget>[
               const Text('مبلغ کل هزینهٔ اضافهٔ این ردیف (دستمزد، برق، …) به ریال؛ جایگزین مبلغ قبلی می‌شود.'),
               const SizedBox(height: 8),
-              TextField(controller: tc, autofocus: true, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: 'هزینهٔ اضافه (ریال)', border: const OutlineInputBorder(), errorText: err)),
+              TextField(controller: tc, autofocus: true, keyboardType: TextInputType.number, inputFormatters: [ThousandsInputFormatter()], decoration: InputDecoration(labelText: 'هزینهٔ اضافه (ریال)', border: const OutlineInputBorder(), errorText: err)),
             ]),
             actions: <Widget>[
               TextButton(onPressed: () => Navigator.pop(c), child: const Text('انصراف')),

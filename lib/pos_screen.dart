@@ -614,6 +614,7 @@ class _PosScreenState extends State<PosScreen> {
                   child: TextField(
                     controller: _usdRate,
                     keyboardType: TextInputType.number,
+                    inputFormatters: [ThousandsInputFormatter()],
                     decoration: const InputDecoration(
                         labelText: 'قیمت دلار امروز', border: OutlineInputBorder()),
                   ),
@@ -849,6 +850,7 @@ class _QtyDialogState extends State<_QtyDialog> {
               TextField(
                 controller: _price,
                 keyboardType: TextInputType.number,
+                inputFormatters: [ThousandsInputFormatter()],
                 decoration: const InputDecoration(labelText: 'فی فروش (هر کیلو)', border: OutlineInputBorder()),
               ),
               const SizedBox(height: 8),

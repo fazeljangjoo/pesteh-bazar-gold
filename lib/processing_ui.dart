@@ -541,6 +541,7 @@ class _ProcessingFormScreenState extends State<ProcessingFormScreen> {
                 child: TextField(
                   controller: _fee,
                   keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                  inputFormatters: [ThousandsInputFormatter()],
                   onChanged: (_) => setState(() {}),
                   decoration: InputDecoration(labelText: _basis == 'per_kg' ? 'کرایه هر کیلو' : 'مبلغ کرایه', border: const OutlineInputBorder()),
                 ),
@@ -564,6 +565,7 @@ class _ProcessingFormScreenState extends State<ProcessingFormScreen> {
                   child: TextField(
                     controller: _wcharge,
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    inputFormatters: [ThousandsInputFormatter()],
                     decoration: const InputDecoration(labelText: 'نرخ ضایعات (هر کیلو)', border: OutlineInputBorder()),
                   ),
                 ),

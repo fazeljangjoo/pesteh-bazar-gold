@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'excel_io.dart';
 import 'utils.dart';
 import 'warehouse_ui.dart';
-import 'widgets.dart' show snack;
+import 'widgets.dart' show snack, pickDate;
 
 /// T02.3 — گزارش ممیزی (audit log). فقط برای مالک یا کارکنی که audit.view دارد.
 /// آنلاین از طریق StockApi (app.php → audit.list). فیلتر: کاربر، نوع رکورد، بازهٔ تاریخ، جستجوی متن.
@@ -253,9 +253,9 @@ class _AuditLogScreenState extends State<AuditLogScreen> {
 
   Future<void> _pickDate(bool isFrom) async {
     final DateTime now = DateTime.now();
-    final DateTime? d = await showDatePicker(
-      context: context,
-      initialDate: now,
+    final DateTime? d = await pickDate(
+      context,
+      initial: now,
       firstDate: DateTime(now.year - 5),
       lastDate: DateTime(now.year + 1),
     );
