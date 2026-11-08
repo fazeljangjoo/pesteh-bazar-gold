@@ -104,6 +104,16 @@ class OfflineDocs {
     if (rawItems is! List || rawItems.isEmpty || rawItems.length > 20) {
       throw StockApiException('حداقل یک و حداکثر ۲۰ قلم برای برگشت لازم است');
     }
+    // IMPORTANT: resolve temp/alias ids BEFORE opening the transaction. currentId() reads through the root
+    // Database; calling it inside d.transaction() makes sqflite wait for the transaction itself (deadlock) for
+    // unsynced (negative) ids, so the return form spun forever and nothing was saved.
+    final List<int> resolvedRef = <int>[];
+    for (final dynamic raw in rawItems) {
+      if (raw is! Map) throw StockApiException('قلم برگشت نامعتبر است');
+      resolvedRef.add(isSale
+          ? await AppDb.I.currentId('sale', _i(raw['sale_id']))
+          : await AppDb.I.currentId('pur', _i(raw['lot_id'] ?? raw['purchase_id'])));
+    }
     late int rid;
     late double total;
     late double refund;
@@ -111,9 +121,11 @@ class OfflineDocs {
     await AppDb.I.docWrite((Database d) async {
       await d.transaction((Transaction t) async {
         String? party;
+        int idx = -1;
         final List<Map<String, dynamic>> lines = <Map<String, dynamic>>[];
         final Map<String, List<double>> asked = <String, List<double>>{};
         for (final dynamic raw in rawItems) {
+          idx++;
           if (raw is! Map) throw StockApiException('قلم برگشت نامعتبر است');
           final double kg = _d(raw['kg']);
           if (kg <= 0 || kg > 1e9) throw StockApiException('وزن برگشت باید بزرگ‌تر از صفر باشد');
@@ -125,7 +137,7 @@ class OfflineDocs {
           String key;
           double price;
           if (isSale) {
-            saleId = await AppDb.I.currentId('sale', _i(raw['sale_id']));
+            saleId = resolvedRef[idx];
             if (saleId == 0) throw StockApiException('فروش مورد برگشت را انتخاب کنید');
             final List<Map<String, Object?>> sale = await t.query('sales', where: 'id=?', whereArgs: <Object?>[saleId], limit: 1);
             if (sale.isEmpty) throw StockApiException('فروش انتخابی یافت نشد');
@@ -163,7 +175,7 @@ class OfflineDocs {
             final double sold = it['item_price'] != null ? _d(it['item_price']) : _d(sale.first['price']);
             price = (raw['unit_price'] == null || '${raw['unit_price']}'.isEmpty) ? sold : _d(raw['unit_price']);
           } else {
-            lot = await AppDb.I.currentId('pur', _i(raw['lot_id'] ?? raw['purchase_id']));
+            lot = resolvedRef[idx];
             final List<Map<String, Object?>> pu = await t.query('purchases', where: 'id=?', whereArgs: <Object?>[lot], limit: 1);
             if (pu.isEmpty) throw StockApiException('خرید (لات) انتخابی یافت نشد');
             key = '$lot';
