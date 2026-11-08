@@ -1,4 +1,5 @@
 import 'db.dart';
+import 'return_calc.dart';
 
 /// یکسان‌سازی نام طرف حساب: «ي/ك» عربی، فاصله‌های اضافه
 String partyKey(String? name) {
@@ -38,6 +39,29 @@ class DueItem {
     required this.date,
     required this.paid,
   });
+}
+
+/// اعتبار برگشت هر طرف‌حساب = Σ ارزش برگشت − Σ مبلغ بازپرداخت‌شده (کلید = partyKey). receivable: برگشت از فروش، payable: برگشت از خرید.
+Future<({Map<String, double> receivable, Map<String, double> payable})> loadReturnCredits() async {
+  final d = await AppDb.I.db;
+  Future<Map<String, double>> sums(String tbl, String itbl) async {
+    final m = <String, double>{};
+    final rows = await d.rawQuery('''
+        SELECT r.party AS party, COALESCE(r.refund_amount, 0) AS refund,
+               COALESCE((SELECT SUM(i.kg * i.unit_price) FROM $itbl i WHERE i.return_id = r.id), 0) AS total
+        FROM $tbl r''');
+    for (final r in rows) {
+      final k = partyKey(r['party'] as String?);
+      m[k] = (m[k] ?? 0) + (r['total'] as num).toDouble() - (r['refund'] as num).toDouble();
+    }
+    m.removeWhere((k, v) => v <= 0);
+    return m;
+  }
+
+  return (
+    receivable: await sums('sale_returns', 'sale_return_items'),
+    payable: await sums('purchase_returns', 'purchase_return_items'),
+  );
 }
 
 Future<List<DueItem>> loadDues({bool includePaid = false}) async {
@@ -135,6 +159,41 @@ Future<List<DueItem>> loadDues({bool includePaid = false}) async {
       date: DateTime.parse(r['due_date'] as String),
       paid: ((r['paid'] as num?) ?? 0) == 1,
     ));
+  }
+
+  // برگشت‌ها: اعتبار برگشت هر طرف‌حساب (ارزش − بازپرداخت‌شده) از سررسیدهای پرداخت‌نشدهٔ همان طرف کم می‌شود (نزدیک‌ترین سررسید اول).
+  final credits = await loadReturnCredits();
+  if (credits.receivable.isNotEmpty || credits.payable.isNotEmpty) {
+    final amounts = applyReturnCredit(
+      rows: [
+        for (final x in out)
+          (
+            party: x.party,
+            receivable: x.receivable,
+            paid: x.paid,
+            eligible: x.table != 'loan_dues',
+            date: x.date,
+            amount: x.amount,
+          ),
+      ],
+      receivableCredit: credits.receivable,
+      payableCredit: credits.payable,
+    );
+    final adjusted = <DueItem>[];
+    for (var i = 0; i < out.length; i++) {
+      final x = out[i];
+      if (amounts[i] == x.amount) {
+        adjusted.add(x);
+      } else if (amounts[i] >= 0.5) {
+        adjusted.add(DueItem(
+          table: x.table, id: x.id, receivable: x.receivable, kind: x.kind, party: x.party, label: x.label,
+          ref: x.ref, bank: x.bank, amount: amounts[i], date: x.date, paid: x.paid,
+        ));
+      } // else: کاملاً با اعتبار برگشت پوشش داده شده ⇒ در سررسیدها نمی‌آید
+    }
+    out
+      ..clear()
+      ..addAll(adjusted);
   }
 
   out.sort((a, b) => a.date.compareTo(b.date));
@@ -314,6 +373,19 @@ Future<List<PartyAccount>> loadParties() async {
     final a = acc(r['party'] as String?);
     a.sold -= (r['total'] as num).toDouble();
     a.received -= (r['refund'] as num).toDouble();
+  }
+
+  // برگشت از خرید (قرینهٔ برگشت از فروش؛ همان منطق سرور returns.php: bought −= V، paid −= R).
+  // ارزش کالای برگشتی (V) از بدهی ما به فروشنده کم می‌شود؛ مبلغی که فروشنده نقد/چکی به ما پس داده (R) دوباره به بدهی اضافه می‌شود.
+  // قبلاً برگشت از خرید اینجا حساب نمی‌شد و فروشنده بعد از برگشت هم طلبکار می‌ماند.
+  final purchaseReturns = await d.rawQuery('''
+      SELECT r.party AS party, COALESCE(r.refund_amount, 0) AS refund,
+             COALESCE((SELECT SUM(i.kg * i.unit_price) FROM purchase_return_items i WHERE i.return_id = r.id), 0) AS total
+      FROM purchase_returns r''');
+  for (final r in purchaseReturns) {
+    final a = acc(r['party'] as String?);
+    a.bought -= (r['total'] as num).toDouble();
+    a.paid -= (r['refund'] as num).toDouble();
   }
 
   // طرف‌حساب‌هایی که دستی تعریف شده‌اند (حتی اگر هنوز خرید/فروشی نداشته باشند)

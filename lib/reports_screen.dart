@@ -507,10 +507,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         if (usdMissing > 0)
                           Text('${Fmt.money(usdMissing, label: false)} فروش به‌دلیل نبودنِ قیمت دلار یا فی دلاریِ خرید در جمع دلاری نیامده است',
                               style: const TextStyle(fontSize: 12, color: Colors.black54)),
-                        FxProfitBlock(sales: list), // S30.T30.5: سود هر ارز از جدول نرخ ثبت‌شده
-                        if (retList.isNotEmpty)
-                          const Text('توجه: «سود هر ارز از جدول نرخ» فقط فروش‌ها را حساب می‌کند و برگشت از فروش در آن کسر نشده است.',
-                              style: TextStyle(fontSize: 12, color: Colors.black54)),
+                        FxProfitBlock(sales: list, returns: retList), // S30.T30.5: سود هر ارز از جدول نرخ ثبت‌شده (برگشت‌ها با نرخ تاریخ فروش اصلی کسر می‌شوند)
                       ],
                     ]),
                   ),
