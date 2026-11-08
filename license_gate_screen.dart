@@ -658,7 +658,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 ),
               ],
               const SizedBox(height: 12),
-              const Text('کاربر جدید: ۲۰ روز اشتراک آزمایشی رایگان',
+              const Text('کاربر جدید: ۱۰ روز اشتراک آزمایشی رایگان',
                   textAlign: TextAlign.center, style: TextStyle(color: Colors.black54, fontSize: 12.5)),
               const SizedBox(height: 16),
               const Divider(),
