@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'db.dart';
 import 'fx_local.dart';
+import 'ledger.dart' show setPaidWithCredit, updateLineWithCredit; // S36: paid toggle with return-credit accounting
 import 'fmt.dart' show Fmt, MoneyField;
 import 'fx_tx_fields.dart';
 import 'notify_service.dart';
@@ -185,14 +186,12 @@ class _ReceiptScreenState extends State<ReceiptScreen> with EditGuard<ReceiptScr
       builder: (_) => _ReceiptLumpForm(existing: existing, total: _total, others: _othersSum(_lump, existing['id'] as int?)),
     );
     if (row == null) return;
-    if (!await saveConfirmed(context, () => AppDb.I.updateReceiptLumpTx(existing['id'] as int, row), successMsg: 'ویرایش با موفقیت ثبت شد')) return;
+    if (!await saveConfirmed(context, () => updateLineWithCredit('receipt_lump_tx', existing['id'] as int, row, existing['paid'] == 1, AppDb.I.updateReceiptLumpTx), successMsg: 'ویرایش با موفقیت ثبت شد')) return;
     await _load();
   }
 
   Future<void> _toggleLumpPaid(Map<String, dynamic> row, bool paid) async {
-    final updated = Map<String, dynamic>.from(row)..remove('id')..remove('receipt_id');
-    updated['paid'] = paid ? 1 : 0;
-    if (!await saveConfirmed(context, () => AppDb.I.updateReceiptLumpTx(row['id'] as int, updated), successMsg: 'وضعیت تسویه با موفقیت ثبت شد')) return;
+    if (!await saveConfirmed(context, () => setPaidWithCredit('receipt_lump_tx', row['id'] as int, paid), successMsg: 'وضعیت تسویه با موفقیت ثبت شد')) return;
     await _load();
   }
 
@@ -222,7 +221,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> with EditGuard<ReceiptScr
       builder: (_) => _ReceiptCreditForm(existing: existing, total: _total, others: _othersSum(_credit, existing['id'] as int?)),
     );
     if (row == null) return;
-    if (!await saveConfirmed(context, () => AppDb.I.updateReceiptCreditInst(existing['id'] as int, row), successMsg: 'ویرایش با موفقیت ثبت شد')) return;
+    if (!await saveConfirmed(context, () => updateLineWithCredit('receipt_credit_inst', existing['id'] as int, row, existing['paid'] == 1, AppDb.I.updateReceiptCreditInst), successMsg: 'ویرایش با موفقیت ثبت شد')) return;
     if (row['paid'] == 1) {
       await NotifyService.I.cancelReceiptCreditRow(existing['id'] as int);
     } else {
@@ -234,7 +233,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> with EditGuard<ReceiptScr
   Future<void> _toggleCreditPaid(Map<String, dynamic> row, bool paid) async {
     final updated = Map<String, dynamic>.from(row)..remove('id')..remove('receipt_id');
     updated['paid'] = paid ? 1 : 0;
-    if (!await saveConfirmed(context, () => AppDb.I.updateReceiptCreditInst(row['id'] as int, updated), successMsg: 'وضعیت تسویه با موفقیت ثبت شد')) return;
+    if (!await saveConfirmed(context, () => setPaidWithCredit('receipt_credit_inst', row['id'] as int, paid), successMsg: 'وضعیت تسویه با موفقیت ثبت شد')) return;
     if (paid) {
       await NotifyService.I.cancelReceiptCreditRow(row['id'] as int);
     } else {
@@ -269,7 +268,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> with EditGuard<ReceiptScr
       builder: (_) => _ReceiptChequeForm(existing: existing, total: _total, others: _othersSum(_cheque, existing['id'] as int?)),
     );
     if (row == null) return;
-    if (!await saveConfirmed(context, () => AppDb.I.updateReceiptChequeInst(existing['id'] as int, row), successMsg: 'ویرایش با موفقیت ثبت شد')) return;
+    if (!await saveConfirmed(context, () => updateLineWithCredit('receipt_cheque_inst', existing['id'] as int, row, existing['paid'] == 1, AppDb.I.updateReceiptChequeInst), successMsg: 'ویرایش با موفقیت ثبت شد')) return;
     if (row['paid'] == 1) {
       await NotifyService.I.cancelReceiptChequeRow(existing['id'] as int);
     } else {
@@ -281,7 +280,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> with EditGuard<ReceiptScr
   Future<void> _toggleChequePaid(Map<String, dynamic> row, bool paid) async {
     final updated = Map<String, dynamic>.from(row)..remove('id')..remove('receipt_id');
     updated['paid'] = paid ? 1 : 0;
-    if (!await saveConfirmed(context, () => AppDb.I.updateReceiptChequeInst(row['id'] as int, updated), successMsg: 'وضعیت تسویه با موفقیت ثبت شد')) return;
+    if (!await saveConfirmed(context, () => setPaidWithCredit('receipt_cheque_inst', row['id'] as int, paid), successMsg: 'وضعیت تسویه با موفقیت ثبت شد')) return;
     if (paid) {
       await NotifyService.I.cancelReceiptChequeRow(row['id'] as int);
     } else {

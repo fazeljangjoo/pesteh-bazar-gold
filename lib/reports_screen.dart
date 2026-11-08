@@ -392,7 +392,9 @@ class _ReportsScreenState extends State<ReportsScreen> {
               if (fxChart && _chartCcy != null) {
                 final sdIso = '${x['sale_date'] ?? x['date']}';
                 final rS = _book!.rateOf(_chartCcy!, sdIso);
-                final rB = rS; // همان مبنای محاسبهٔ فروش‌ها در همین صفحه (تاریخ خریدِ قلم در دادهٔ فروش نیست ⇒ روز فروش)
+                // S36: نرخ روز خرید قلم (purchase_date)؛ برای لات امانی یا وقتی نیست ⇒ روز فروش — همان مبنای فروش‌ها در همین صفحه
+                final pdStr = '${x['purchase_date'] ?? ''}'.trim();
+                final rB = pdStr.isNotEmpty ? _book!.rateOf(_chartCcy!, pdStr) : rS;
                 if (rS != null && rB != null) {
                   final pu = rev / rS - kg * ((x['cost_price'] as num).toDouble() + extraKg) / rB;
                   byTypeUsd[key] = (byTypeUsd[key] ?? 0) - pu;
