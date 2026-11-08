@@ -355,7 +355,8 @@ class OfflineDocs {
     final StringBuffer sql = StringBuffer(
         'SELECT r.id AS return_id, r.number AS number, r.date AS date, i.sale_id AS sale_id, i.lot_id AS lot_id, i.kg AS kg, i.unit_price AS unit_price, '
         'pu.code AS code, pu.type_name AS type_name, pu.base_type AS base_type, pu.labor_cost AS p_labor_cost, pu.transport_cost AS p_transport_cost, '
-        'pu.net_weight AS p_net_weight, pu.price AS cost_price, pu.price_usd AS cost_price_usd, c.name AS category_name, s.usd_rate AS usd_rate, s.date AS sale_date '
+        'pu.net_weight AS p_net_weight, ${consCostSql("COALESCE((SELECT si2.item_price FROM sale_items si2 WHERE si2.sale_id=i.sale_id AND si2.purchase_id=i.lot_id LIMIT 1), s.price)", p: 'pu')} AS cost_price, '
+        'pu.price_usd AS cost_price_usd, c.name AS category_name, s.usd_rate AS usd_rate, s.date AS sale_date, ${consPurchaseDateSql(p: 'pu')} AS purchase_date '
         'FROM sale_returns r JOIN sale_return_items i ON i.return_id=r.id JOIN purchases pu ON pu.id=i.lot_id '
         'LEFT JOIN categories c ON c.id=pu.category_id LEFT JOIN sales s ON s.id=i.sale_id WHERE 1=1');
     final List<Object?> args = <Object?>[];
@@ -383,6 +384,7 @@ class OfflineDocs {
         'cost_price_usd': r['cost_price_usd'] == null ? null : _d(r['cost_price_usd']),
         'usd_rate': r['usd_rate'] == null ? null : _d(r['usd_rate']),
         'sale_date': r['sale_date'] == null ? null : '${r['sale_date']}',
+        'purchase_date': r['purchase_date'] == null ? null : '${r['purchase_date']}', // S36: null for a consigned lot
       });
     }
     return out;

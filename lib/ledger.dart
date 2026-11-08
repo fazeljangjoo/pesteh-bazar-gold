@@ -41,7 +41,41 @@ class DueItem {
   });
 }
 
-/// اعتبار برگشت هر طرف‌حساب = Σ ارزش برگشت − Σ مبلغ بازپرداخت‌شده (کلید = partyKey). receivable: برگشت از فروش، payable: برگشت از خرید.
+/// منبع‌های شش‌گانهٔ سررسید: (جدول، ستون طرف‌حساب، join، شرط، دریافتنی؟) — همان شرط‌های loadDues / سرور `pb_dues_credit_meta`.
+const List<(String, String, String, String, bool)> _kDueSources = <(String, String, String, String, bool)>[
+  ('lump_tx', 'p.seller', 'JOIN payments pay ON pay.id = x.payment_id JOIN purchases p ON p.id = pay.purchase_id',
+      "pay.pay_type IN ('lump', 'mixed')", false),
+  ('credit_inst', 'p.seller', 'JOIN payments pay ON pay.id = x.payment_id JOIN purchases p ON p.id = pay.purchase_id',
+      "(pay.pay_type = 'mixed' OR (pay.pay_type = 'staged' AND pay.staged_type = 'credit'))", false),
+  ('cheque_inst', 'p.seller', 'JOIN payments pay ON pay.id = x.payment_id JOIN purchases p ON p.id = pay.purchase_id',
+      "(pay.pay_type = 'mixed' OR (pay.pay_type = 'staged' AND pay.staged_type = 'cheque'))", false),
+  ('receipt_lump_tx', 's.buyer', 'JOIN receipts rec ON rec.id = x.receipt_id JOIN sales s ON s.id = rec.sale_id',
+      "rec.recv_type = 'lump'", true),
+  ('receipt_credit_inst', 's.buyer', 'JOIN receipts rec ON rec.id = x.receipt_id JOIN sales s ON s.id = rec.sale_id',
+      "rec.recv_type = 'staged' AND rec.staged_type = 'credit'", true),
+  ('receipt_cheque_inst', 's.buyer', 'JOIN receipts rec ON rec.id = x.receipt_id JOIN sales s ON s.id = rec.sale_id',
+      "rec.recv_type = 'staged' AND rec.staged_type = 'cheque'", true),
+];
+
+/// Σ credit_used ردیف‌های «پرداخت‌شدهٔ» هر طرف‌حساب (کلید = partyKey) به تفکیک سمت — اعتباری که قبلاً مصرف شده است.
+Future<({Map<String, double> receivable, Map<String, double> payable})> loadCreditUsed() async {
+  final d = await AppDb.I.db;
+  final r = <String, double>{};
+  final p = <String, double>{};
+  for (final (String t, String pcol, String join, String cond, bool recv) in _kDueSources) {
+    final rows = await d.rawQuery('SELECT $pcol AS party, SUM(COALESCE(x.credit_used, 0)) AS u FROM $t x $join '
+        'WHERE x.paid = 1 AND COALESCE(x.credit_used, 0) > 0 AND $cond GROUP BY $pcol');
+    for (final row in rows) {
+      final k = partyKey(row['party'] as String?);
+      final m = recv ? r : p;
+      m[k] = (m[k] ?? 0) + ((row['u'] as num?) ?? 0).toDouble();
+    }
+  }
+  return (receivable: r, payable: p);
+}
+
+/// اعتبار برگشت هر طرف‌حساب = Σ ارزش برگشت − Σ مبلغ بازپرداخت‌شده − Σ credit_used ردیف‌های پرداخت‌شدهٔ همان طرف
+/// (کلید = partyKey؛ هرگز منفی نمی‌شود). receivable: برگشت از فروش، payable: برگشت از خرید.
 Future<({Map<String, double> receivable, Map<String, double> payable})> loadReturnCredits() async {
   final d = await AppDb.I.db;
   Future<Map<String, double>> sums(String tbl, String itbl) async {
@@ -54,17 +88,21 @@ Future<({Map<String, double> receivable, Map<String, double> payable})> loadRetu
       final k = partyKey(r['party'] as String?);
       m[k] = (m[k] ?? 0) + (r['total'] as num).toDouble() - (r['refund'] as num).toDouble();
     }
-    m.removeWhere((k, v) => v <= 0);
     return m;
   }
 
-  return (
-    receivable: await sums('sale_returns', 'sale_return_items'),
-    payable: await sums('purchase_returns', 'purchase_return_items'),
-  );
+  final recv = await sums('sale_returns', 'sale_return_items');
+  final pay = await sums('purchase_returns', 'purchase_return_items');
+  final used = await loadCreditUsed();
+  used.receivable.forEach((k, v) => recv[k] = (recv[k] ?? 0) - v);
+  used.payable.forEach((k, v) => pay[k] = (pay[k] ?? 0) - v);
+  recv.removeWhere((k, v) => v <= 0);
+  pay.removeWhere((k, v) => v <= 0);
+  return (receivable: recv, payable: pay);
 }
 
-Future<List<DueItem>> loadDues({bool includePaid = false}) async {
+/// سررسیدها بدون اعمال اعتبار برگشت (مبلغ‌ها همان مبلغ ذخیره‌شده‌اند).
+Future<List<DueItem>> _loadDuesRaw({bool includePaid = false}) async {
   final d = await AppDb.I.db;
   final out = <DueItem>[];
 
@@ -161,21 +199,76 @@ Future<List<DueItem>> loadDues({bool includePaid = false}) async {
     ));
   }
 
+  return out;
+}
+
+List<DueRow> _creditRows(List<DueItem> out) => <DueRow>[
+      for (final x in out)
+        (
+          party: x.party,
+          receivable: x.receivable,
+          paid: x.paid,
+          eligible: x.table != 'loan_dues',
+          date: x.date,
+          amount: x.amount,
+        ),
+    ];
+
+/// اعتباری که این ردیفِ پرداخت‌نشده همین الان مصرف می‌کند (0 اگر اعتباری نباشد/ردیف پرداخت‌شده باشد).
+/// همان تخصیص loadDues: نزدیک‌ترین سررسید اول، با استخرِ بعد از کسر credit_used ردیف‌های پرداخت‌شده.
+Future<double> dueCreditTake(String table, int id) async {
+  if (table == 'loan_dues') return 0;
+  final credits = await loadReturnCredits();
+  if (credits.receivable.isEmpty && credits.payable.isEmpty) return 0;
+  final raw = await _loadDuesRaw();
+  final takes = allocateReturnCredit(
+      rows: _creditRows(raw), receivableCredit: credits.receivable, payableCredit: credits.payable);
+  for (final e in takes.entries) {
+    if (raw[e.key].table == table && raw[e.key].id == id) return e.value;
+  }
+  return 0;
+}
+
+/// «پرداخت/دریافت شد» با حسابداری اعتبار برگشت (معادل `dues.mark_paid` سرور).
+/// [shownAmount] = مبلغ کاهش‌یافتهٔ نمایش‌داده‌شده در لیست سررسید؛ اگر ندهید و [paid] درست باشد، از تخصیص فعلی حساب می‌شود.
+/// [paid]=false مبلغ اصلی (قبل از کاهش) را برمی‌گرداند.
+Future<void> setPaidWithCredit(String table, int id, bool paid, {double? shownAmount}) async {
+  if (!paid || table == 'loan_dues') {
+    await AppDb.I.setPaid(table, id, paid);
+    return;
+  }
+  double? shown = shownAmount;
+  if (shown == null) {
+    final take = await dueCreditTake(table, id);
+    if (take > 0.004) {
+      final stored = await AppDb.I.lineAmount(table, id);
+      if (stored != null) shown = stored - take;
+    }
+  }
+  await AppDb.I.setPaid(table, id, true, shownAmount: shown);
+}
+
+/// ذخیرهٔ ویرایش یک ردیف از فرم: اگر در این ویرایش ردیف از «پرداخت‌نشده» به «پرداخت‌شده» رسید، اول بدون پرداخت ذخیره می‌شود
+/// و بعد با [setPaidWithCredit] علامت می‌خورد تا اعتبار برگشت مصرف شود (فرم نباید از دور اعتبار خارج کند).
+/// بقیهٔ حالت‌ها (از جمله برگرداندن به پرداخت‌نشده) همان [update] است که خودش `credit_used` را برمی‌گرداند.
+Future<void> updateLineWithCredit(String table, int id, Map<String, dynamic> row, bool wasPaid,
+    Future<void> Function(int id, Map<String, dynamic> row) update) async {
+  final nowPaid = row['paid'] == 1 || row['paid'] == true;
+  if (nowPaid && !wasPaid) {
+    await update(id, <String, dynamic>{...row, 'paid': 0});
+    await setPaidWithCredit(table, id, true);
+  } else {
+    await update(id, row);
+  }
+}
+
+Future<List<DueItem>> loadDues({bool includePaid = false}) async {
+  final out = await _loadDuesRaw(includePaid: includePaid);
   // برگشت‌ها: اعتبار برگشت هر طرف‌حساب (ارزش − بازپرداخت‌شده) از سررسیدهای پرداخت‌نشدهٔ همان طرف کم می‌شود (نزدیک‌ترین سررسید اول).
   final credits = await loadReturnCredits();
   if (credits.receivable.isNotEmpty || credits.payable.isNotEmpty) {
     final amounts = applyReturnCredit(
-      rows: [
-        for (final x in out)
-          (
-            party: x.party,
-            receivable: x.receivable,
-            paid: x.paid,
-            eligible: x.table != 'loan_dues',
-            date: x.date,
-            amount: x.amount,
-          ),
-      ],
+      rows: _creditRows(out),
       receivableCredit: credits.receivable,
       payableCredit: credits.payable,
     );

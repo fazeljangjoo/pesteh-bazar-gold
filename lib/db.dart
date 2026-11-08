@@ -16,6 +16,7 @@ import 'entity_store.dart';
 import 'money_unit.dart'; // S29.T29.3
 import 'fmt.dart' show Fmt; // S35.T35.11
 import 'fx_doc_field.dart' show kFxRialPerStoredUnit;
+import 'return_calc.dart' show settleDueRow, DueSettle; // S36: return-credit settlement (pure)
 
 
 const List<String> kPresetTypesNormal = ['اکبری', 'احمدآقایی', 'فندقی', 'کله‌قوچی'];
@@ -47,17 +48,17 @@ const List<(String, List<String>)> _kSnapshot = [
   ('payments', ['id', 'purchase_id', 'pay_type', 'staged_type']),
   (
     'lump_tx',
-    ['id', 'payment_id', 'from_account', 'payer_name', 'to_account', 'seller_name', 'amount', 'date', 'paid', 'ccy', 'ccy_amount', 'fx_rate']
+    ['id', 'payment_id', 'from_account', 'payer_name', 'to_account', 'seller_name', 'amount', 'date', 'paid', 'ccy', 'ccy_amount', 'fx_rate', 'credit_used']
   ),
   (
     'credit_inst',
-    ['id', 'payment_id', 'due_date', 'amount', 'from_account', 'payer_name', 'to_account', 'seller_name', 'paid', 'ccy', 'ccy_amount', 'fx_rate']
+    ['id', 'payment_id', 'due_date', 'amount', 'from_account', 'payer_name', 'to_account', 'seller_name', 'paid', 'ccy', 'ccy_amount', 'fx_rate', 'credit_used']
   ),
   (
     'cheque_inst',
     [
       'id', 'payment_id', 'due_date', 'amount', 'cheque_no', 'bank_name', 'from_account', 'payer_name',
-      'to_account', 'seller_name', 'paid', 'ccy', 'ccy_amount', 'fx_rate', 'sayad_id' // S35.T35.7c
+      'to_account', 'seller_name', 'paid', 'ccy', 'ccy_amount', 'fx_rate', 'sayad_id', 'credit_used' // S35.T35.7c + v71
     ]
   ),
   (
@@ -74,20 +75,20 @@ const List<(String, List<String>)> _kSnapshot = [
   ('receipts', ['id', 'sale_id', 'recv_type', 'staged_type']),
   (
     'receipt_lump_tx',
-    ['id', 'receipt_id', 'from_account', 'payer_name', 'to_account', 'receiver_name', 'amount', 'date', 'paid', 'ccy', 'ccy_amount', 'fx_rate']
+    ['id', 'receipt_id', 'from_account', 'payer_name', 'to_account', 'receiver_name', 'amount', 'date', 'paid', 'ccy', 'ccy_amount', 'fx_rate', 'credit_used']
   ),
   (
     'receipt_credit_inst',
     [
       'id', 'receipt_id', 'due_date', 'amount', 'from_account', 'payer_name', 'to_account',
-      'receiver_name', 'paid', 'ccy', 'ccy_amount', 'fx_rate'
+      'receiver_name', 'paid', 'ccy', 'ccy_amount', 'fx_rate', 'credit_used'
     ]
   ),
   (
     'receipt_cheque_inst',
     [
       'id', 'receipt_id', 'due_date', 'amount', 'cheque_no', 'bank_name', 'from_account', 'payer_name',
-      'to_account', 'receiver_name', 'paid', 'ccy', 'ccy_amount', 'fx_rate', 'sayad_id' // S35.T35.7c
+      'to_account', 'receiver_name', 'paid', 'ccy', 'ccy_amount', 'fx_rate', 'sayad_id', 'credit_used' // S35.T35.7c + v71
     ]
   ),
   // طرف‌حساب‌های تعریف‌شده‌ی دستی و دفتر قرض/وام (در سود و زیان حساب نمی‌شوند)
@@ -106,7 +107,24 @@ const List<(String, List<String>)> _kSnapshot = [
 const List<(String, List<String>)> _kDocTables = [
   ('proformas', ['id', 'uid', 'number', 'party', 'date', 'valid_until', 'status', 'reserve', 'note', 'terms', 'converted_at', 'tax_amount', 'created_at']),
   ('proforma_items', ['id', 'proforma_id', 'lot_id', 'description', 'kg', 'unit_price', 'discount', 'sale_id']),
+  // S36: شرایط تسویهٔ بار امانی (یک ردیف برای هر لات امانی؛ `id` = شناسهٔ consignment_items سرور) ⇒ مبنای هزینه در سود
+  ('cons_terms', ['id', 'lot_id', 'settlement_mode', 'commission_type', 'commission_value', 'agreed_price']),
 ];
+
+/// purchases.is_mix of a consigned-in lot (server PB_CONS_LOT_KIND)
+const int kConsLotKind = 3;
+
+/// SQL: effective COST per kg of a sold lot (mirror of server `pb_cons_cost_sql()`).
+/// [p] = alias of purchases (the lot); [unitExpr] = SQL of the sale unit price per kg of that line.
+/// Own lots: p.price. Consigned-in lot: purchase_on_sale → agreed_price; commission → unit×(1−v/100) | unit−v; no terms → p.price.
+String consCostSql(String unitExpr, {String p = 'p'}) =>
+    "(CASE WHEN $p.is_mix=$kConsLotKind THEN COALESCE((SELECT CASE ct.settlement_mode "
+    "WHEN 'purchase_on_sale' THEN ct.agreed_price "
+    "ELSE (CASE ct.commission_type WHEN 'percent' THEN ($unitExpr) * (1 - ct.commission_value / 100) ELSE ($unitExpr) - ct.commission_value END) END "
+    "FROM cons_terms ct WHERE ct.lot_id=$p.id LIMIT 1), $p.price) ELSE $p.price END)";
+
+/// SQL: purchase date of a lot; null for consigned lots (no purchase happened ⇒ no purchase-date FX rate).
+String consPurchaseDateSql({String p = 'p'}) => '(CASE WHEN $p.is_mix=$kConsLotKind THEN NULL ELSE $p.date END)';
 
 /// جدول‌هایی که اگر سرور هنوز نفرستاد (سرور قدیمی)، داده‌ی محلی‌شان پاک نمی‌شود
 const Set<String> _kOptionalTables = {
@@ -132,6 +150,7 @@ const Set<String> _kRealCols = {
   'gram', 'pct_dombest', 'pct_tuchin', 'pct_crooked', 'pct_khandan', 'weight', 'small_sacks',
   'large_sacks', 'item_price', 'amount', 'usd_rate', 'price_usd', 'fx_rate', 'ccy_amount', 'price_ccy', 'total_ccy', 'waste',
   'kg', 'unit_price', 'refund_amount', 'discount', 'tax_amount', 'gross_kg', 'tare_kg', 'quality_deduct_kg',
+  'credit_used', 'commission_value', 'agreed_price', // S36
 };
 const Set<String> _kIntCols = {
   'id', 'category_id', 'mix_purchase_id', 'source_purchase_id', 'purchase_id', 'payment_id', 'sale_id',
@@ -167,7 +186,7 @@ class AppDb {
   /// با هر تغییر داده زیاد می‌شود تا صفحه‌ها بازخوانی شوند
   final ValueNotifier<int> version = ValueNotifier<int>(0);
 
-  static const int schemaVersion = 28;
+  static const int schemaVersion = 29;
 
   String? _phone;
   Database? _db;
@@ -373,6 +392,28 @@ class AppDb {
     if (oldV < 28) {
       await _addSayadCols(d); // S35.T35.7c: sayad id on cheque lines (local mirror)
     }
+    if (oldV < 29) {
+      await _addCreditUsedCols(d); // S36 (server v71): return credit consumed by a paid line
+      await createConsTerms(d); // S36: consignment settlement terms mirror
+    }
+  }
+
+  /// S36: شرایط تسویهٔ بار امانی (آینهٔ `docs.cons_terms` سرور). IF NOT EXISTS ⇒ اجرای دوباره بی‌خطر.
+  static Future<void> createConsTerms(DatabaseExecutor d) async {
+    await d.execute('CREATE TABLE IF NOT EXISTS cons_terms(id INTEGER PRIMARY KEY, lot_id INTEGER NOT NULL, '
+        'settlement_mode TEXT, commission_type TEXT, commission_value REAL, agreed_price REAL)');
+    await d.execute('CREATE INDEX IF NOT EXISTS ix_cons_terms_lot ON cons_terms(lot_id)');
+  }
+
+  /// S36 (server migration 71): `credit_used` REAL NULL on the six line tables (NULL = 0).
+  static Future<void> _addCreditUsedCols(DatabaseExecutor d) async {
+    for (final String t in const <String>[
+      'lump_tx', 'credit_inst', 'cheque_inst', 'receipt_lump_tx', 'receipt_credit_inst', 'receipt_cheque_inst',
+    ]) {
+      try {
+        await d.execute('ALTER TABLE $t ADD COLUMN credit_used REAL'); // fails when the column already exists
+      } catch (_) {/* column already exists */}
+    }
   }
 
   /// جدول‌های آینهٔ برگشت‌ها و پیش‌فاکتورها (IF NOT EXISTS ⇒ اجرای دوباره بی‌خطر)
@@ -389,6 +430,7 @@ class AppDb {
         'valid_until TEXT, status TEXT, reserve INTEGER, note TEXT, terms TEXT, converted_at TEXT, tax_amount REAL, created_at TEXT)');
     await d.execute('CREATE TABLE IF NOT EXISTS proforma_items(id INTEGER PRIMARY KEY, proforma_id INTEGER NOT NULL, lot_id INTEGER, '
         'description TEXT, kg REAL NOT NULL DEFAULT 0, unit_price REAL NOT NULL DEFAULT 0, discount REAL, sale_id INTEGER)');
+    await createConsTerms(d); // S36
     for (final s in const [
       'CREATE INDEX IF NOT EXISTS ix_sri_ret ON sale_return_items(return_id)',
       'CREATE INDEX IF NOT EXISTS ix_sri_sale ON sale_return_items(sale_id)',
@@ -721,6 +763,7 @@ class AppDb {
     await _addFinCols(d); // S35.T35.6b
     await GradeLinesLocal.createTables(d); // S35.T35.3b
     await _addTxFxCols(d); // S28.T28.2b
+    await _addCreditUsedCols(d); // S36
     await _createIndexes(d);
     // نکته: دسته‌ها و انواع پیش‌فرض را سرور می‌سازد (bootstrap) و هنگام ورود دریافت می‌شوند.
   }
@@ -2499,6 +2542,10 @@ class AppDb {
     if (out.containsKey('bank_name')) out['bank_name'] = _s(out['bank_name'], 100);
     if (out.containsKey('sayad_id')) out['sayad_id'] = _s(out['sayad_id'], 16); // S35.T35.7c
     if (out.containsKey('paid')) out['paid'] = (out['paid'] == true || out['paid'] == 1) ? 1 : 0;
+    if (out.containsKey('credit_used')) {
+      final double cu = _n(out['credit_used']);
+      out['credit_used'] = (cu > 0.004 && cu <= 1e13 && out['paid'] != 0) ? _r(cu, 2) : null;
+    }
     return out;
   }
 
@@ -2663,11 +2710,24 @@ class AppDb {
   Future<void> _updateTx(String table, int id, Map<String, dynamic> row) async {
     final meta = _txMeta[table]!;
     await _write((d) => d.transaction((t) async {
-          final cur = await t.query(table, columns: [meta.$1], where: 'id=?', whereArgs: [id]);
+          final cur = await t.query(table,
+              columns: [meta.$1, 'amount', 'paid', 'credit_used', 'ccy_amount', 'fx_rate'], where: 'id=?', whereArgs: [id]);
           if (cur.isEmpty) {
             throw SaveNotConfirmed('این ردیف دیگر وجود ندارد (اطلاعات در این بین به‌روز شده). صفحه را ببندید و دوباره باز کنید.');
           }
-          final n = await t.update(table, _txRow(row), where: 'id=?', whereArgs: [id]);
+          final upd = _txRow(row);
+          // S36: a paid line that consumed return credit is un-paid through a form ⇒ same as setPaid(false): the reduction is restored
+          // (only when the amount was not edited); otherwise just drop credit_used so the pool never counts an unpaid line.
+          if (upd['paid'] == 0 && ((cur.first['paid'] as num?) ?? 0) == 1 && _n(cur.first['credit_used']) > 0.004) {
+            final double curAmt = _n(cur.first['amount']);
+            if (!upd.containsKey('amount') || (_n(upd['amount']) - curAmt).abs() < 0.005) {
+              final DueSettle s = _settle(cur.first, false, 0);
+              upd['amount'] = s.amount;
+              if (s.ccyAmount != null) upd['ccy_amount'] = s.ccyAmount;
+            }
+            upd['credit_used'] = null;
+          }
+          final n = await t.update(table, upd, where: 'id=?', whereArgs: [id]);
           if (n < 1) throw SaveNotConfirmed();
           await _queueByParent(t, meta.$2, (cur.first[meta.$1] as num).toInt());
         }));
@@ -2777,13 +2837,17 @@ class AppDb {
       (await db).query('receipt_cheque_inst', where: 'paid=0');
 
   // ======================= فروش =======================
+  /// cost per kg of the lot of a sale line (alias si = sale_items): consigned lots follow their settlement terms (S36)
+  static final String _salesCostSql =
+      consCostSql('COALESCE(si.item_price, (SELECT sx.price FROM sales sx WHERE sx.id=si.sale_id))');
+
   Future<List<Map<String, dynamic>>> sales() async {
     final d = await db;
     final rows = await d.query('sales', orderBy: 'ord DESC, id DESC');
     // یک کوئری برای همهٔ اقلام (قبلاً برای هر فروش یک کوئری جدا بود)
     final all = await d.rawQuery('''
         SELECT si.sale_id AS _sid, si.weight, si.item_price, si.small_sacks, si.large_sacks, si.purchase_id AS purchase_id,
-               p.code AS code, p.price AS cost_price, p.price_usd AS cost_price_usd, p.type_name AS type_name, p.base_type AS base_type, p.labor_cost AS p_labor_cost, p.transport_cost AS p_transport_cost, p.net_weight AS p_net_weight, c.name AS category_name
+               p.code AS code, $_salesCostSql AS cost_price, p.price_usd AS cost_price_usd, ${consPurchaseDateSql()} AS purchase_date, p.type_name AS type_name, p.base_type AS base_type, p.labor_cost AS p_labor_cost, p.transport_cost AS p_transport_cost, p.net_weight AS p_net_weight, c.name AS category_name
         FROM sale_items si
         JOIN purchases p ON p.id = si.purchase_id
         JOIN categories c ON c.id = p.category_id
@@ -3156,8 +3220,30 @@ class AppDb {
     'receipt_cheque_inst',
   };
 
-  /// وضعیت «پرداخت/دریافت شد» یک تراکنش (یکجا، قسط یا چک) را عوض می‌کند
-  Future<void> setPaid(String table, int id, bool paid) async {
+  /// S36: pure settlement of one line row (mirror of server `pb_dues_set_paid`); see return_calc.dart [settleDueRow].
+  DueSettle _settle(Map<String, Object?> row, bool paid, double take) => settleDueRow(
+        amount: _n(row['amount']),
+        creditUsed: _n(row['credit_used']),
+        wasPaid: ((row['paid'] as num?) ?? 0) == 1,
+        paid: paid,
+        take: take,
+        ccyAmount: row['ccy_amount'] == null ? null : _n(row['ccy_amount']),
+        fxRateInStored: (_n(row['fx_rate']) > 0) ? _n(row['fx_rate']) / kFxRialPerStoredUnit : null,
+      );
+
+  /// مبلغ ذخیره‌شدهٔ (کاهش‌نیافتهٔ نمایشی) یک ردیف پرداخت/دریافت؛ null اگر نبود.
+  Future<double?> lineAmount(String table, int id) async {
+    if (!_paidTables.contains(table)) return null;
+    final rows = await (await db).query(table, columns: ['amount'], where: 'id=?', whereArgs: [id]);
+    return rows.isEmpty ? null : _n(rows.first['amount']);
+  }
+
+  /// وضعیت «پرداخت/دریافت شد» یک تراکنش (یکجا، قسط یا چک) را عوض می‌کند.
+  ///
+  /// [shownAmount] = مبلغ نمایش‌داده‌شده (بعد از کسر اعتبار برگشت). وقتی از مبلغ ذخیره‌شده کمتر باشد و [paid] درست باشد،
+  /// کاهش «واقعی» می‌شود: `amount -= take`, `credit_used = take` (همان `pb_dues_set_paid` سرور). با [paid]=false مبلغ اصلی برمی‌گردد.
+  /// بدون [shownAmount] فقط پرچم عوض می‌شود (و بازگرداندنِ credit_used در صورت وجود).
+  Future<void> setPaid(String table, int id, bool paid, {double? shownAmount}) async {
     if (table == 'loan_dues') {
       if (paid) await payLoanDue(id);
       return;
@@ -3165,9 +3251,19 @@ class AppDb {
     if (!_paidTables.contains(table)) throw ArgumentError('جدول نامعتبر');
     final meta = _txMeta[table]!;
     await _write((d) => d.transaction((t) async {
-      final cur = await t.query(table, columns: [meta.$1], where: 'id=?', whereArgs: [id]);
+      final cur = await t.query(table,
+          columns: [meta.$1, 'amount', 'paid', 'credit_used', 'ccy_amount', 'fx_rate'], where: 'id=?', whereArgs: [id]);
       if (cur.isEmpty) throw SaveNotConfirmed('این مورد دیگر وجود ندارد؛ صفحه را ببندید و دوباره باز کنید.');
-      await t.update(table, {'paid': paid ? 1 : 0}, where: 'id=?', whereArgs: [id]);
+      final double stored = _n(cur.first['amount']);
+      final double take = (paid && shownAmount != null && shownAmount < stored) ? stored - (shownAmount < 0 ? 0 : shownAmount) : 0.0;
+      final DueSettle s = _settle(cur.first, paid, take);
+      final Map<String, Object?> vals = <String, Object?>{'paid': paid ? 1 : 0};
+      if (s.changed) {
+        vals['amount'] = s.amount;
+        vals['credit_used'] = s.creditUsed > 0.004 ? s.creditUsed : null;
+        if (s.ccyAmount != null) vals['ccy_amount'] = s.ccyAmount;
+      }
+      await t.update(table, vals, where: 'id=?', whereArgs: [id]);
       await _queueByParent(t, meta.$2, (cur.first[meta.$1] as num).toInt());
     }));
     version.value++;

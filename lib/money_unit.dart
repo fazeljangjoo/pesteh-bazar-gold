@@ -24,12 +24,13 @@ class MoneyUnit {
     'purchases': <String>['price', 'labor_cost', 'transport_cost', 'usd_rate'], // usd_rate = stored unit per USD: moves with price
     'sales': <String>['price', 'labor_cost', 'transport_cost', 'usd_rate'],
     'sale_items': <String>['item_price'],
-    'lump_tx': <String>['amount'],
-    'credit_inst': <String>['amount'],
-    'cheque_inst': <String>['amount'],
-    'receipt_lump_tx': <String>['amount'],
-    'receipt_credit_inst': <String>['amount'],
-    'receipt_cheque_inst': <String>['amount'],
+    'lump_tx': <String>['amount', 'credit_used'], // credit_used: return credit consumed (v71)
+    'credit_inst': <String>['amount', 'credit_used'], // credit_used: return credit consumed (v71)
+    'cheque_inst': <String>['amount', 'credit_used'], // credit_used: return credit consumed (v71)
+    'receipt_lump_tx': <String>['amount', 'credit_used'], // credit_used: return credit consumed (v71)
+    'receipt_credit_inst': <String>['amount', 'credit_used'], // credit_used: return credit consumed (v71)
+    'receipt_cheque_inst': <String>['amount', 'credit_used'], // credit_used: return credit consumed (v71)
+    'cons_terms': <String>['agreed_price'], // S36: price per kg (commission_value is money only when not percent: handled in migrateLocal)
     'loan_entries': <String>['amount'],
     'loan_dues': <String>['amount'],
     'sale_returns': <String>['refund_amount', 'tax_amount'],
@@ -85,6 +86,10 @@ class MoneyUnit {
           if (!have.contains(c)) continue;
           await t.execute('UPDATE ${e.key} SET $c = ROUND($c * 10, 2) WHERE $c IS NOT NULL');
         }
+      }
+      if ((await _cols(t, 'cons_terms')).contains('commission_value')) {
+        await t.execute("UPDATE cons_terms SET commission_value = ROUND(commission_value * 10, 2) "
+            "WHERE commission_value IS NOT NULL AND COALESCE(commission_type, '') <> 'percent'");
       }
       await _migrateEntities(t);
       await t.insert('meta', <String, Object?>{'k': kMetaKey, 'v': rial}, conflictAlgorithm: ConflictAlgorithm.replace);

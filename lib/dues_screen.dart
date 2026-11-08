@@ -61,7 +61,7 @@ class _DuesScreenState extends State<DuesScreen> {
     final ok = await confirm(
         context, '${i.kind} به مبلغ ${Fmt.money(i.amount)}$who «$verb شد» ثبت شود؟');
     if (!ok) return;
-    final done = await saveConfirmed(context, () => AppDb.I.setPaid(i.table, i.id, true),
+    final done = await saveConfirmed(context, () => setPaidWithCredit(i.table, i.id, true, shownAmount: i.amount), // S36: i.amount = reduced (shown) amount
         successMsg: '$verb با موفقیت ثبت شد');
     if (!done) return;
     await _cancelNotification(i);
