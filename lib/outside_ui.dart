@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'form_layout.dart' show kWideForm;
 import 'returns_ui.dart' show ReturnsHelp;
 import 'utils.dart';
 import 'warehouse_ui.dart' show StockApi, StockApiException;
