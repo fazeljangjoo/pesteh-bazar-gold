@@ -9,6 +9,7 @@ import 'party_statement_screen.dart'; // T03.2
 import 'crm_ui.dart'; // T03.4
 import 'payment_screen.dart';
 import 'receipt_screen.dart';
+import 'fmt.dart' show Fmt;
 import 'utils.dart';
 import 'widgets.dart';
 
@@ -70,15 +71,15 @@ class _PartiesScreenState extends State<PartiesScreen> {
                   child: Padding(
                     padding: const EdgeInsets.all(12),
                     child: Column(children: [
-                      infoRow('جمع طلب‌ها (از خریدارها)', '${faNum(theyOwe, dec: 0)} ریال',
+                      infoRow('جمع طلب‌ها (از خریدارها)', Fmt.money(theyOwe),
                           valueColor: Colors.green.shade800),
-                      infoRow('جمع بدهی‌ها (به فروشنده‌ها)', '${faNum(weOwe, dec: 0)} ریال',
+                      infoRow('جمع بدهی‌ها (به فروشنده‌ها)', Fmt.money(weOwe),
                           valueColor: Colors.red.shade800),
                       if (loanRecv > 0.5 || loanPay > 0.5) ...[
                         const Divider(),
-                        infoRow('مانده طلب قرضی', '${faNum(loanRecv, dec: 0)} ریال',
+                        infoRow('مانده طلب قرضی', Fmt.money(loanRecv),
                             valueColor: Colors.green.shade800),
-                        infoRow('مانده بدهی قرضی', '${faNum(loanPay, dec: 0)} ریال',
+                        infoRow('مانده بدهی قرضی', Fmt.money(loanPay),
                             valueColor: Colors.red.shade800),
                       ],
                       if (all.any((a) => a.hasLoans))
@@ -124,10 +125,10 @@ class _PartiesScreenState extends State<PartiesScreen> {
         ? Colors.black54
         : (total > 0 ? Colors.green.shade800 : Colors.red.shade800);
     final lines = <String>[
-      if (a.bought > 0) 'خرید ${faNum(a.bought, dec: 0)}',
-      if (a.sold > 0) 'فروش ${faNum(a.sold, dec: 0)}',
-      if (a.loanReceivable.abs() > 0.5) 'طلب قرضی ${faNum(a.loanReceivable, dec: 0)}',
-      if (a.loanPayable.abs() > 0.5) 'بدهی قرضی ${faNum(a.loanPayable, dec: 0)}',
+      if (a.bought > 0) 'خرید ${Fmt.money(a.bought, label: false)}',
+      if (a.sold > 0) 'فروش ${Fmt.money(a.sold, label: false)}',
+      if (a.loanReceivable.abs() > 0.5) 'طلب قرضی ${Fmt.money(a.loanReceivable, label: false)}',
+      if (a.loanPayable.abs() > 0.5) 'بدهی قرضی ${Fmt.money(a.loanPayable, label: false)}',
     ].join('  •  ');
     return Card(
       key: ValueKey('party${a.key}'),
@@ -138,7 +139,7 @@ class _PartiesScreenState extends State<PartiesScreen> {
           mainAxisAlignment: MainAxisAlignment.center,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            Text(settled ? 'تسویه' : faNum(total.abs(), dec: 0),
+            Text(settled ? 'تسویه' : Fmt.money(total.abs(), label: false),
                 style: TextStyle(fontWeight: FontWeight.w700, color: color)),
             Text(settled ? '' : (total > 0 ? 'طلب ما' : 'بدهی ما'),
                 style: TextStyle(fontSize: 11, color: color)),
@@ -217,23 +218,23 @@ class PartyDetailScreen extends StatelessWidget {
             padding: const EdgeInsets.all(12),
             child: Column(children: [
               if (a.bought > 0) ...[
-                infoRow('جمع خرید از او', '${faNum(a.bought, dec: 0)} ریال'),
-                infoRow('پرداخت‌شده به او', '${faNum(a.paid, dec: 0)} ریال'),
-                infoRow('بدهی ما به او', '${faNum(a.weOwe, dec: 0)} ریال',
+                infoRow('جمع خرید از او', Fmt.money(a.bought)),
+                infoRow('پرداخت‌شده به او', Fmt.money(a.paid)),
+                infoRow('بدهی ما به او', Fmt.money(a.weOwe),
                     valueColor: a.weOwe > 0.5 ? Colors.red.shade800 : null),
               ],
               if (a.bought > 0 && a.sold > 0) const Divider(),
               if (a.sold > 0) ...[
-                infoRow('جمع فروش به او', '${faNum(a.sold, dec: 0)} ریال'),
-                infoRow('دریافت‌شده از او', '${faNum(a.received, dec: 0)} ریال'),
-                infoRow('طلب ما از او', '${faNum(a.theyOwe, dec: 0)} ریال',
+                infoRow('جمع فروش به او', Fmt.money(a.sold)),
+                infoRow('دریافت‌شده از او', Fmt.money(a.received)),
+                infoRow('طلب ما از او', Fmt.money(a.theyOwe),
                     valueColor: a.theyOwe > 0.5 ? Colors.green.shade800 : null),
               ],
               if (a.bought > 0 && a.sold > 0) ...[
                 const Divider(),
                 infoRow(
                   settled ? 'تراز نهایی' : (a.net > 0 ? 'تراز نهایی: او به ما بدهکار است' : 'تراز نهایی: ما به او بدهکاریم'),
-                  settled ? 'تسویه' : '${faNum(a.net.abs(), dec: 0)} ریال',
+                  settled ? 'تسویه' : Fmt.money(a.net.abs()),
                 ),
               ],
             ]),
@@ -270,14 +271,14 @@ class PartyDetailScreen extends StatelessWidget {
               style: TextStyle(fontSize: 12, color: Colors.black54)),
           const SizedBox(height: 8),
           if (a.hasLoans) ...[
-            if (a.loanGiven > 0) infoRow('قرض اعطایی (به او داده‌ایم)', '${faNum(a.loanGiven, dec: 0)} ریال'),
-            if (a.loanTaken > 0) infoRow('قرض دریافتی (از او گرفته‌ایم)', '${faNum(a.loanTaken, dec: 0)} ریال'),
-            if (a.repaidToUs > 0) infoRow('بازپرداخت دریافتی', '${faNum(a.repaidToUs, dec: 0)} ریال'),
-            if (a.repaidByUs > 0) infoRow('بازپرداخت پرداختی', '${faNum(a.repaidByUs, dec: 0)} ریال'),
+            if (a.loanGiven > 0) infoRow('قرض اعطایی (به او داده‌ایم)', Fmt.money(a.loanGiven)),
+            if (a.loanTaken > 0) infoRow('قرض دریافتی (از او گرفته‌ایم)', Fmt.money(a.loanTaken)),
+            if (a.repaidToUs > 0) infoRow('بازپرداخت دریافتی', Fmt.money(a.repaidToUs)),
+            if (a.repaidByUs > 0) infoRow('بازپرداخت پرداختی', Fmt.money(a.repaidByUs)),
             const Divider(),
             infoRow(
               settledLoan ? 'مانده قرض' : (net > 0 ? 'مانده طلب قرضی (او به ما بدهکار است)' : 'مانده بدهی قرضی (ما به او بدهکاریم)'),
-              settledLoan ? 'تسویه' : '${faNum(net.abs(), dec: 0)} ریال',
+              settledLoan ? 'تسویه' : Fmt.money(net.abs()),
               valueColor: settledLoan ? null : (net > 0 ? Colors.green.shade800 : Colors.red.shade800),
             ),
           ] else
@@ -336,7 +337,7 @@ class PartyDetailScreen extends StatelessWidget {
       dense: true,
       contentPadding: EdgeInsets.zero,
       leading: Icon(l.isIn ? Icons.south_west : Icons.north_east, color: color),
-      title: Text('${l.label} • ${faNum(l.amount, dec: 0)} ریال', style: TextStyle(color: color, fontWeight: FontWeight.w600)),
+      title: Text('${l.label} • ${Fmt.money(l.amount)}', style: TextStyle(color: color, fontWeight: FontWeight.w600)),
       subtitle: Text('${jalaliDateFromDt(l.date)}${(l.note ?? '').isEmpty ? '' : '\n${l.note}'}'),
       isThreeLine: (l.note ?? '').isNotEmpty,
       trailing: IconButton(
@@ -347,7 +348,7 @@ class PartyDetailScreen extends StatelessWidget {
             context: context,
             builder: (ctx) => AlertDialog(
               title: const Text('حذف این مورد؟'),
-              content: Text('${l.label} به مبلغ ${faNum(l.amount, dec: 0)} ریال حذف می‌شود.'),
+              content: Text('${l.label} به مبلغ ${Fmt.money(l.amount)} حذف می‌شود.'),
               actions: [
                 TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('انصراف')),
                 FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('حذف')),
@@ -371,8 +372,8 @@ class PartyDetailScreen extends StatelessWidget {
         title: Text('${e.isPurchase ? 'خرید' : 'فروش'} ${e.label} • ${faNum(e.weight)} کیلو (خالص)'),
         subtitle: Text(
           '${jalaliDateFromDt(e.date)}\n'
-          'مبلغ ${faNum(e.total, dec: 0)} • تسویه‌شده ${faNum(e.settled, dec: 0)}'
-          '${open ? ' • مانده ${faNum(e.remaining, dec: 0)}' : ' • تسویه کامل'}',
+          'مبلغ ${Fmt.money(e.total, label: false)} • تسویه‌شده ${Fmt.money(e.settled, label: false)}'
+          '${open ? ' • مانده ${Fmt.money(e.remaining, label: false)}' : ' • تسویه کامل'}',
           style: TextStyle(color: open ? Theme.of(context).colorScheme.error : null),
         ),
         isThreeLine: true,

@@ -2,6 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'fmt.dart' show Fmt;
+import 'form_layout.dart';
 import 'vouchers_links.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -12,6 +14,7 @@ import 'pdf_service.dart';
 import 'returns_ui.dart' show ReturnsHelp;
 import 'sync_service.dart';
 import 'utils.dart';
+import 'widgets.dart' show JalaliDateField;
 import 'warehouse_ui.dart' show StockApi, StockApiException, StockLookup, WhOption;
 
 /// S08.T08.3 — consignment screens (امانی): both directions.
@@ -50,9 +53,11 @@ String _en(String s) {
 }
 
 double _numText(String s) => double.tryParse(_en(s).trim()) ?? 0.0;
+/// STAGE11.5: مبلغ تایپ‌شده به «واحد نمایش» است؛ سرور بدون ضریب در «واحد ذخیره» نگه می‌دارد.
+double _storedNum(String s) => Fmt.storedUnit == Fmt.displayUnit ? _numText(s) : Fmt.fromDisplay(_numText(s)).toDouble(); // یکسان ⇒ بدون گرد کردن
 double _n(dynamic v) => ReturnsHelp.d(v);
 String _kg(dynamic v) => faNum(_n(v), dec: 3);
-String _money(dynamic v) => faNum(_n(v), dec: 0);
+String _money(dynamic v) => Fmt.money(_n(v), label: false);
 bool _can(String key) => StaffPerms.I.can(key);
 
 String _statusLabel(String s) {
@@ -101,7 +106,8 @@ class _F {
   final String initial;
   final bool numeric;
   final Map<String, String>? options;
-  const _F(this.key, this.label, {this.initial = '', this.numeric = false, this.options});
+  final bool isDate; // تاریخ شمسی؛ مقدار برگشتی همچنان ISO میلادی yyyy-mm-dd
+  const _F(this.key, this.label, {this.initial = '', this.numeric = false, this.options, this.isDate = false});
 }
 
 Future<Map<String, String>?> _form(BuildContext context, String title, List<_F> fields) async {
@@ -137,7 +143,13 @@ Future<Map<String, String>?> _form(BuildContext context, String title, List<_F> 
                           ],
                           onChanged: (String? v) => set(() => sel[f.key] = v),
                         )
-                      : TextField(
+                      : f.isDate
+                          ? JalaliDateField(
+                              label: f.label,
+                              value: DateTime.tryParse(ctrls[f.key]!.text) ?? DateTime.now(),
+                              onChanged: (DateTime d) => set(() => ctrls[f.key]!.text = ReturnsHelp.iso(d)),
+                            )
+                          : TextField(
                           controller: ctrls[f.key],
                           keyboardType: f.numeric ? const TextInputType.numberWithOptions(decimal: true) : TextInputType.text,
                           decoration: InputDecoration(labelText: f.label, border: const OutlineInputBorder()),
@@ -227,7 +239,54 @@ class ConsignmentStore {
     return false;
   }
 
-  /// Replays queued writes in order. Stops at the first network failure; server-rejected ops are dropped and reported.
+  static const String _kFailed = 'cons_failed_v1';
+
+  static Future<List<Map<String, dynamic>>> failedOps() async {
+    final SharedPreferences sp = await SharedPreferences.getInstance();
+    final String? raw = sp.getString(_kFailed);
+    if (raw == null) return <Map<String, dynamic>>[];
+    try {
+      return ReturnsHelp.maps(jsonDecode(raw));
+    } catch (_) {
+      return <Map<String, dynamic>>[];
+    }
+  }
+
+  static Future<void> _saveFailed(List<Map<String, dynamic>> f) async {
+    final SharedPreferences sp = await SharedPreferences.getInstance();
+    await sp.setString(_kFailed, jsonEncode(f));
+  }
+
+  /// دوباره در انتهای صف می‌گذارد (بعد از رفع علت رد شدن).
+  static Future<void> retryFailed(int i) async {
+    final List<Map<String, dynamic>> failed = await failedOps();
+    if (i < 0 || i >= failed.length) return;
+    final Map<String, dynamic> op = Map<String, dynamic>.from(failed.removeAt(i))
+      ..remove('error')
+      ..remove('tries');
+    await _saveFailed(failed);
+    final List<Map<String, dynamic>> ops = await pendingOps();
+    ops.add(op);
+    await _saveOps(ops);
+  }
+
+  static Future<void> dismissFailed(int i) async {
+    final List<Map<String, dynamic>> failed = await failedOps();
+    if (i < 0 || i >= failed.length) return;
+    failed.removeAt(i);
+    await _saveFailed(failed);
+  }
+
+  /// ۴۰۱ = نشست نامعتبر/منقضی (رد عملیات نیست): صف دست‌نخورده می‌ماند تا کاربر دوباره وارد شود.
+  /// (پیام ۴۰۱ سرور «دوباره وارد شوید» است و فقط «ورود مجدد» را نمی‌شناختیم ⇒ همهٔ صف دور ریخته می‌شد.)
+  static bool _keepQueue(StockApiException e) =>
+      e.network || e.code == 401 || e.message.contains('ورود مجدد') || e.message.contains('دوباره وارد شوید');
+
+  /// پاسخ بدون پیام JSON (۵۰۲/صفحهٔ خطای هاست …): چند بار دوباره، بعد «ناموفق» تا صف برای همیشه قفل نشود.
+  static bool _serverFault(StockApiException e) => e.message.startsWith('خطای سرور');
+
+  /// Replays queued writes in order. Stops at the first network/session failure; a definite server rejection is kept in the
+  /// «ناموفق» list (with the server message) instead of being dropped, so offline work is never lost silently.
   static Future<List<String>> flush() async {
     final List<String> errors = <String>[];
     List<Map<String, dynamic>> ops = await pendingOps();
@@ -239,8 +298,19 @@ class ConsignmentStore {
         await StockApi.call('${op['action']}', payload is Map ? Map<String, dynamic>.from(payload) : <String, dynamic>{});
         sentAny = true;
       } on StockApiException catch (e) {
-        if (isNetworkError(e.message) || e.message.contains('ورود مجدد')) break;
+        if (_keepQueue(e)) break;
+        if (_serverFault(e)) {
+          final int tries = ((op['tries'] as num?) ?? 0).toInt() + 1;
+          if (tries < 5) {
+            ops[0] = <String, dynamic>{...op, 'tries': tries};
+            await _saveOps(ops);
+            break;
+          }
+        }
         errors.add('${op['label'] ?? ''}: ${e.message}');
+        final List<Map<String, dynamic>> failed = await failedOps();
+        failed.add(<String, dynamic>{...op, 'error': e.message});
+        await _saveFailed(failed);
       }
       ops = ops.sublist(1);
       await _saveOps(ops);
@@ -248,6 +318,21 @@ class ConsignmentStore {
     if (sentAny) SyncService.I.syncNow(pull: true);
     return errors;
   }
+}
+
+Future<bool> _confirmDropFailed(BuildContext context) async {
+  final bool? ok = await showDialog<bool>(
+    context: context,
+    builder: (BuildContext c) => AlertDialog(
+      title: const Text('حذف مورد ناموفق'),
+      content: const Text('این مورد هرگز به سرور ارسال نمی‌شود و اطلاعاتش از بین می‌رود. ادامه می‌دهید؟'),
+      actions: <Widget>[
+        TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('انصراف')),
+        TextButton(onPressed: () => Navigator.pop(c, true), child: const Text('حذف')),
+      ],
+    ),
+  );
+  return ok == true;
 }
 
 // ---------------------------------------------------------------------------
@@ -267,6 +352,7 @@ class _ConsignmentsScreenState extends State<ConsignmentsScreen> {
   String? _error;
   List<Map<String, dynamic>> _items = <Map<String, dynamic>>[];
   List<Map<String, dynamic>> _queued = <Map<String, dynamic>>[];
+  List<Map<String, dynamic>> _failed = <Map<String, dynamic>>[];
 
   @override
   void initState() {
@@ -278,6 +364,7 @@ class _ConsignmentsScreenState extends State<ConsignmentsScreen> {
     if (mounted) setState(() => _loading = true);
     final List<String> flushErrors = await ConsignmentStore.flush();
     _queued = await ConsignmentStore.pendingOps();
+    _failed = await ConsignmentStore.failedOps();
     String? error;
     List<Map<String, dynamic>> items;
     try {
@@ -355,6 +442,35 @@ class _ConsignmentsScreenState extends State<ConsignmentsScreen> {
                 child: Padding(padding: const EdgeInsets.all(10), child: Text(_error!)),
               ),
             if (_loading) const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator())),
+            for (int i = 0; i < _failed.length; i++)
+              Card(
+                color: Theme.of(context).colorScheme.errorContainer,
+                child: ListTile(
+                  leading: const Icon(Icons.error_outline),
+                  title: Text('${_failed[i]['label'] ?? ''}'),
+                  subtitle: Text('رد شد و ارسال نشد: ${_failed[i]['error'] ?? ''}'),
+                  isThreeLine: true,
+                  trailing: Row(mainAxisSize: MainAxisSize.min, children: <Widget>[
+                    IconButton(
+                      tooltip: 'تلاش دوباره',
+                      icon: const Icon(Icons.refresh),
+                      onPressed: () async {
+                        await ConsignmentStore.retryFailed(i);
+                        _load();
+                      },
+                    ),
+                    IconButton(
+                      tooltip: 'حذف',
+                      icon: const Icon(Icons.delete_outline),
+                      onPressed: () async {
+                        if (!await _confirmDropFailed(context)) return;
+                        await ConsignmentStore.dismissFailed(i);
+                        _load();
+                      },
+                    ),
+                  ]),
+                ),
+              ),
             for (final Map<String, dynamic> o in queuedHere)
               ListTile(
                 leading: const Icon(Icons.cloud_upload_outlined),
@@ -419,7 +535,7 @@ class _ConsignmentFormScreenState extends State<ConsignmentFormScreen> {
   final TextEditingController _note = TextEditingController();
   final TextEditingController _value = TextEditingController(text: '0');
   final TextEditingController _agreed = TextEditingController();
-  final TextEditingController _date = TextEditingController(text: ReturnsHelp.iso(DateTime.now()));
+  DateTime _date = DateTime.now();
   final List<_Line> _lines = <_Line>[_Line()];
   String _mode = 'commission'; // in: commission|purchase_on_sale ; out: to_consignee|via_consignee
   String _ctype = 'percent'; // in commission: percent|per_kg
@@ -463,7 +579,6 @@ class _ConsignmentFormScreenState extends State<ConsignmentFormScreen> {
     _note.dispose();
     _value.dispose();
     _agreed.dispose();
-    _date.dispose();
     for (final _Line l in _lines) {
       l.dispose();
     }
@@ -475,7 +590,6 @@ class _ConsignmentFormScreenState extends State<ConsignmentFormScreen> {
   Future<void> _submit() async {
     final String party = _party.text.trim();
     if (party.isEmpty) return _snack(_isIn ? 'نام صاحب کالا را وارد کنید' : 'نام امانت‌گیرنده را وارد کنید');
-    if (!RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(_en(_date.text.trim()))) return _snack('تاریخ را به صورت yyyy-mm-dd وارد کنید');
     final List<Map<String, dynamic>> items = <Map<String, dynamic>>[];
     setState(() => _saving = true);
     try {
@@ -510,7 +624,7 @@ class _ConsignmentFormScreenState extends State<ConsignmentFormScreen> {
         'uid': ReturnsHelp.newUid('cons'),
         'direction': widget.direction,
         'party': party,
-        'date': _en(_date.text.trim()),
+        'date': ReturnsHelp.iso(_date),
         'settlement_mode': _mode,
         'note': _note.text.trim(),
         'items': items,
@@ -518,8 +632,8 @@ class _ConsignmentFormScreenState extends State<ConsignmentFormScreen> {
       String label = '${_isIn ? 'امانی دریافتی' : 'امانی ارسالی'}: $party';
       if (_isIn) {
         payload['commission_type'] = _ctype;
-        payload['commission_value'] = _mode == 'commission' ? _numText(_value.text) : 0;
-        if (_mode == 'purchase_on_sale') payload['agreed_price'] = _numText(_agreed.text);
+        payload['commission_value'] = _mode == 'commission' ? (_ctype == 'percent' ? _numText(_value.text) : _storedNum(_value.text)) : 0;
+        if (_mode == 'purchase_on_sale') payload['agreed_price'] = _storedNum(_agreed.text);
         if (_wh != null) payload['warehouse_uid'] = _wh;
       }
       final bool queued = await ConsignmentStore.write('consignments.create', payload, label);
@@ -538,174 +652,188 @@ class _ConsignmentFormScreenState extends State<ConsignmentFormScreen> {
   @override
   Widget build(BuildContext context) {
     final String title = _isIn ? 'امانی دریافتی (کالای دیگران نزد ما)' : 'امانی ارسالی (کالای ما نزد دیگران)';
-    return Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: ListView(
-        padding: const EdgeInsets.all(14),
-        children: <Widget>[
-          TextField(
-            controller: _party,
-            decoration: InputDecoration(labelText: _isIn ? 'صاحب کالا' : 'امانت‌گیرنده', border: const OutlineInputBorder()),
-          ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: _date,
-            decoration: const InputDecoration(labelText: 'تاریخ (yyyy-mm-dd)', border: OutlineInputBorder()),
-          ),
-          const SizedBox(height: 10),
-          if (_isIn) ...<Widget>[
-            DropdownButtonFormField<String>(
+    final bool wide = kWideForm(context);
+    final double g = kFormGap;
+    Widget pad(Widget w) => Padding(padding: EdgeInsets.only(bottom: g), child: w);
+
+    final Widget info = FormSection(title: 'مشخصات و تسویه', children: <Widget>[
+      FormGrid(gap: 12, minColWidth: 260, children: <Widget>[
+        pad(TextField(
+          controller: _party,
+          decoration: InputDecoration(labelText: _isIn ? 'صاحب کالا' : 'امانت‌گیرنده', border: const OutlineInputBorder()),
+        )),
+        pad(JalaliDateField(label: 'تاریخ', value: _date, onChanged: (DateTime d) => setState(() => _date = d))),
+        if (_isIn) ...<Widget>[
+          FormSpan(
+            span: 2,
+            child: pad(DropdownButtonFormField<String>(
+              isExpanded: true,
               value: _mode,
               decoration: const InputDecoration(labelText: 'روش تسویه', border: OutlineInputBorder()),
               items: const <DropdownMenuItem<String>>[
-                DropdownMenuItem(value: 'commission', child: Text('کمیسیون (فروش به نام ما، سهم صاحب کالا کسر کمیسیون)')),
-                DropdownMenuItem(value: 'purchase_on_sale', child: Text('خرید هنگام فروش (قیمت توافقی هر کیلو)')),
+                DropdownMenuItem(value: 'commission', child: Text('کمیسیون (فروش به نام ما، سهم صاحب کالا کسر کمیسیون)', overflow: TextOverflow.ellipsis)),
+                DropdownMenuItem(value: 'purchase_on_sale', child: Text('خرید هنگام فروش (قیمت توافقی هر کیلو)', overflow: TextOverflow.ellipsis)),
               ],
               onChanged: (String? v) => setState(() => _mode = v ?? 'commission'),
-            ),
-            const SizedBox(height: 10),
-            if (_mode == 'commission')
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: DropdownButtonFormField<String>(
-                      value: _ctype,
-                      decoration: const InputDecoration(labelText: 'نوع کمیسیون', border: OutlineInputBorder()),
-                      items: const <DropdownMenuItem<String>>[
-                        DropdownMenuItem(value: 'percent', child: Text('درصد')),
-                        DropdownMenuItem(value: 'per_kg', child: Text('ریال هر کیلو')),
-                      ],
-                      onChanged: (String? v) => setState(() => _ctype = v ?? 'percent'),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: TextField(
-                      controller: _value,
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                      decoration: const InputDecoration(labelText: 'مقدار کمیسیون', border: OutlineInputBorder()),
-                    ),
-                  ),
-                ],
-              )
-            else
-              TextField(
-                controller: _agreed,
-                keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                decoration: const InputDecoration(labelText: 'قیمت توافقی هر کیلو', border: OutlineInputBorder()),
-              ),
-            const SizedBox(height: 10),
-            DropdownButtonFormField<String>(
-              value: _wh,
-              decoration: const InputDecoration(labelText: 'انبار محل نگهداری', border: OutlineInputBorder()),
+            )),
+          ),
+          if (_mode == 'commission') ...<Widget>[
+            pad(DropdownButtonFormField<String>(
+              value: _ctype,
+              decoration: const InputDecoration(labelText: 'نوع کمیسیون', border: OutlineInputBorder()),
               items: <DropdownMenuItem<String>>[
-                for (final WhOption w in _whs) DropdownMenuItem<String>(value: w.uid, child: Text(w.name)),
+                const DropdownMenuItem(value: 'percent', child: Text('درصد')),
+                DropdownMenuItem(value: 'per_kg', child: Text('${Fmt.unitLabel()} هر کیلو')),
               ],
-              onChanged: (String? v) => setState(() => _wh = v),
-            ),
-          ] else ...<Widget>[
-            DropdownButtonFormField<String>(
+              onChanged: (String? v) => setState(() => _ctype = v ?? 'percent'),
+            )),
+            pad(TextField(
+              controller: _value,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: _ctype == 'percent' ? null : [ThousandsInputFormatter()],
+              decoration: InputDecoration(labelText: _ctype == 'percent' ? 'مقدار کمیسیون' : 'مقدار کمیسیون (${Fmt.unitLabel()})', border: const OutlineInputBorder()),
+            )),
+          ] else
+            pad(TextField(
+              controller: _agreed,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              inputFormatters: [ThousandsInputFormatter()],
+              decoration: InputDecoration(labelText: 'قیمت توافقی هر کیلو (${Fmt.unitLabel()})', border: const OutlineInputBorder()),
+            )),
+          pad(DropdownButtonFormField<String>(
+            value: _wh,
+            decoration: const InputDecoration(labelText: 'انبار محل نگهداری', border: OutlineInputBorder()),
+            items: <DropdownMenuItem<String>>[
+              for (final WhOption w in _whs) DropdownMenuItem<String>(value: w.uid, child: Text(w.name)),
+            ],
+            onChanged: (String? v) => setState(() => _wh = v),
+          )),
+        ] else
+          FormSpan(
+            span: 2,
+            child: pad(DropdownButtonFormField<String>(
+              isExpanded: true,
               value: _mode,
               decoration: const InputDecoration(labelText: 'نحوه فروش', border: OutlineInputBorder()),
               items: const <DropdownMenuItem<String>>[
-                DropdownMenuItem(value: 'to_consignee', child: Text('امانت‌گیرنده مستقیماً می‌فروشد و گزارش می‌دهد')),
-                DropdownMenuItem(value: 'via_consignee', child: Text('از طریق امانت‌گیرنده به خریدار نهایی')),
+                DropdownMenuItem(value: 'to_consignee', child: Text('امانت‌گیرنده مستقیماً می‌فروشد و گزارش می‌دهد', overflow: TextOverflow.ellipsis)),
+                DropdownMenuItem(value: 'via_consignee', child: Text('از طریق امانت‌گیرنده به خریدار نهایی', overflow: TextOverflow.ellipsis)),
               ],
               onChanged: (String? v) => setState(() => _mode = v ?? 'to_consignee'),
-            ),
-          ],
-          const SizedBox(height: 16),
-          Text('اقلام', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 6),
-          for (int i = 0; i < _lines.length; i++) _lineCard(i),
-          Align(
-            alignment: AlignmentDirectional.centerStart,
-            child: TextButton.icon(
-              onPressed: () => setState(() => _lines.add(_Line())),
-              icon: const Icon(Icons.add),
-              label: const Text('افزودن قلم'),
-            ),
+            )),
           ),
-          const SizedBox(height: 10),
-          TextField(
-            controller: _note,
-            decoration: const InputDecoration(labelText: 'یادداشت', border: OutlineInputBorder()),
-          ),
-          const SizedBox(height: 18),
-          FilledButton.icon(
-            onPressed: _saving ? null : _submit,
-            icon: _saving
-                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.save_outlined),
-            label: const Text('ثبت'),
-          ),
-        ],
+      ]),
+    ]);
+
+    final Widget items = FormSection(title: 'اقلام', children: <Widget>[
+      for (int i = 0; i < _lines.length; i++) _lineCard(i),
+      Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: TextButton.icon(
+          onPressed: () => setState(() => _lines.add(_Line())),
+          icon: const Icon(Icons.add),
+          label: const Text('افزودن قلم'),
+        ),
       ),
+    ]);
+
+    return FormPage(
+      title: title,
+      actions: <Widget>[
+        FilledButton.icon(
+          onPressed: _saving ? null : _submit,
+          icon: _saving
+              ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.save_outlined),
+          label: const Text('ثبت'),
+        ),
+      ],
+      children: <Widget>[
+        info,
+        items,
+        SizedBox(height: g),
+        pad(TextField(
+          controller: _note,
+          decoration: const InputDecoration(labelText: 'یادداشت', border: OutlineInputBorder()),
+        )),
+      ],
     );
   }
 
   Widget _lineCard(int i) {
     final _Line l = _lines[i];
+    final Widget first = _isIn
+        ? TextField(
+            controller: l.name,
+            decoration: const InputDecoration(labelText: 'نوع کالا', border: OutlineInputBorder()),
+          )
+        : DropdownButtonFormField<String>(
+            value: l.lotLocalId,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'لات انبار', border: OutlineInputBorder()),
+            items: <DropdownMenuItem<String>>[
+              for (final MapEntry<String, String> e in _lots.entries)
+                DropdownMenuItem<String>(value: e.key, child: Text(e.value, overflow: TextOverflow.ellipsis)),
+            ],
+            onChanged: (String? v) => setState(() => l.lotLocalId = v),
+          );
+    final Widget kg = TextField(
+      controller: l.kg,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      decoration: const InputDecoration(labelText: 'کیلو', border: OutlineInputBorder()),
+    );
+    final Widget small = TextField(
+      controller: l.small,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      decoration: const InputDecoration(labelText: 'گونی کوچک', border: OutlineInputBorder()),
+    );
+    final Widget large = TextField(
+      controller: l.large,
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      decoration: const InputDecoration(labelText: 'گونی بزرگ', border: OutlineInputBorder()),
+    );
+    final Widget del = IconButton(
+      tooltip: 'حذف قلم',
+      icon: const Icon(Icons.delete_outline),
+      onPressed: () => setState(() {
+        _lines.removeAt(i).dispose();
+      }),
+    );
+    if (kWideForm(context)) {
+      return Padding(
+        padding: EdgeInsets.only(bottom: kFormGap),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Expanded(flex: 4, child: first),
+            const SizedBox(width: 8),
+            Expanded(flex: 2, child: kg),
+            const SizedBox(width: 8),
+            Expanded(flex: 2, child: small),
+            const SizedBox(width: 8),
+            Expanded(flex: 2, child: large),
+            if (_lines.length > 1) del else const SizedBox(width: 48),
+          ],
+        ),
+      );
+    }
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(10),
         child: Column(
           children: <Widget>[
-            if (_isIn)
-              TextField(
-                controller: l.name,
-                decoration: const InputDecoration(labelText: 'نوع کالا', border: OutlineInputBorder()),
-              )
-            else
-              DropdownButtonFormField<String>(
-                value: l.lotLocalId,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'لات انبار', border: OutlineInputBorder()),
-                items: <DropdownMenuItem<String>>[
-                  for (final MapEntry<String, String> e in _lots.entries)
-                    DropdownMenuItem<String>(value: e.key, child: Text(e.value, overflow: TextOverflow.ellipsis)),
-                ],
-                onChanged: (String? v) => setState(() => l.lotLocalId = v),
-              ),
+            first,
             const SizedBox(height: 8),
             Row(
               children: <Widget>[
-                Expanded(
-                  child: TextField(
-                    controller: l.kg,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(labelText: 'کیلو', border: OutlineInputBorder()),
-                  ),
-                ),
+                Expanded(child: kg),
                 const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: l.small,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(labelText: 'گونی کوچک', border: OutlineInputBorder()),
-                  ),
-                ),
+                Expanded(child: small),
                 const SizedBox(width: 8),
-                Expanded(
-                  child: TextField(
-                    controller: l.large,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    decoration: const InputDecoration(labelText: 'گونی بزرگ', border: OutlineInputBorder()),
-                  ),
-                ),
+                Expanded(child: large),
               ],
             ),
-            if (_lines.length > 1)
-              Align(
-                alignment: AlignmentDirectional.centerEnd,
-                child: IconButton(
-                  tooltip: 'حذف قلم',
-                  icon: const Icon(Icons.delete_outline),
-                  onPressed: () => setState(() {
-                    _lines.removeAt(i).dispose();
-                  }),
-                ),
-              ),
+            if (_lines.length > 1) Align(alignment: AlignmentDirectional.centerEnd, child: del),
           ],
         ),
       ),
@@ -810,12 +938,12 @@ class _ConsignmentDetailScreenState extends State<ConsignmentDetailScreen> {
 
   Future<void> _payDialog() async {
     final Map<String, String>? r = await _form(context, 'پرداخت به صاحب کالا', <_F>[
-      _F('amount', 'مبلغ', numeric: true),
+      _F('amount', 'مبلغ (${Fmt.unitLabel()})', numeric: true),
       _F('note', 'یادداشت'),
     ]);
     if (r == null) return;
-    final double amount = _numText(r['amount'] ?? '');
-    if (amount <= 0) return _snack('مبلغ را وارد کنید');
+    final double amount = _storedNum(r['amount'] ?? '');
+    if (_numText(r['amount'] ?? '') <= 0 || amount <= 0) return _snack('مبلغ را وارد کنید');
     await _write('consignments.pay', <String, dynamic>{
       'uid': ReturnsHelp.newUid('cpay'),
       'consignment_id': widget.id,
@@ -830,9 +958,9 @@ class _ConsignmentDetailScreenState extends State<ConsignmentDetailScreen> {
     final Map<String, String>? r = await _form(context, 'ثبت فروش نزد امانت‌گیرنده', <_F>[
       _F('lot', 'لات', options: _asOptions(_lotOptions(withOutstanding: true))),
       _F('kg', 'وزن فروش (کیلو)', numeric: true),
-      _F('price', 'قیمت هر کیلو', numeric: true),
+      _F('price', 'قیمت هر کیلو (${Fmt.unitLabel()})', numeric: true),
       if (via) _F('buyer', 'خریدار نهایی'),
-      _F('date', 'تاریخ (yyyy-mm-dd)', initial: ReturnsHelp.iso(DateTime.now())),
+      _F('date', 'تاریخ', initial: ReturnsHelp.iso(DateTime.now()), isDate: true),
     ]);
     if (r == null) return;
     final double kg = _numText(r['kg'] ?? '');
@@ -843,7 +971,7 @@ class _ConsignmentDetailScreenState extends State<ConsignmentDetailScreen> {
       'consignment_id': widget.id,
       'lot_id': int.parse(r['lot']!),
       'kg': kg,
-      'price': _numText(r['price'] ?? ''),
+      'price': _storedNum(r['price'] ?? ''),
       'date': _en(r['date'] ?? ReturnsHelp.iso(DateTime.now())),
       if (via) 'buyer': r['buyer']!.trim(),
     }, 'فروش ${_kg(kg)} کیلو: ${_d['party'] ?? ''}');

@@ -6,6 +6,7 @@ import 'charts.dart';
 import 'db.dart';
 import 'pdf_output.dart';
 import 'pdf_service.dart';
+import 'stock_ccy.dart';
 import 'utils.dart';
 import 'warehouse_ui.dart';
 import 'widgets.dart';
@@ -62,6 +63,8 @@ String _kindLabel(String k) {
     'adjust': 'اصلاح',
     'transfer_in': 'انتقال ورودی',
     'transfer_out': 'انتقال خروجی',
+    'crack_out': 'کسر برای لات خط شکست',
+    'crack_in': 'ورود لات خط شکست',
   };
   return m[k] ?? k;
 }
@@ -86,6 +89,7 @@ class _StockReportsScreenState extends State<StockReportsScreen> with SingleTick
   Map<String, dynamic>? _ledger;
   Map<String, dynamic>? _balance;
   Map<String, dynamic>? _mix;
+  final StockCcy _fx = StockCcy(); // S30.T30.6b: ارز نمودار موجودی (null = کیلو)
   Map<String, String> _whNames = <String, String>{};
   Map<String, String> _ounceNames = <String, String>{};
   List<WhOption> _whOpts = <WhOption>[];
@@ -95,6 +99,9 @@ class _StockReportsScreenState extends State<StockReportsScreen> with SingleTick
   void initState() {
     super.initState();
     _tc = TabController(length: 3, vsync: this);
+    _fx.load(() {
+      if (mounted) setState(() {});
+    });
     _init();
   }
 
@@ -301,19 +308,22 @@ class _StockReportsScreenState extends State<StockReportsScreen> with SingleTick
 
   Widget _ledgerRow(Map<String, dynamic> r) {
     final kg = _n(r, 'kg');
+    // ردیف‌های برگشتِ ویرایش/حذف سند (و ردیف اصلیِ برگشت‌خورده) خنثی‌اند و در جمع «ورودی/خروجی» نیستند؛ کم‌رنگ و برچسب‌دار
+    final bool rev = r['reversed'] == true || r['is_reversal'] == true;
     return Card(
       elevation: 0,
       margin: const EdgeInsets.only(bottom: 6),
       child: ListTile(
         dense: true,
-        title: Text('${jalaliDate((r['date'] ?? '').toString())}  •  ${_kindLabel((r['kind'] ?? '').toString())}'),
+        title: Text('${jalaliDate((r['date'] ?? '').toString())}  •  ${_kindLabel((r['kind'] ?? '').toString())}${rev ? '  •  (اصلاح/برگشت)' : ''}',
+            style: rev ? TextStyle(color: Colors.grey.shade600) : null),
         subtitle: Text(
           '${(r['lot_code'] ?? '-')} • ${_whLabel(r['warehouse_uid']?.toString())} • مانده ${faNum(_n(r, 'balance_kg'))} کیلو',
         ),
         trailing: Text(
           faNum(kg),
           style: TextStyle(
-            color: kg < 0 ? Colors.red.shade700 : Colors.green.shade800,
+            color: rev ? Colors.grey.shade600 : (kg < 0 ? Colors.red.shade700 : Colors.green.shade800),
             fontWeight: FontWeight.w700,
           ),
         ),
@@ -384,10 +394,22 @@ class _StockReportsScreenState extends State<StockReportsScreen> with SingleTick
     final hasCheck = b['cached_kg'] != null;
     final diff = _n(b, 'diff_kg');
     final groups = <BarGroup>[];
+    final String? cc = _fx.ccy;
+    final String iso = StockCcy.isoOf(_to);
+    int noRate = 0;
     for (final Map<String, dynamic> it in items) {
       final lbl = _itemLabel(it);
       final short = lbl.length > 6 ? '${lbl.substring(0, 6)}…' : lbl;
-      groups.add(BarGroup(short, lbl, <double>[_n(it, 'kg')]));
+      if (cc == null) {
+        groups.add(BarGroup(short, lbl, <double>[_n(it, 'kg')]));
+      } else {
+        final double? v = _fx.convert(_n(it, 'value'), iso);
+        if (v == null) {
+          noRate++;
+        } else {
+          groups.add(BarGroup(short, lbl, <double>[v]));
+        }
+      }
     }
     return ListView(
       padding: const EdgeInsets.all(12),
@@ -409,15 +431,25 @@ class _StockReportsScreenState extends State<StockReportsScreen> with SingleTick
           ]),
         ),
         const SizedBox(height: 12),
-        if (groups.isNotEmpty)
+        if (groups.isNotEmpty || cc != null)
           ChartCard(
-            title: 'نمودار موجودی (کیلو)',
-            child: GroupedBarChart(
-              groups: groups,
-              series: const <BarSeries>[BarSeries('کیلو', Color(0xFF2E7D32))],
-              format: (double v) => faNum(v),
-              compact: (double v) => faCompact(v),
-            ),
+            title: cc == null ? 'نمودار موجودی (کیلو)' : 'نمودار ارزش موجودی ($cc)',
+            subtitle: cc == null ? null : 'به بهای تمام‌شدهٔ لات‌ها، با آخرین نرخ ثبت‌شده تا ${jalaliDateFromDt(_to ?? DateTime.now())}',
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: <Widget>[
+              StockCcySwitch(st: _fx, onChanged: (String? v) => setState(() => _fx.ccy = v)),
+              if (groups.isEmpty)
+                ChartEmpty('برای $cc نرخ ثبت‌شده‌ای در جدول نرخ نیست')
+              else
+                GroupedBarChart(
+                  groups: groups,
+                  series: <BarSeries>[BarSeries(cc ?? 'کیلو', const Color(0xFF2E7D32))],
+                  format: (double v) => cc == null ? faNum(v) : '${faCompactCcy(v)} $cc',
+                  compact: (double v) => cc == null ? faCompact(v) : faCompactCcy(v),
+                ),
+              if (cc != null && noRate > 0 && groups.isNotEmpty)
+                Text('${faNum(noRate, dec: 0)} مورد به‌دلیل نبودنِ نرخ ثبت‌شده در نمودار نیامده است.',
+                    style: TextStyle(fontSize: 12, color: Colors.orange.shade900)),
+            ]),
           ),
         const SizedBox(height: 12),
         if (items.isEmpty)
@@ -435,9 +467,21 @@ class _StockReportsScreenState extends State<StockReportsScreen> with SingleTick
     if (m == null) return const Center(child: CircularProgressIndicator());
     final items = _listOf(m, 'items');
     final slices = <ChartSlice>[];
+    final String? cc = _fx.ccy;
+    final String iso = StockCcy.isoOf(_to);
+    double totCc = 0;
     for (int i = 0; i < items.length; i++) {
       final kg = _n(items[i], 'kg');
-      if (kg > 0) slices.add(ChartSlice(_itemLabel(items[i]), kg, _palette[i % _palette.length]));
+      if (kg <= 0) continue;
+      if (cc == null) {
+        slices.add(ChartSlice(_itemLabel(items[i]), kg, _palette[i % _palette.length]));
+      } else {
+        final double? v = _fx.convert(_n(items[i], 'value'), iso);
+        if (v != null && v > 0) {
+          slices.add(ChartSlice(_itemLabel(items[i]), v, _palette[i % _palette.length]));
+          totCc += v;
+        }
+      }
     }
     return ListView(
       padding: const EdgeInsets.all(12),
@@ -445,16 +489,23 @@ class _StockReportsScreenState extends State<StockReportsScreen> with SingleTick
         ChartCard(
           title: 'ترکیب موجودی',
           subtitle: 'بر اساس ${_byLabel()} • فقط مقادیر مثبت',
-          child: slices.isEmpty
-              ? const Padding(padding: EdgeInsets.all(12), child: Text('موجودی مثبتی یافت نشد'))
-              : Center(
-                  child: DonutChart(
-                    slices: slices,
-                    centerTitle: 'کل (کیلو)',
-                    format: (double v) => faNum(v),
-                    centerValue: _n(m, 'positive_kg'),
-                  ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: <Widget>[
+            StockCcySwitch(st: _fx, onChanged: (String? v) => setState(() => _fx.ccy = v)),
+            if (slices.isEmpty)
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Text(cc == null ? 'موجودی مثبتی یافت نشد' : 'برای $cc نرخ ثبت‌شده‌ای در جدول نرخ نیست'),
+              )
+            else
+              Center(
+                child: DonutChart(
+                  slices: slices,
+                  centerTitle: cc == null ? 'کل (کیلو)' : 'ارزش کل ($cc)',
+                  format: (double v) => cc == null ? faNum(v) : faCompactCcy(v),
+                  centerValue: cc == null ? _n(m, 'positive_kg') : totCc,
                 ),
+              ),
+          ]),
         ),
         const SizedBox(height: 12),
         for (int i = 0; i < items.length; i++)

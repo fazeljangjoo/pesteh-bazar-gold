@@ -4,11 +4,14 @@ import 'package:flutter/material.dart';
 
 import 'fx_doc_field.dart' show kFxRialPerStoredUnit;
 import 'fx_local.dart';
+import 'return_calc.dart' show returnFx;
 import 'utils.dart';
 
 class FxProfitBlock extends StatefulWidget {
   final List<Map<String, dynamic>> sales;
-  const FxProfitBlock({super.key, required this.sales});
+  /// Rows of `sale_returns.profit_lines` already filtered like the sales (period / code): subtracted from the totals.
+  final List<Map<String, dynamic>> returns;
+  const FxProfitBlock({super.key, required this.sales, this.returns = const <Map<String, dynamic>>[]});
 
   @override
   State<FxProfitBlock> createState() => _FxProfitBlockState();
@@ -69,7 +72,7 @@ class _FxProfitBlockState extends State<FxProfitBlock> {
   Widget build(BuildContext context) {
     if (_loading || _codes.isEmpty || _ccy == null) return const SizedBox.shrink();
     double rev = 0, cost = 0;
-    int ok = 0, missing = 0;
+    int ok = 0, missing = 0, retMissing = 0;
     for (final Map<String, dynamic> s in widget.sales) {
       final ({double revenue, double cost, double profit})? f = saleFx(s, _rateOf);
       if (f == null) {
@@ -78,6 +81,17 @@ class _FxProfitBlockState extends State<FxProfitBlock> {
         ok++;
         rev += f.revenue;
         cost += f.cost;
+      }
+    }
+    int retOk = 0;
+    for (final Map<String, dynamic> r in widget.returns) {
+      final ({double revenue, double cost})? f = returnFx(r, _rateOf);
+      if (f == null) {
+        retMissing++;
+      } else {
+        retOk++;
+        rev -= f.revenue; // برگشت از فروش: از فروش و بها کم می‌شود (مثل سود و زیان ریالی)
+        cost -= f.cost;
       }
     }
     final String c = _ccy!;
@@ -100,11 +114,16 @@ class _FxProfitBlockState extends State<FxProfitBlock> {
           },
         ),
       ]),
-      if (ok > 0) ...<Widget>[
+      if (ok > 0 || retOk > 0) ...<Widget>[
         row('مجموع فروش ($c)', faCcy(c, rev)),
         row('مجموع بها و هزینه‌ها ($c)', faCcy(c, cost)),
         row('سود / زیان ($c)', faCcy(c, rev - cost), color: (rev - cost) >= 0 ? Colors.green.shade800 : Colors.red.shade800),
       ],
+      if (retMissing > 0)
+        Text(
+          '${faNum(retMissing, dec: 0)} برگشت از فروش به‌دلیل نبودنِ نرخ ثبت‌شده در این جمع کسر نشده است.',
+          style: TextStyle(fontSize: 12, color: Colors.orange.shade900),
+        ),
       if (missing > 0)
         Text(
           ok == 0

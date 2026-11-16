@@ -66,6 +66,15 @@ PriceBlendResult priceBlend(Map<String, dynamic> input) {
   final Object? rawItems = input['items'] ?? <dynamic>[];
   if (rawItems is! List) return err('bad_items');
 
+  // خرید گرمیِ پسته اصلی: قیمت پایهٔ مؤثر = (P / R) · base_g
+  double effP = P;
+  if (_truthy(input['base_gram_mode'])) {
+    final Object? bgRaw = input['base_g'];
+    final double bg = (bgRaw != null && bgRaw != '' && _isNumeric(bgRaw)) ? _toDouble(bgRaw) : 0.0;
+    if (bg <= 0 || bg > 100) return err('bad_base_gram');
+    effP = (P / R) * bg;
+  }
+
   double sumAll = 0.0, sumPriced = 0.0, acc = 0.0;
   final List<PriceBlendLine> lines = <PriceBlendLine>[];
 
@@ -97,7 +106,7 @@ PriceBlendResult priceBlend(Map<String, dynamic> input) {
   }
   if (sumAll > 100.0000001) return err('sum_over_100');
 
-  final int avg = _roundInt(_round6(P * (1 - sumPriced / 100.0) + acc));
+  final int avg = _roundInt(_round6(effP * (1 - sumPriced / 100.0) + acc));
   final int total = _roundInt(_round6(avg * W));
   return PriceBlendResult.success(avg, total, lines);
 }
@@ -121,6 +130,7 @@ const Map<String, String> kPriceEngineErrors = <String, String>{
   'bad_items': 'اقلام قیمت‌گذاری نامعتبر است',
   'bad_pct': 'درصد نامعتبر است',
   'bad_q': 'قیمت درصد نامعتبر است',
+  'bad_base_gram': '«گرم مغز» پسته اصلی باید بیشتر از ۰ و حداکثر ۱۰۰ باشد',
   'bad_gram': '«گرم مغز» باید بیشتر از ۰ و حداکثر ۱۰۰ باشد',
   'sum_over_100': 'مجموع درصدها نمی‌تواند بیشتر از ۱۰۰ باشد',
 };

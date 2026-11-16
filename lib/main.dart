@@ -4,6 +4,7 @@ import 'payroll_ui.dart'; // T11.4
 import 'dart:async';
 import 'perms.dart'; // T02.2
 import 'ounce_room_shell.dart'; // S5.T4
+import 'workshop_operator_shell.dart'; // کارگاه ۳-ب
 import 'staff_screens.dart'; // T02.2
 import 'audit_screen.dart'; // T02.3
 import 'data_health_screen.dart'; // T23.2
@@ -696,6 +697,7 @@ class _HomeShellState extends State<HomeShell> {
       valueListenable: StaffPerms.I.current,
       builder: (BuildContext c, Map<String, dynamic>? _, Widget? __) {
         if (StaffPerms.I.isOunceRoomOnly) return const OunceRoomShell();
+        if (StaffPerms.I.isWorkshopOperatorOnly) return const WorkshopOperatorShell();
         return _buildHome(context);
       },
     );
@@ -746,7 +748,7 @@ class _HomeShellState extends State<HomeShell> {
           NavigationDestination(icon: Icon(Icons.home_outlined), label: 'خانه'),
           NavigationDestination(icon: Icon(Icons.shopping_cart_outlined), label: 'خرید'),
           NavigationDestination(icon: Icon(Icons.sell_outlined), label: 'فروش'),
-          NavigationDestination(icon: Icon(Icons.warehouse_outlined), label: 'موجودی'),
+          NavigationDestination(icon: Icon(Icons.warehouse_outlined), label: 'انبار'),
         ],
       ),
     );

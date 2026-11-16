@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'fmt.dart' show Fmt;
 
 import 'excel_io.dart';
 import 'pdf_output.dart';
@@ -16,7 +17,7 @@ import 'widgets.dart';
 const Map<String, String> kTbLevels = <String, String>{'1': 'گروه', '2': 'کل', '3': 'معین', 'tafsili': 'تفصیلی'};
 const Map<String, String> kTbStatuses = <String, String>{'posted': 'ثبت‌شده (موقت+قطعی)', 'final': 'فقط قطعی', 'all': 'همه (با پیش‌نویس)'};
 
-String _m(dynamic v) => faNum(((v is num) ? v : num.tryParse('${v ?? 0}') ?? 0).toDouble(), dec: 0);
+String _m(dynamic v) => Fmt.money(((v is num) ? v : num.tryParse('${v ?? 0}') ?? 0).toDouble(), label: false);
 String _iso(DateTime d) => '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
 /// Plain table form shared by screen, PDF and Excel.

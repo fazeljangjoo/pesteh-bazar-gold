@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:path/path.dart' as p;
 
+import 'backup_drill_ui.dart';
 import 'db_crypto.dart';
 import 'local_backup.dart';
 import 'utils.dart';
@@ -134,6 +135,12 @@ class _BackupScreenState extends State<BackupScreen> {
                 label: const Text('باز کردن پوشه'),
               ),
             ],
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const BackupDrillScreen())),
+            icon: const Icon(Icons.verified_outlined),
+            label: const Text('تمرین بازیابی پشتیبان (سرور)'),
           ),
           if (_busy) const Padding(padding: EdgeInsets.all(12), child: LinearProgressIndicator()),
           const SizedBox(height: 8),

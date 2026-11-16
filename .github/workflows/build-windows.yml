@@ -1,5 +1,7 @@
 name: Build Windows
 
+# فقط نسخهٔ ویندوز (پروژهٔ جدا از اندروید). اجرا: Actions → Build Windows → Run workflow
+
 on:
   workflow_dispatch:
   push:
@@ -19,6 +21,7 @@ jobs:
       - uses: subosito/flutter-action@v2
         with:
           channel: stable
+          cache: true
 
       - run: flutter config --enable-windows-desktop
 
@@ -69,6 +72,9 @@ jobs:
       - name: Analyze (informational)
         continue-on-error: true
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Run tests
+        run: flutter test test/workshop_cost_test.dart test/lot_cartex_test.dart
 
       - name: Build release
         run: flutter build windows --release --obfuscate --split-debug-info=build/debug-symbols
@@ -139,4 +145,4 @@ jobs:
           path: |
             dist/PestehBazar-Setup.exe
             dist/PestehBazar-Windows-portable.zip
-            retention-days: 1
+          retention-days: 7

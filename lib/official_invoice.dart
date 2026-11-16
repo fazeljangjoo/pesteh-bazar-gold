@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:file_selector/file_selector.dart' show FileSaveLocation, XTypeGroup, getSaveLocation;
 import 'package:flutter/material.dart';
+import 'fmt.dart' show Fmt;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:pdf/pdf.dart';
@@ -21,7 +22,9 @@ import 'widgets.dart';
 /// No live API (DECISIONS Q9). Amounts: stored value × [kRialFactor] (DECISIONS Q1: official outputs in rial).
 /// The unique tax invoice ID (شماره مالیاتی / irtaxid) is a PLACEHOLDER: the tax memory ID + Verhoeff check digit
 /// are issued by the tax authority flow and are intentionally not generated here.
-const int kRialFactor = 10;
+/// ضریب تبدیل مبلغِ ذخیره‌شده به ریال برای خروجی رسمی: مشتریِ «ریال» ⇒ ۱، مشتریِ قدیمیِ «تومان» ⇒ ۱۰.
+/// (قبلاً همیشه ۱۰ بود؛ برای مشتری ریالی – پیش‌فرض بعد از S29 – مبالغ فاکتور رسمی ۱۰ برابر می‌شد.)
+int get kRialFactor => Fmt.storedUnit == 'rial' ? 1 : 10;
 
 class InvIssue {
   const InvIssue(this.error, this.text);
@@ -83,7 +86,7 @@ class OfficialInvoice {
     final String status = _s(sale['tax_status']);
     final int rate = _n(sale['tax_rate_milli']).round();
     final List<dynamic> items = (sale['items'] as List?) ?? <dynamic>[];
-    final int saleDisc = (_n(sale['discount']) * kRialFactor).round();
+    final int saleDisc = (_n(sale['discount_amount'] ?? sale['discount']) * kRialFactor).round(); // ستون محلی «discount» وجود ندارد؛ تخفیف سند در discount_amount است
     final List<OfficialLine> lines = <OfficialLine>[];
     int allocated = 0;
     final double sumAmt = items.fold<double>(0, (double a, dynamic it) => a + _n(it['weight']) * _n(it['item_price']));
@@ -290,7 +293,7 @@ String amountInWords(int n) {
   return groups.join(' و ');
 }
 
-String _m(num v) => faNum(v, dec: 0);
+String _m(num v) => Fmt.money(v, label: false, from: 'rial', to: 'rial'); // مبالغ رسمی همیشه ریال‌اند (نه واحد نمایش کاربر)
 
 class OfficialInvoicePdf {
   OfficialInvoicePdf._();
@@ -360,7 +363,7 @@ class OfficialInvoicePdf {
         ]),
         pw.SizedBox(height: 8),
         pw.Table.fromTextArray(
-          headers: <String>['ردیف', 'شرح کالا', 'مقدار (کیلوگرم)', 'فی (ریال)', 'مبلغ (ریال)', 'تخفیف (ریال)', 'مبلغ پس از تخفیف', 'مالیات (ریال)', 'جمع (ریال)'].map(pdfText).toList(),
+          headers: <String>['ردیف', 'شرح کالا', 'مقدار (کیلوگرم)', 'فی (${Fmt.unitLabel()})', 'مبلغ (${Fmt.unitLabel()})', 'تخفیف (${Fmt.unitLabel()})', 'مبلغ پس از تخفیف', 'مالیات (${Fmt.unitLabel()})', 'جمع (${Fmt.unitLabel()})'].map(pdfText).toList(),
           data: <List<String>>[for (final List<String> r in rows) r.map(pdfText).toList()],
           headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8),
           cellStyle: const pw.TextStyle(fontSize: 8),
@@ -373,12 +376,12 @@ class OfficialInvoicePdf {
           padding: const pw.EdgeInsets.all(6),
           decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.5)),
           child: pw.Column(children: <pw.Widget>[
-            _kv('جمع مبلغ (ریال)', _m(inv.total)),
-            _kv('جمع تخفیف (ریال)', _m(inv.totalDiscount)),
-            _kv('مبلغ پس از تخفیف (ریال)', _m(inv.totalNet)),
-            _kv('مالیات بر ارزش افزوده (ریال)', _m(inv.totalTax)),
+            _kv('جمع مبلغ (${Fmt.unitLabel()})', _m(inv.total)),
+            _kv('جمع تخفیف (${Fmt.unitLabel()})', _m(inv.totalDiscount)),
+            _kv('مبلغ پس از تخفیف (${Fmt.unitLabel()})', _m(inv.totalNet)),
+            _kv('مالیات بر ارزش افزوده (${Fmt.unitLabel()})', _m(inv.totalTax)),
             pw.Divider(thickness: 0.4),
-            _kv('مبلغ قابل پرداخت (ریال)', _m(inv.grand)),
+            _kv('مبلغ قابل پرداخت (${Fmt.unitLabel()})', _m(inv.grand)),
             pw.SizedBox(height: 3),
             pw.Text(pdfText('مبلغ به حروف: ${amountInWords(inv.grand)} ریال'), style: const pw.TextStyle(fontSize: 9)),
             pw.SizedBox(height: 3),

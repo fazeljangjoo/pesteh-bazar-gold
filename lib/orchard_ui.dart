@@ -1,6 +1,9 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'fmt.dart' show Fmt;
+import 'form_layout.dart';
+import 'lot_trace_ui.dart'; // S31.T31.7b
 
 import 'perms.dart';
 import 'vouchers_links.dart';
@@ -8,6 +11,7 @@ import 'pdf_output.dart';
 import 'pdf_service.dart';
 import 'returns_ui.dart' show ReturnsHelp;
 import 'utils.dart';
+import 'widgets.dart' show JalaliDateField;
 import 'warehouse_ui.dart' show StockApi, StockApiException, StockLookup, WhOption;
 
 /// S10.T10.2 — orchards (باغ): list, form, detail (costs, harvests, allocation), performance report, PDF.
@@ -51,7 +55,9 @@ String _en(String s) {
 double _numText(String s) => double.tryParse(_en(s).trim()) ?? 0.0;
 double _n(dynamic v) => ReturnsHelp.d(v);
 String _kg(dynamic v) => faNum(_n(v), dec: 3);
-String _money(dynamic v) => faNum(_n(v), dec: 0);
+/// STAGE11.5: ورودی به واحد نمایش؛ سرور در واحد ذخیره.
+double _storedNum(String s) => Fmt.storedUnit == Fmt.displayUnit ? _numText(s) : Fmt.fromDisplay(_numText(s)).toDouble(); // یکسان ⇒ بدون گرد کردن
+String _money(dynamic v) => Fmt.money(_n(v), label: false);
 bool _can(String key) => StaffPerms.I.can(key);
 
 void _snackOf(BuildContext context, String m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
@@ -72,7 +78,8 @@ class _F {
   final String initial;
   final bool numeric;
   final Map<String, String>? options;
-  const _F(this.key, this.label, {this.initial = '', this.numeric = false, this.options});
+  final bool isDate; // تاریخ شمسی؛ مقدار برگشتی همچنان ISO میلادی yyyy-mm-dd
+  const _F(this.key, this.label, {this.initial = '', this.numeric = false, this.options, this.isDate = false});
 }
 
 Future<Map<String, String>?> _form(BuildContext context, String title, List<_F> fields) async {
@@ -108,7 +115,13 @@ Future<Map<String, String>?> _form(BuildContext context, String title, List<_F> 
                           ],
                           onChanged: (String? v) => set(() => sel[f.key] = v),
                         )
-                      : TextField(
+                      : f.isDate
+                          ? JalaliDateField(
+                              label: f.label,
+                              value: DateTime.tryParse(ctrls[f.key]!.text) ?? DateTime.now(),
+                              onChanged: (DateTime d) => set(() => ctrls[f.key]!.text = ReturnsHelp.iso(d)),
+                            )
+                          : TextField(
                           controller: ctrls[f.key],
                           keyboardType: f.numeric ? const TextInputType.numberWithOptions(decimal: true) : TextInputType.text,
                           decoration: InputDecoration(labelText: f.label, border: const OutlineInputBorder()),
@@ -196,6 +209,18 @@ class _OrchardsScreenState extends State<OrchardsScreen> {
               tooltip: 'گزارش عملکرد باغ‌ها',
               icon: const Icon(Icons.assessment_outlined),
               onPressed: () => _open(const OrchardReportScreen()),
+            ),
+          if (_can('orchards.view'))
+            IconButton(
+              tooltip: 'جریان باغ تا فروش',
+              icon: const Icon(Icons.account_tree_outlined),
+              onPressed: () => _open(const OrchardFlowScreen()),
+            ),
+          if (_can('purchases.view'))
+            IconButton(
+              tooltip: 'ردیابی لات',
+              icon: const Icon(Icons.manage_search),
+              onPressed: () => _open(const LotTraceScreen()),
             ),
           IconButton(tooltip: 'به‌روزرسانی', icon: const Icon(Icons.refresh), onPressed: _load),
         ],
@@ -293,56 +318,46 @@ class _OrchardFormScreenState extends State<OrchardFormScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.orchard == null ? 'باغ جدید' : 'ویرایش باغ')),
-      body: ListView(
-        padding: const EdgeInsets.all(14),
-        children: <Widget>[
-          TextField(controller: _name, decoration: const InputDecoration(labelText: 'نام باغ', border: OutlineInputBorder())),
-          const SizedBox(height: 10),
-          TextField(controller: _loc, decoration: const InputDecoration(labelText: 'موقعیت', border: OutlineInputBorder())),
-          const SizedBox(height: 10),
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: TextField(
-                  controller: _area,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  decoration: const InputDecoration(labelText: 'مساحت (هکتار)', border: OutlineInputBorder()),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: TextField(
-                  controller: _trees,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(labelText: 'تعداد درخت', border: OutlineInputBorder()),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          TextField(controller: _variety, decoration: const InputDecoration(labelText: 'رقم / گونه', border: OutlineInputBorder())),
-          const SizedBox(height: 10),
-          DropdownButtonFormField<String>(
-            value: _own,
-            decoration: const InputDecoration(labelText: 'مالکیت', border: OutlineInputBorder()),
-            items: const <DropdownMenuItem<String>>[
-              DropdownMenuItem(value: 'own', child: Text('ملکی')),
-              DropdownMenuItem(value: 'lease', child: Text('اجاره‌ای')),
-            ],
-            onChanged: (String? v) => setState(() => _own = v ?? 'own'),
-          ),
-          const SizedBox(height: 10),
-          TextField(controller: _note, decoration: const InputDecoration(labelText: 'یادداشت', border: OutlineInputBorder())),
-          const SizedBox(height: 18),
-          FilledButton.icon(
-            onPressed: _saving ? null : _save,
-            icon: const Icon(Icons.save_outlined),
-            label: const Text('ذخیره'),
-          ),
-        ],
-      ),
+    final double g = kFormGap;
+    Widget pad(Widget w) => Padding(padding: EdgeInsets.only(bottom: g), child: w);
+    return FormPage(
+      title: widget.orchard == null ? 'باغ جدید' : 'ویرایش باغ',
+      actions: <Widget>[
+        FilledButton.icon(
+          onPressed: _saving ? null : _save,
+          icon: const Icon(Icons.save_outlined),
+          label: const Text('ذخیره'),
+        ),
+      ],
+      children: <Widget>[
+        FormSection(title: 'مشخصات باغ', children: <Widget>[
+          FormGrid(gap: 12, minColWidth: 260, children: <Widget>[
+            pad(TextField(controller: _name, decoration: const InputDecoration(labelText: 'نام باغ', border: OutlineInputBorder()))),
+            pad(TextField(controller: _loc, decoration: const InputDecoration(labelText: 'موقعیت', border: OutlineInputBorder()))),
+            pad(TextField(
+              controller: _area,
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(labelText: 'مساحت (هکتار)', border: OutlineInputBorder()),
+            )),
+            pad(TextField(
+              controller: _trees,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(labelText: 'تعداد درخت', border: OutlineInputBorder()),
+            )),
+            pad(TextField(controller: _variety, decoration: const InputDecoration(labelText: 'رقم / گونه', border: OutlineInputBorder()))),
+            pad(DropdownButtonFormField<String>(
+              value: _own,
+              decoration: const InputDecoration(labelText: 'مالکیت', border: OutlineInputBorder()),
+              items: const <DropdownMenuItem<String>>[
+                DropdownMenuItem(value: 'own', child: Text('ملکی')),
+                DropdownMenuItem(value: 'lease', child: Text('اجاره‌ای')),
+              ],
+              onChanged: (String? v) => setState(() => _own = v ?? 'own'),
+            )),
+            FormSpan(child: pad(TextField(controller: _note, decoration: const InputDecoration(labelText: 'یادداشت', border: OutlineInputBorder())))),
+          ]),
+        ]),
+      ],
     );
   }
 }
@@ -396,14 +411,14 @@ class _OrchardDetailScreenState extends State<OrchardDetailScreen> {
     final Map<String, String>? r = await _form(context, 'ثبت هزینهٔ فصلی', <_F>[
       _F('season', 'سال زراعی', initial: '${DateTime.now().year}', numeric: true),
       _F('cat', 'دسته', initial: 'water', options: _catLabels),
-      _F('amount', 'مبلغ', numeric: true),
-      _F('date', 'تاریخ (yyyy-mm-dd)', initial: ReturnsHelp.iso(DateTime.now())),
+      _F('amount', 'مبلغ (${Fmt.unitLabel()})', numeric: true),
+      _F('date', 'تاریخ', initial: ReturnsHelp.iso(DateTime.now()), isDate: true),
       _F('party', 'طرف حساب'),
       _F('note', 'یادداشت'),
     ]);
     if (r == null) return;
-    final double amt = _numText(r['amount'] ?? '');
-    if (amt <= 0) return _snackOf(context, 'مبلغ را وارد کنید');
+    final double amt = _storedNum(r['amount'] ?? '');
+    if (_numText(r['amount'] ?? '') <= 0 || amt <= 0) return _snackOf(context, 'مبلغ را وارد کنید');
     final Map<String, dynamic>? res = await _call(context, 'orchard_costs.add', <String, dynamic>{
       'uid': ReturnsHelp.newUid('ocost'),
       'orchard_id': widget.id,
@@ -426,7 +441,7 @@ class _OrchardDetailScreenState extends State<OrchardDetailScreen> {
     final Map<String, String> whOpts = <String, String>{for (final WhOption w in whs) w.uid: w.name};
     final Map<String, String>? r = await _form(context, 'ثبت برداشت', <_F>[
       _F('season', 'سال زراعی', initial: '${DateTime.now().year}', numeric: true),
-      _F('date', 'تاریخ (yyyy-mm-dd)', initial: ReturnsHelp.iso(DateTime.now())),
+      _F('date', 'تاریخ', initial: ReturnsHelp.iso(DateTime.now()), isDate: true),
       _F('wet', 'وزن تر (کیلو)', numeric: true),
       _F('dry', 'وزن خشک (کیلو)', numeric: true),
       if (whOpts.isNotEmpty) _F('wh', 'انبار', initial: whs.where((WhOption w) => w.isDefault).isNotEmpty ? whs.firstWhere((WhOption w) => w.isDefault).uid : whs.first.uid, options: whOpts),
@@ -460,14 +475,14 @@ class _OrchardDetailScreenState extends State<OrchardDetailScreen> {
         'weight': 'بر اساس وزن خشک (جمع هزینه‌ها)',
         'market': 'بر اساس قیمت بازار (وزن × قیمت)',
       }),
-      _F('market', 'قیمت بازار هر کیلو (فقط برای بازار)', numeric: true),
+      _F('market', 'قیمت بازار هر کیلو (${Fmt.unitLabel()}) (فقط برای بازار)', numeric: true),
     ]);
     if (r == null) return;
     final Map<String, dynamic>? res = await _call(context, 'orchards.allocate', <String, dynamic>{
       'orchard_id': widget.id,
       'season_year': season,
       'basis': r['basis'] ?? 'weight',
-      'market_per_kg': _numText(r['market'] ?? ''),
+      'market_per_kg': _storedNum(r['market'] ?? ''),
     });
     if (res != null) {
       _changed = true;

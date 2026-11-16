@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'crm_ui.dart';
+import 'fmt.dart' show Fmt;
+import 'form_layout.dart';
 import 'warehouse_ui.dart';
 
 /// T03.1 — مشخصات طرف‌حساب (نوع، تماس، شناسه‌ها، سقف اعتبار، مانده افتتاحیه). آنلاین از طریق StockApi
@@ -67,6 +69,14 @@ class _PartyMasterScreenState extends State<PartyMasterScreen> {
     return b.toString().replaceAll(',', '').replaceAll('٬', '').trim();
   }
 
+  /// متن واردشده (واحد نمایش) → رشتهٔ مبلغ به واحد ذخیره؛ خالی = ''.
+  String _storedMoney(String text) {
+    final String d = _digits(text);
+    if (d.isEmpty) return '';
+    final num? n = num.tryParse(d);
+    return n == null ? d : '${Fmt.fromDisplay(n)}';
+  }
+
   Future<void> _load() async {
     try {
       final r = await StockApi.call('parties.list');
@@ -80,9 +90,11 @@ class _PartyMasterScreenState extends State<PartyMasterScreen> {
             _nid.text = (x['national_id'] ?? '').toString();
             _eco.text = (x['economic_code'] ?? '').toString();
             _postal.text = (x['postal_code'] ?? '').toString();
-            _limit.text = x['credit_limit'] == null ? '' : '${x['credit_limit']}';
+            // STAGE11.3: سرور «واحد ذخیره» می‌دهد/می‌گیرد؛ فرم با «واحد نمایش» کار می‌کند (قبلاً عدد خام نشان داده و ذخیره می‌شد)
+            final num? lim = num.tryParse('${x['credit_limit'] ?? ''}');
+            _limit.text = lim == null ? '' : '${Fmt.toDisplay(lim)}';
             final num ob = (x['opening_balance'] as num?) ?? 0;
-            _opening.text = ob == 0 ? '' : '${ob.round()}';
+            _opening.text = ob == 0 ? '' : '${Fmt.toDisplay(ob)}';
             _note.text = (x['note'] ?? '').toString();
             final Object? tg = x['tags'];
             if (tg is List) _tags.text = tg.map((Object? e) => '$e').join('، ');
@@ -116,8 +128,8 @@ class _PartyMasterScreenState extends State<PartyMasterScreen> {
         'national_id': _digits(_nid.text),
         'economic_code': _digits(_eco.text),
         'postal_code': _digits(_postal.text),
-        'credit_limit': _digits(_limit.text),
-        'opening_balance': _digits(_opening.text),
+        'credit_limit': _storedMoney(_limit.text),
+        'opening_balance': _storedMoney(_opening.text),
         'opening_side': _side,
         'active': _active ? 1 : 0,
         'note': _note.text.trim(),
@@ -135,87 +147,148 @@ class _PartyMasterScreenState extends State<PartyMasterScreen> {
     if (mounted) setState(() => _saving = false);
   }
 
-  Widget _tf(TextEditingController c, String label, {bool numeric = false, int lines = 1}) {
+  Widget _tf(TextEditingController c, String label, {bool numeric = false, int lines = 1, bool money = false}) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: TextField(
         controller: c,
         maxLines: lines,
         keyboardType: numeric ? TextInputType.number : TextInputType.text,
-        decoration: InputDecoration(labelText: label, border: const OutlineInputBorder()),
+        decoration: InputDecoration(labelText: label, suffixText: money ? Fmt.unitLabel() : null, border: const OutlineInputBorder()),
       ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
+    final bool wide = kWideForm(context);
+    final Widget typeChips = Wrap(
+      spacing: 8,
+      children: <Widget>[
+        for (final e in kPartyTypesFa.entries)
+          FilterChip(
+            label: Text(e.value),
+            selected: _types.contains(e.key),
+            onSelected: (bool v) => setState(() {
+              if (v) {
+                _types.add(e.key);
+              } else {
+                _types.remove(e.key);
+              }
+            }),
+          ),
+      ],
+    );
+    final Widget sideField = DropdownButtonFormField<String>(
+      value: _side,
+      decoration: const InputDecoration(labelText: 'وضعیت مانده افتتاحیه', border: OutlineInputBorder()),
+      items: const <DropdownMenuItem<String>>[
+        DropdownMenuItem<String>(value: 'debtor', child: Text('بدهکار (او به ما بدهکار است)')),
+        DropdownMenuItem<String>(value: 'creditor', child: Text('بستانکار (ما به او بدهکاریم)')),
+      ],
+      onChanged: (String? v) => setState(() => _side = v ?? 'debtor'),
+    );
+    final Widget stageField = DropdownButtonFormField<String>(
+      value: _stage,
+      decoration: const InputDecoration(labelText: 'مرحلهٔ مشتری', border: OutlineInputBorder()),
+      items: <DropdownMenuItem<String>>[
+        for (final MapEntry<String, String> e in kPartyStagesFa.entries)
+          DropdownMenuItem<String>(value: e.key, child: Text(e.value)),
+      ],
+      onChanged: (String? v) => setState(() => _stage = v ?? 'active'),
+    );
+    final Widget saveBtn = FilledButton(onPressed: _saving ? null : _save, child: Text(_saving ? 'در حال ذخیره…' : 'ذخیره'));
+    final Widget? err = _error == null ? null : Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(_error!, style: const TextStyle(color: Colors.red)));
+    final PreferredSizeWidget bar = AppBar(
+      title: Text('مشخصات ${widget.partyName}'),
+      actions: <Widget>[
+        if (_phone.text.trim().isNotEmpty)
+          IconButton(tooltip: 'تماس', icon: const Icon(Icons.call_outlined), onPressed: () => crmLaunch(context, 'tel', _phone.text)),
+        if (_phone.text.trim().isNotEmpty)
+          IconButton(tooltip: 'پیامک', icon: const Icon(Icons.sms_outlined), onPressed: () => crmLaunch(context, 'sms', _phone.text)),
+      ],
+    );
+
+    if (wide && !_loading) {
+      return Scaffold(
+        appBar: bar,
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1180),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: <Widget>[
+                if (err != null) err,
+                FormSection(title: 'نوع و تماس', children: <Widget>[
+                  const Padding(padding: EdgeInsetsDirectional.only(bottom: 4), child: Text('نوع طرف‌حساب')),
+                  Padding(padding: const EdgeInsets.only(bottom: 8), child: typeChips),
+                  FormGrid(gap: 12, minColWidth: 260, children: <Widget>[
+                    _tf(_phone, 'تلفن', numeric: true),
+                    _tf(_nid, 'کد ملی / شناسهٔ ملی', numeric: true),
+                    _tf(_eco, 'کد اقتصادی', numeric: true),
+                    _tf(_postal, 'کد پستی', numeric: true),
+                    FormSpan(span: 2, child: _tf(_address, 'نشانی')),
+                  ]),
+                ]),
+                FormSection(title: 'حساب و وضعیت', children: <Widget>[
+                  FormGrid(gap: 12, minColWidth: 260, children: <Widget>[
+                    _tf(_limit, 'سقف اعتبار (اختیاری)', numeric: true, money: true),
+                    _tf(_opening, 'مانده افتتاحیه', numeric: true, money: true),
+                    Padding(padding: const EdgeInsets.only(bottom: 12), child: sideField),
+                    Padding(padding: const EdgeInsets.only(bottom: 12), child: stageField),
+                    FormSpan(span: 2, child: _tf(_tags, 'برچسب‌ها (با ویرگول جدا کنید، حداکثر ۱۰)')),
+                    _tf(_note, 'یادداشت'),
+                    SwitchListTile(title: const Text('فعال'), value: _active, onChanged: (bool v) => setState(() => _active = v)),
+                  ]),
+                ]),
+                const SizedBox(height: 16),
+              ]),
+            ),
+          ),
+        ),
+        bottomNavigationBar: Material(
+          elevation: 3,
+          color: Theme.of(context).colorScheme.surface,
+          child: SafeArea(
+            top: false,
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 1180),
+                child: Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), child: Row(children: <Widget>[saveBtn])),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
-      appBar: AppBar(
-        title: Text('مشخصات ${widget.partyName}'),
-        actions: <Widget>[
-          if (_phone.text.trim().isNotEmpty)
-            IconButton(tooltip: 'تماس', icon: const Icon(Icons.call_outlined), onPressed: () => crmLaunch(context, 'tel', _phone.text)),
-          if (_phone.text.trim().isNotEmpty)
-            IconButton(tooltip: 'پیامک', icon: const Icon(Icons.sms_outlined), onPressed: () => crmLaunch(context, 'sms', _phone.text)),
-        ],
-      ),
+      appBar: bar,
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               padding: const EdgeInsets.all(16),
               children: <Widget>[
-                if (_error != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(_error!, style: const TextStyle(color: Colors.red))),
+                if (err != null) err,
                 const Text('نوع طرف‌حساب'),
-                Wrap(
-                  spacing: 8,
-                  children: <Widget>[
-                    for (final e in kPartyTypesFa.entries)
-                      FilterChip(
-                        label: Text(e.value),
-                        selected: _types.contains(e.key),
-                        onSelected: (bool v) => setState(() {
-                          if (v) {
-                            _types.add(e.key);
-                          } else {
-                            _types.remove(e.key);
-                          }
-                        }),
-                      ),
-                  ],
-                ),
+                typeChips,
                 const SizedBox(height: 12),
                 _tf(_phone, 'تلفن', numeric: true),
                 _tf(_address, 'نشانی', lines: 2),
                 _tf(_nid, 'کد ملی / شناسهٔ ملی', numeric: true),
                 _tf(_eco, 'کد اقتصادی', numeric: true),
                 _tf(_postal, 'کد پستی', numeric: true),
-                _tf(_limit, 'سقف اعتبار (اختیاری)', numeric: true),
-                _tf(_opening, 'مانده افتتاحیه', numeric: true),
-                DropdownButtonFormField<String>(
-                  value: _side,
-                  decoration: const InputDecoration(labelText: 'وضعیت مانده افتتاحیه', border: OutlineInputBorder()),
-                  items: const <DropdownMenuItem<String>>[
-                    DropdownMenuItem<String>(value: 'debtor', child: Text('بدهکار (او به ما بدهکار است)')),
-                    DropdownMenuItem<String>(value: 'creditor', child: Text('بستانکار (ما به او بدهکاریم)')),
-                  ],
-                  onChanged: (String? v) => setState(() => _side = v ?? 'debtor'),
-                ),
+                _tf(_limit, 'سقف اعتبار (اختیاری)', numeric: true, money: true),
+                _tf(_opening, 'مانده افتتاحیه', numeric: true, money: true),
+                sideField,
                 const SizedBox(height: 12),
                 _tf(_note, 'یادداشت', lines: 2),
-                DropdownButtonFormField<String>(
-                  value: _stage,
-                  decoration: const InputDecoration(labelText: 'مرحلهٔ مشتری', border: OutlineInputBorder()),
-                  items: <DropdownMenuItem<String>>[
-                    for (final MapEntry<String, String> e in kPartyStagesFa.entries)
-                      DropdownMenuItem<String>(value: e.key, child: Text(e.value)),
-                  ],
-                  onChanged: (String? v) => setState(() => _stage = v ?? 'active'),
-                ),
+                stageField,
                 const SizedBox(height: 12),
                 _tf(_tags, 'برچسب‌ها (با ویرگول جدا کنید، حداکثر ۱۰)'),
                 SwitchListTile(title: const Text('فعال'), value: _active, onChanged: (bool v) => setState(() => _active = v)),
                 const SizedBox(height: 8),
-                FilledButton(onPressed: _saving ? null : _save, child: Text(_saving ? 'در حال ذخیره…' : 'ذخیره')),
+                saveBtn,
               ],
             ),
     );

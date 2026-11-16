@@ -2,6 +2,7 @@
 // سند اصلی دست‌نخورده می‌ماند؛ تعدیل فقط با دلیل، پیش‌نمایش اختلاف ریالی و ثبت در audit_log (سمت سرور).
 // فقط پلن ارزی (FeatureGate 'fx.documents' در main.dart). همه‌چیز آنلاین است.
 import 'package:flutter/material.dart';
+import 'fmt.dart' show Fmt;
 
 import 'fx_local.dart';
 import 'utils.dart';

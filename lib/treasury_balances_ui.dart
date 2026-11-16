@@ -1,6 +1,7 @@
 // S28.T28.1 — موجودی صندوق‌ها و حساب‌های بانکی به تفکیک ارز (فقط‌خواندنی، آنلاین).
 // منبع: اکشن سرور treasury.balances (طلایی، دسترسی accounting.view).
 import 'package:flutter/material.dart';
+import 'fmt.dart' show Fmt;
 
 import 'fx_local.dart';
 import 'utils.dart';
@@ -50,7 +51,7 @@ class _TreasuryBalancesScreenState extends State<TreasuryBalancesScreen> {
   double _d(dynamic v) => (v is num) ? v.toDouble() : (double.tryParse('$v') ?? 0);
 
   /// Amount text: rial accounts show the integer rial amount; foreign accounts show the foreign amount + code.
-  String _amount(String ccy, double v) => ccy == 'IRR' ? '${faNum(v, dec: 0)} ریال' : faCcy(ccy, v, dec: 2);
+  String _amount(String ccy, double v) => ccy == 'IRR' ? '${Fmt.money(v)}' : faCcy(ccy, v, dec: 2);
 
   @override
   Widget build(BuildContext context) {
@@ -73,7 +74,7 @@ class _TreasuryBalancesScreenState extends State<TreasuryBalancesScreen> {
                             title: Text(_amount(t['ccy'].toString(), _d(t['ccy_balance']))),
                             subtitle: t['ccy'].toString() == 'IRR'
                                 ? Text('${faNum(_d(t['accounts']), dec: 0)} حساب')
-                                : Text('معادل دفتری: ${faNum(_d(t['rial_balance']), dec: 0)} ریال  •  ${faNum(_d(t['accounts']), dec: 0)} حساب'),
+                                : Text('معادل دفتری: ${Fmt.money(_d(t['rial_balance']))}  •  ${faNum(_d(t['accounts']), dec: 0)} حساب'),
                           ),
                         ),
                       const SizedBox(height: 12),
@@ -85,7 +86,7 @@ class _TreasuryBalancesScreenState extends State<TreasuryBalancesScreen> {
                             leading: Icon(a['kind'] == 'bank' ? Icons.account_balance_outlined : Icons.payments_outlined),
                             title: Text(a['name'].toString()),
                             subtitle: Text(
-                              (a['ccy'].toString() == 'IRR' ? '' : 'معادل دفتری: ${faNum(_d(a['rial_balance']), dec: 0)} ریال') +
+                              (a['ccy'].toString() == 'IRR' ? '' : 'معادل دفتری: ${Fmt.money(_d(a['rial_balance']))}') +
                                   (((a['other_ccy_lines'] as num?) ?? 0) > 0
                                       ? '\n⚠️ ${faNum(_d(a['other_ccy_lines']), dec: 0)} ردیف سند با ارز دیگر روی این حساب ثبت شده است'
                                       : ''),

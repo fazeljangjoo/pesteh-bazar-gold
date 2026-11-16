@@ -55,7 +55,7 @@ class StockCountLocal {
       final dynamic j = jsonDecode('${r['payload']}');
       if (j is Map) p = Map<String, dynamic>.from(j);
     } catch (_) {}
-    return <String, dynamic>{'uid': r['uid'], 'server_id': r['server_id'], 'status': r['status'], 'error': r['error'], 'payload': p};
+    return <String, dynamic>{'uid': r['uid'], 'server_id': r['server_id'], 'status': r['status'], 'error': r['error'], 'payload': p, 'updated_at': r['updated_at']};
   }
 
   static Future<Map<String, dynamic>?> byUid(String uid) async {
@@ -107,14 +107,22 @@ class StockCountLocal {
     body['uid'] = uid;
     if (row['server_id'] != null) body['id'] = row['server_id'];
     final Database d = await _d();
+    final Object? stamp = row['updated_at']; // نسخهٔ ارسال‌شده؛ اگر وسط ارسال دوباره ذخیره شود، نباید «همگام» حساب شود
     try {
       final Map<String, dynamic> r = await StockApi.call('stock_count.save', body);
-      await d.update('stock_count_local', <String, Object?>{'server_id': (r['id'] as num).toInt(), 'status': 'synced', 'error': null, 'updated_at': DateTime.now().toIso8601String()},
-          where: 'uid=?', whereArgs: <Object?>[uid]);
+      final int sid = (r['id'] as num).toInt();
+      final int n = await d.update('stock_count_local',
+          <String, Object?>{'server_id': sid, 'status': 'synced', 'error': null, 'updated_at': DateTime.now().toIso8601String()},
+          where: 'uid=? AND updated_at=?', whereArgs: <Object?>[uid, stamp]);
+      if (n == 0) {
+        // وسط ارسال ویرایش شده: شناسهٔ سرور ثبت می‌شود ولی پیش‌نویس «در انتظار» می‌ماند تا نسخهٔ جدید هم برود
+        await d.update('stock_count_local', <String, Object?>{'server_id': sid}, where: 'uid=?', whereArgs: <Object?>[uid]);
+      }
       return r;
     } on StockApiException catch (e) {
       if (e.network) return null;
-      await d.update('stock_count_local', <String, Object?>{'status': 'error', 'error': e.message}, where: 'uid=?', whereArgs: <Object?>[uid]);
+      await d.update('stock_count_local', <String, Object?>{'status': 'error', 'error': e.message},
+          where: 'uid=? AND updated_at=?', whereArgs: <Object?>[uid, stamp]);
       rethrow;
     }
   }

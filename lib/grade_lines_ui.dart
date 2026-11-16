@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
 
 import 'db.dart';
+import 'fmt.dart' show MoneyField;
 import 'utils.dart';
 import 'widgets.dart';
 
@@ -62,6 +63,7 @@ class GradeRow {
   String? key;
   final TextEditingController kg = TextEditingController();
   final TextEditingController price = TextEditingController();
+  void setPrice(num v) => MoneyField.setStored(price, v);
   void dispose() {
     kg.dispose();
     price.dispose();
@@ -74,7 +76,7 @@ class GradeLinesController {
 
   bool get hasRows => rows.isNotEmpty;
   double get sumKg => rows.fold(0.0, (double a, GradeRow r) => a + (parseNum(r.kg.text) ?? 0));
-  double get total => rows.fold(0.0, (double a, GradeRow r) => a + ((parseNum(r.kg.text) ?? 0) * (parseNum(r.price.text) ?? 0)).roundToDouble());
+  double get total => rows.fold(0.0, (double a, GradeRow r) => a + ((parseNum(r.kg.text) ?? 0) * (MoneyField.stored(r.price) ?? 0)).roundToDouble());
   /// Weighted unit price Σ(kg×price) ÷ Σkg (0 when no weight).
   double get weightedPrice => sumKg <= 0 ? 0 : (total / sumKg).roundToDouble();
 
@@ -89,14 +91,14 @@ class GradeLinesController {
       final GradeRow r = GradeRow()
         ..key = '${l['grade_key']}'
         ..kg.text = plain((l['kg'] as num))
-        ..price.text = plain((l['unit_price'] as num));
+        ..setPrice(l['unit_price'] as num);
       rows.add(r);
     }
   }
 
   List<Map<String, dynamic>> toPayload() => <Map<String, dynamic>>[
         for (final GradeRow r in rows)
-          if (r.key != null) <String, dynamic>{'grade_key': r.key, 'kg': parseNum(r.kg.text) ?? 0, 'unit_price': parseNum(r.price.text) ?? 0}
+          if (r.key != null) <String, dynamic>{'grade_key': r.key, 'kg': parseNum(r.kg.text) ?? 0, 'unit_price': MoneyField.stored(r.price) ?? 0}
       ];
 
   /// null = OK; otherwise a Persian message. [netKg] = document net weight.
@@ -178,7 +180,7 @@ class _GradeLinesEditorState extends State<GradeLinesEditor> {
           const SizedBox(width: 6),
           Expanded(flex: 2, child: numField(c.rows[i].kg, 'کیلو', onChanged: _chg)),
           const SizedBox(width: 6),
-          Expanded(flex: 3, child: numField(c.rows[i].price, 'فی', thousands: true, onChanged: _chg)),
+          Expanded(flex: 3, child: MoneyField(controller: c.rows[i].price, label: 'فی', onChanged: _chg)),
           IconButton(
             icon: const Icon(Icons.delete_outline),
             onPressed: () {

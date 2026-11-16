@@ -1,0 +1,678 @@
+{
+ "tol": 1e-09,
+ "note": "کیس‌های مشترک lot_cartex؛ projection: normal=[party,weight_kg,remaining_kg,exit_type,exit_date|null]؛ kot.items=[party,weight_kg,exit_date]؛ processed=[party,weight_kg,exit_type,exit_date]. expect با دست نوشته شد.",
+ "cases": [
+  {
+   "name": "simple_lot",
+   "opts": {
+    "from": "2026-09-23",
+    "to": "2027-09-22",
+    "label": "سال پسته‌ای ۱۴۰۵–۱۴۰۶"
+   },
+   "lots": [
+    {
+     "id": 1,
+     "code": "A1",
+     "type_name": "اکبری",
+     "seller": "علی",
+     "net_weight": 100,
+     "remaining": 100,
+     "date": "2026-10-05",
+     "is_mix": 0
+    }
+   ],
+   "mix_sources": [],
+   "proc_inputs": [],
+   "sale_items": [],
+   "expect": {
+    "types": [
+     {
+      "type_name": "اکبری",
+      "total_kg": 100,
+      "normal": [
+       [
+        "علی",
+        100,
+        100,
+        "in_stock",
+        null
+       ]
+      ],
+      "kot": [],
+      "processed": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "two_lots_one_kot",
+   "opts": {
+    "from": "2026-09-23",
+    "to": "2027-09-22",
+    "label": "سال پسته‌ای ۱۴۰۵–۱۴۰۶"
+   },
+   "lots": [
+    {
+     "id": 1,
+     "code": "A1",
+     "type_name": "اکبری",
+     "seller": "علی",
+     "net_weight": 50,
+     "remaining": 0,
+     "date": "2026-10-05",
+     "is_mix": 0
+    },
+    {
+     "id": 2,
+     "code": "A2",
+     "type_name": "اکبری",
+     "seller": "رضا",
+     "net_weight": 30,
+     "remaining": 0,
+     "date": "2026-10-06",
+     "is_mix": 0
+    },
+    {
+     "id": 3,
+     "code": "K1",
+     "type_name": "اکبری",
+     "seller": "",
+     "net_weight": 78,
+     "remaining": 78,
+     "date": "2026-11-01",
+     "is_mix": 1
+    }
+   ],
+   "mix_sources": [
+    {
+     "mix_purchase_id": 3,
+     "source_purchase_id": 1,
+     "weight": 50
+    },
+    {
+     "mix_purchase_id": 3,
+     "source_purchase_id": 2,
+     "weight": 30
+    }
+   ],
+   "proc_inputs": [],
+   "sale_items": [],
+   "expect": {
+    "types": [
+     {
+      "type_name": "اکبری",
+      "total_kg": 158,
+      "normal": [
+       [
+        "",
+        78,
+        78,
+        "in_stock",
+        null
+       ]
+      ],
+      "kot": [
+       {
+        "kot_id": 3,
+        "total_kg": 80,
+        "color_key": 3,
+        "items": [
+         [
+          "رضا",
+          30,
+          "2026-11-01"
+         ],
+         [
+          "علی",
+          50,
+          "2026-11-01"
+         ]
+        ]
+       }
+      ],
+      "processed": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "sold_out_lot",
+   "opts": {
+    "from": "2026-09-23",
+    "to": "2027-09-22",
+    "label": "سال پسته‌ای ۱۴۰۵–۱۴۰۶"
+   },
+   "lots": [
+    {
+     "id": 4,
+     "code": "A4",
+     "type_name": "اکبری",
+     "seller": "احمد",
+     "net_weight": 40,
+     "remaining": 0,
+     "date": "2026-10-01",
+     "is_mix": 0
+    }
+   ],
+   "mix_sources": [],
+   "proc_inputs": [],
+   "sale_items": [
+    {
+     "purchase_id": 4,
+     "weight": 20,
+     "date": "2026-12-01"
+    },
+    {
+     "purchase_id": 4,
+     "weight": 20,
+     "date": "2026-12-05"
+    }
+   ],
+   "expect": {
+    "types": [
+     {
+      "type_name": "اکبری",
+      "total_kg": 40,
+      "normal": [
+       [
+        "احمد",
+        40,
+        0,
+        "sold",
+        "2026-12-05"
+       ]
+      ],
+      "kot": [],
+      "processed": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "processed_and_crack",
+   "opts": {
+    "from": "2026-09-23",
+    "to": "2027-09-22",
+    "label": "سال پسته‌ای ۱۴۰۵–۱۴۰۶"
+   },
+   "lots": [
+    {
+     "id": 5,
+     "code": "A5",
+     "type_name": "اکبری",
+     "seller": "حسن",
+     "net_weight": 60,
+     "remaining": 0,
+     "date": "2026-10-02",
+     "is_mix": 0
+    },
+    {
+     "id": 6,
+     "code": "A6",
+     "type_name": "اکبری",
+     "seller": "تقی",
+     "net_weight": 25,
+     "remaining": 5,
+     "date": "2026-10-03",
+     "is_mix": 0
+    }
+   ],
+   "mix_sources": [],
+   "proc_inputs": [
+    {
+     "lot_id": 5,
+     "kg": 60,
+     "order_id": 7,
+     "order_date": "2026-11-10",
+     "op_type": "paid"
+    },
+    {
+     "lot_id": 6,
+     "kg": 20,
+     "order_id": 8,
+     "order_date": "2026-11-12",
+     "op_type": "crack"
+    }
+   ],
+   "sale_items": [],
+   "expect": {
+    "types": [
+     {
+      "type_name": "اکبری",
+      "total_kg": 85,
+      "normal": [
+       [
+        "تقی",
+        25,
+        5,
+        "in_stock",
+        null
+       ]
+      ],
+      "kot": [],
+      "processed": [
+       [
+        "تقی",
+        20,
+        "crack",
+        "2026-11-12"
+       ],
+       [
+        "حسن",
+        60,
+        "proc",
+        "2026-11-10"
+       ]
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "partial_exit",
+   "opts": {
+    "from": "2026-09-23",
+    "to": "2027-09-22",
+    "label": "سال پسته‌ای ۱۴۰۵–۱۴۰۶"
+   },
+   "lots": [
+    {
+     "id": 7,
+     "code": "A7",
+     "type_name": "اکبری",
+     "seller": "کاظم",
+     "net_weight": 100,
+     "remaining": 40,
+     "date": "2026-10-04",
+     "is_mix": 0
+    },
+    {
+     "id": 8,
+     "code": "K2",
+     "type_name": "اکبری",
+     "seller": "",
+     "net_weight": 30,
+     "remaining": 30,
+     "date": "2026-11-20",
+     "is_mix": 1
+    }
+   ],
+   "mix_sources": [
+    {
+     "mix_purchase_id": 8,
+     "source_purchase_id": 7,
+     "weight": 30
+    }
+   ],
+   "proc_inputs": [],
+   "sale_items": [
+    {
+     "purchase_id": 7,
+     "weight": 30,
+     "date": "2026-12-01"
+    }
+   ],
+   "expect": {
+    "types": [
+     {
+      "type_name": "اکبری",
+      "total_kg": 130,
+      "normal": [
+       [
+        "کاظم",
+        100,
+        40,
+        "in_stock",
+        null
+       ],
+       [
+        "",
+        30,
+        30,
+        "in_stock",
+        null
+       ]
+      ],
+      "kot": [
+       {
+        "kot_id": 8,
+        "total_kg": 30,
+        "color_key": 8,
+        "items": [
+         [
+          "کاظم",
+          30,
+          "2026-11-20"
+         ]
+        ]
+       }
+      ],
+      "processed": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "persian_names_sort",
+   "opts": {
+    "from": "2026-09-23",
+    "to": "2027-09-22",
+    "label": "سال پسته‌ای ۱۴۰۵–۱۴۰۶"
+   },
+   "lots": [
+    {
+     "id": 10,
+     "code": "B1",
+     "type_name": "اکبری",
+     "seller": "کاظم",
+     "net_weight": 1,
+     "remaining": 1,
+     "date": "2026-10-01",
+     "is_mix": 0
+    },
+    {
+     "id": 11,
+     "code": "B2",
+     "type_name": "اکبری",
+     "seller": "حسين",
+     "net_weight": 1,
+     "remaining": 1,
+     "date": "2026-10-01",
+     "is_mix": 0
+    },
+    {
+     "id": 12,
+     "code": "B3",
+     "type_name": "اکبری",
+     "seller": "علیرضا",
+     "net_weight": 1,
+     "remaining": 1,
+     "date": "2026-10-01",
+     "is_mix": 0
+    },
+    {
+     "id": 13,
+     "code": "B4",
+     "type_name": "اکبری",
+     "seller": "علی‌اکبر",
+     "net_weight": 1,
+     "remaining": 1,
+     "date": "2026-10-01",
+     "is_mix": 0
+    },
+    {
+     "id": 14,
+     "code": "B5",
+     "type_name": "اکبری",
+     "seller": "",
+     "net_weight": 1,
+     "remaining": 1,
+     "date": "2026-10-01",
+     "is_mix": 0
+    },
+    {
+     "id": 15,
+     "code": "B6",
+     "type_name": "اکبری",
+     "seller": "آرش",
+     "net_weight": 1,
+     "remaining": 1,
+     "date": "2026-10-01",
+     "is_mix": 0
+    },
+    {
+     "id": 16,
+     "code": "B7",
+     "type_name": "اکبری",
+     "seller": "كاوه",
+     "net_weight": 1,
+     "remaining": 1,
+     "date": "2026-10-02",
+     "is_mix": 0
+    }
+   ],
+   "mix_sources": [],
+   "proc_inputs": [],
+   "sale_items": [],
+   "expect": {
+    "types": [
+     {
+      "type_name": "اکبری",
+      "total_kg": 7,
+      "normal": [
+       [
+        "آرش",
+        1,
+        1,
+        "in_stock",
+        null
+       ],
+       [
+        "حسين",
+        1,
+        1,
+        "in_stock",
+        null
+       ],
+       [
+        "علی‌اکبر",
+        1,
+        1,
+        "in_stock",
+        null
+       ],
+       [
+        "علیرضا",
+        1,
+        1,
+        "in_stock",
+        null
+       ],
+       [
+        "کاظم",
+        1,
+        1,
+        "in_stock",
+        null
+       ],
+       [
+        "كاوه",
+        1,
+        1,
+        "in_stock",
+        null
+       ],
+       [
+        "",
+        1,
+        1,
+        "in_stock",
+        null
+       ]
+      ],
+      "kot": [],
+      "processed": []
+     }
+    ]
+   }
+  },
+  {
+   "name": "out_of_range",
+   "opts": {
+    "from": "2026-09-23",
+    "to": "2027-09-22",
+    "label": "سال پسته‌ای ۱۴۰۵–۱۴۰۶"
+   },
+   "lots": [
+    {
+     "id": 20,
+     "code": "X1",
+     "type_name": "اکبری",
+     "seller": "علی",
+     "net_weight": 10,
+     "remaining": 10,
+     "date": "2026-09-22",
+     "is_mix": 0
+    },
+    {
+     "id": 21,
+     "code": "X2",
+     "type_name": "اکبری",
+     "seller": "رضا",
+     "net_weight": 10,
+     "remaining": 10,
+     "date": "2027-09-23",
+     "is_mix": 0
+    }
+   ],
+   "mix_sources": [],
+   "proc_inputs": [],
+   "sale_items": [],
+   "expect": {
+    "types": []
+   }
+  },
+  {
+   "name": "type_order",
+   "opts": {
+    "from": "2026-09-23",
+    "to": "2027-09-22",
+    "label": "سال پسته‌ای ۱۴۰۵–۱۴۰۶"
+   },
+   "lots": [
+    {
+     "id": 30,
+     "code": "T1",
+     "type_name": "بادامی",
+     "seller": "a",
+     "net_weight": 1,
+     "remaining": 1,
+     "date": "2026-10-01",
+     "is_mix": 0
+    },
+    {
+     "id": 31,
+     "code": "T2",
+     "type_name": "کله‌قوچی",
+     "seller": "a",
+     "net_weight": 2,
+     "remaining": 2,
+     "date": "2026-10-01",
+     "is_mix": 0
+    },
+    {
+     "id": 32,
+     "code": "T3",
+     "type_name": "اکبری",
+     "seller": "a",
+     "net_weight": 3,
+     "remaining": 3,
+     "date": "2026-10-01",
+     "is_mix": 0
+    },
+    {
+     "id": 33,
+     "code": "T4",
+     "type_name": "آزاد",
+     "seller": "a",
+     "net_weight": 4,
+     "remaining": 4,
+     "date": "2026-10-01",
+     "is_mix": 0
+    },
+    {
+     "id": 34,
+     "code": "T5",
+     "type_name": "فندقی",
+     "seller": "a",
+     "net_weight": 5,
+     "remaining": 5,
+     "date": "2026-10-01",
+     "is_mix": 0
+    }
+   ],
+   "mix_sources": [],
+   "proc_inputs": [],
+   "sale_items": [],
+   "expect": {
+    "types": [
+     {
+      "type_name": "اکبری",
+      "total_kg": 3,
+      "normal": [
+       [
+        "a",
+        3,
+        3,
+        "in_stock",
+        null
+       ]
+      ],
+      "kot": [],
+      "processed": []
+     },
+     {
+      "type_name": "فندقی",
+      "total_kg": 5,
+      "normal": [
+       [
+        "a",
+        5,
+        5,
+        "in_stock",
+        null
+       ]
+      ],
+      "kot": [],
+      "processed": []
+     },
+     {
+      "type_name": "کله‌قوچی",
+      "total_kg": 2,
+      "normal": [
+       [
+        "a",
+        2,
+        2,
+        "in_stock",
+        null
+       ]
+      ],
+      "kot": [],
+      "processed": []
+     },
+     {
+      "type_name": "آزاد",
+      "total_kg": 4,
+      "normal": [
+       [
+        "a",
+        4,
+        4,
+        "in_stock",
+        null
+       ]
+      ],
+      "kot": [],
+      "processed": []
+     },
+     {
+      "type_name": "بادامی",
+      "total_kg": 1,
+      "normal": [
+       [
+        "a",
+        1,
+        1,
+        "in_stock",
+        null
+       ]
+      ],
+      "kot": [],
+      "processed": []
+     }
+    ]
+   }
+  }
+ ]
+}

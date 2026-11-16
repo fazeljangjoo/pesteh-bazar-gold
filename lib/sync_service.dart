@@ -12,6 +12,7 @@ import 'entity_store.dart';
 import 'fx_local.dart';
 import 'license_service.dart';
 import 'money_unit.dart'; // S29.T29.3
+import 'perms.dart'; // S10: کارکن ⇒ sync.export
 import 'local_backup.dart';
 import 'sync_plan.dart'; // S7
 
@@ -74,7 +75,7 @@ class _ApiResult {
 ///
 /// * ارسال: عملیات صف‌شده (`sync_ops`) به‌ترتیب، با کلید یکتای idem ارسال می‌شود؛
 ///   ارسال تکراری (اینترنت ضعیف) دوباره ثبت نمی‌شود.
-/// * دریافت: `backup.export` سرور کل داده‌های حساب را می‌آورد (فقط وقتی صف خالی است).
+/// * دریافت: `backup.export` (مالک) یا `sync.export` (کارکن؛ فیلترشده) کل داده‌های قابل‌دیدن را می‌آورد (فقط وقتی صف خالی است).
 /// * ورود روی دستگاه جدید: [initialSync] همهٔ داده‌های حساب را از سرور می‌آورد.
 class SyncService {
   SyncService._();
@@ -656,9 +657,16 @@ class SyncService {
         LicenseService.I.sessionInvalid.value++;
         return false;
       }
-      if (action == 'entity.delete' && r.code == 404) {
-        // already gone on the server
+      if (r.code == 404 && action.endsWith('.delete') && !r.error.contains('اکشن نامعتبر')) {
+        // حذفِ موردی که روی سرور از قبل حذف شده (مثلاً از دستگاه دیگر): هدف حاصل است؛
+        // وگرنه عملیات «خطادار» می‌ماند و تا دور ریختنش هیچ دریافتی از سرور انجام نمی‌شود.
+        // (۴۰۴ «اکشن نامعتبر» جداست و همچنان خطا حساب می‌شود)
         await AppDb.I.finishOp(seq, rev);
+        continue;
+      }
+      if (r.code == 403 && (r.data?['error'] ?? '').toString() == 'forbidden') {
+        // STAGE11.2: مجوز همین عملیات برای کارکن نیست (سرور error='forbidden'؛ اشتراک مسدود چنین کدی ندارد): عملیات «خطادار» می‌شود تا بقیهٔ صف نماند
+        await AppDb.I.failOp(seq, r.error);
         continue;
       }
       if (r.code == 403 && action.startsWith('entity.')) {
@@ -682,7 +690,11 @@ class SyncService {
             : r.error;
         return false;
       }
-      final retryable = r.code == 409 || r.code == 429 || r.code >= 500 || r.data == null;
+      // ۴۰۹ فقط وقتی «موقتی» است که درخواست قبلیِ همین کلید هنوز در حال پردازش باشد (idemBegin).
+      // سرور خطاهای قطعیِ کسب‌وکاری را هم با ۴۰۹ می‌دهد (حذف ممکن نیست، رکورد حذف شده، حساب تنظیم نشده …)؛
+      // تلاش دوباره برایشان بی‌اثر است و صف پشت آن‌ها تا ۸ دور همگام‌سازی معطل می‌ماند.
+      final bool busy409 = r.code == 409 && r.error.contains('در حال پردازش');
+      final retryable = busy409 || r.code == 429 || r.code >= 500 || r.data == null;
       if (retryable) {
         final att = ((op['attempts'] as num?) ?? 0).toInt() + 1;
         if (att >= 8) {
@@ -727,7 +739,9 @@ class SyncService {
         v0 = (await _ping(phone, token, null)).ver;
       } catch (_) {}
     }
-    final r = await _call(phone, token, 'backup.export', {}, timeoutSec: 120);
+    // S10: مالک ⇒ backup.export (کامل)؛ کارکنِ غیرمالک ⇒ sync.export (فقط‌خواندنی، فیلتر مجوز/قیمت در سرور)
+    final String exportAction = StaffPerms.I.isStaff ? 'sync.export' : 'backup.export';
+    final r = await _call(phone, token, exportAction, {}, timeoutSec: 120);
     if (r.code != 200 || r.data == null) throw _ServerError(r.error, r.code);
     final tables = r.data!['tables'];
     if (tables is! Map) throw _ServerError('پاسخ نامعتبر از سرور', r.code);

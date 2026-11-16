@@ -4,7 +4,10 @@
 import 'package:flutter/material.dart';
 import 'package:sqflite/sqflite.dart';
 
+import 'approval_ui.dart' show ApprovalScreen; // S35.T35.9e
+import 'pay_approval_ui.dart' show PayApprovalScreen; // S31.T31.3b
 import 'db.dart';
+import 'fmt.dart' show Fmt;
 import 'grade_lines_ui.dart' show GradeLinesLocal;
 import 'price_table_ui.dart' show PriceTableLocal, PriceTableScreen;
 import 'pay_terms_ui.dart' show PayRateCard; // S35.T35.7h-6
@@ -13,7 +16,7 @@ import 'widgets.dart';
 
 /// Feature keys (must match PB_FORM_FEATURES on the server).
 const List<String> kFormFeatureKeys = <String>[
-  'weigh', 'grades', 'price_table', 'fin_block', 'pay_terms', 'profit_hint', 'draft', 'confirm_summary',
+  'weigh', 'grades', 'price_table', 'fin_block', 'pay_terms', 'profit_hint', 'draft', 'approval', 'confirm_summary',
 ];
 
 class FormSettingsLocal {
@@ -65,6 +68,22 @@ class FormSettingsLocal {
     await _storeSack(r['weigh']);
   }
 
+  /// S35.T35.11: mirrors the server's display_unit / digits into meta and applies them to [Fmt].
+  static Future<void> storeFormat(Object? f) async {
+    if (f is! Map) return;
+    final Database d = await AppDb.I.db;
+    for (final MapEntry<String, String> e in <String, String>{'display_unit': 'fmt.display_unit', 'digits': 'fmt.digits'}.entries) {
+      if (f[e.key] is String) await d.insert('meta', <String, Object?>{'k': e.value, 'v': f[e.key] as String}, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+    await Fmt.loadFrom(d);
+  }
+
+  /// Saves display unit / digits on the server (settings.manage) and applies them locally.
+  static Future<void> saveFormat({String? displayUnit, String? digits}) async {
+    final Map<String, dynamic> r = await StockApi.call('form_settings.save', <String, dynamic>{'format': <String, dynamic>{if (displayUnit != null) 'display_unit': displayUnit, if (digits != null) 'digits': digits}});
+    await storeFormat(r['format']);
+  }
+
   static Future<void> _store(List<Map<String, dynamic>> features) async {
     final Database d = await AppDb.I.db;
     await d.transaction((Transaction t) async {
@@ -86,6 +105,7 @@ class FormSettingsLocal {
       if (f.isEmpty) return null;
       await _store(f);
       await _storeSack(r['weigh']);
+      await storeFormat(r['format']); // S35.T35.11
       await GradeLinesLocal.storeGrades(r['grades']); // S35.T35.3b
       if (f.any((Map<String, dynamic> x) => x['key'] == 'price_table' && x['on'] == true)) await PriceTableLocal.refresh(); // S35.T35.4
       return f;
@@ -243,6 +263,26 @@ class _FormSettingsScreenState extends State<FormSettingsScreen> {
                     child: Text('همهٔ امکانات پیش‌فرض خاموش‌اند؛ تا روشن نکنید فرم‌ها و چاپ‌ها دقیقاً مثل قبل کار می‌کنند.',
                         style: TextStyle(fontSize: 12, color: Colors.black54)),
                   ),
+                  ListTile( // S35.T35.11: universal formatting (always on; only the display unit is a choice)
+                    title: const Text('واحد نمایش مبلغ'),
+                    subtitle: const Text('فقط نمایش؛ داده‌ها تغییر نمی‌کنند'),
+                    trailing: DropdownButton<String>(
+                      value: Fmt.displayUnit,
+                      items: const <DropdownMenuItem<String>>[
+                        DropdownMenuItem<String>(value: 'toman', child: Text('تومان')),
+                        DropdownMenuItem<String>(value: 'rial', child: Text('ریال')),
+                      ],
+                      onChanged: (String? v) async {
+                        if (v == null) return;
+                        try {
+                          await FormSettingsLocal.saveFormat(displayUnit: v);
+                        } on StockApiException catch (e) {
+                          if (mounted) snack(context, e.message);
+                        }
+                        if (mounted) setState(() {});
+                      },
+                    ),
+                  ),
                   for (final Map<String, dynamic> r in _rows)
                     SwitchListTile(
                       value: r['on'] == true,
@@ -258,6 +298,16 @@ class _FormSettingsScreenState extends State<FormSettingsScreen> {
                         title: const Text('جدول قیمت روز'),
                         trailing: const Icon(Icons.chevron_left),
                         onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const PriceTableScreen()))),
+                  if (_rows.any((Map<String, dynamic> r) => r['key'] == 'approval' && r['on'] == true))
+                    ListTile(
+                        title: const Text('تأیید دوم اسناد (سقف مبلغ)'),
+                        trailing: const Icon(Icons.chevron_left),
+                        onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const ApprovalScreen()))),
+                  if (_rows.any((Map<String, dynamic> r) => r['key'] == 'approval' && r['on'] == true))
+                    ListTile(
+                        title: const Text('تأیید پرداخت‌های بالای سقف'),
+                        trailing: const Icon(Icons.chevron_left),
+                        onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const PayApprovalScreen()))),
                 const Padding(padding: EdgeInsets.all(12), child: PayRateCard()), // S35.T35.7h-6: monthly discount rate (online)
                 ]),
     );

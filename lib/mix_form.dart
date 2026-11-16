@@ -4,6 +4,7 @@ import 'db.dart';
 import 'license_service.dart';
 import 'utils.dart';
 import 'warehouse_ui.dart';
+import 'form_layout.dart';
 import 'widgets.dart';
 
 /// یکسان‌سازی «ي/ك» عربی و «ی/ک» فارسی برای جستجو
@@ -42,6 +43,7 @@ class _MixFormState extends State<MixForm> with EditGuard<MixForm> {
   String _query = '';
   String? _warehouseUid; // S01
   String? _ounceUid; // S01
+  bool _showAvg = false; // «مشاهده میانگین کوت‌ریزی» (فقط نمایش؛ چیزی ذخیره نمی‌شود)
 
   bool get _isEdit => widget.existing != null;
 
@@ -166,6 +168,79 @@ class _MixFormState extends State<MixForm> with EditGuard<MixForm> {
         ]),
       ),
     );
+  }
+
+  /// میانگین وزنیِ گرم و انسِ اجناسِ مبدأ (همان فرمول «محاسبه کوت‌ریزی» دستیار):
+  /// میانگین گرم = Σ(g·w) ÷ Σw ؛ میانگین انس = Σ(o·w) ÷ Σw — w = وزنِ برداشته‌شده از هر جنس.
+  /// جنسی که گرم (یا انس) ندارد، میانگینِ همان مقدار را غیرقابل‌محاسبه می‌کند.
+  Widget _avgCard(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    double sumW = 0, sumGW = 0, sumOW = 0, sumPW = 0;
+    final noGram = <String>[];
+    final noOunce = <String>[];
+    final noPrice = <String>[];
+    for (final e in _selected) {
+      final w = parseNum(_rows[e['id'] as int]?.weight.text) ?? 0;
+      if (w <= 0) continue;
+      final String name = '${e['category_name']} - ${e['type_name']}';
+      final g = e['gram'] as num?;
+      final o = e['ounce'] as num?;
+      final pr = e['price'] as num?;
+      sumW += w;
+      if (pr == null || pr <= 0) {
+        noPrice.add(name);
+      } else {
+        sumPW += pr.toDouble() * w;
+      }
+      if (g == null) {
+        noGram.add(name);
+      } else {
+        sumGW += g.toDouble() * w;
+      }
+      if (o == null || o <= 0) {
+        noOunce.add(name);
+      } else {
+        sumOW += o.toDouble() * w;
+      }
+    }
+    final Widget body;
+    if (sumW <= 0) {
+      body = const Text('وزنِ برداشته‌شده از هر جنس را وارد کنید تا میانگین محاسبه شود.');
+    } else {
+      final bool gramOk = noGram.isEmpty;
+      final bool ounceOk = noOunce.isEmpty;
+      final bool priceOk = noPrice.isEmpty;
+      body = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        infoRow('میانگین گرم', gramOk ? faNum(sumGW / sumW, dec: 2) : 'قابل محاسبه نیست',
+            valueColor: gramOk ? null : scheme.error),
+        infoRow('میانگین انس', ounceOk ? faNum(sumOW / sumW, dec: 2) : 'قابل محاسبه نیست',
+            valueColor: ounceOk ? null : scheme.error),
+        infoRow('میانگین قیمت (فی)', priceOk ? faNum(sumPW / sumW, dec: 0) : 'قابل محاسبه نیست',
+            valueColor: priceOk ? null : scheme.error),
+        if (!gramOk)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text('⚠ میانگین گرم قابل محاسبه نیست؛ این اجناس گرم ندارند: ${noGram.join('، ')}',
+                style: TextStyle(color: scheme.error)),
+          ),
+        if (!ounceOk)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text('⚠ میانگین انس قابل محاسبه نیست؛ این اجناس انس ندارند: ${noOunce.join('، ')}',
+                style: TextStyle(color: scheme.error)),
+          ),
+        if (!priceOk)
+          Padding(
+            padding: const EdgeInsets.only(top: 6),
+            child: Text('⚠ میانگین قیمت قابل محاسبه نیست؛ این اجناس قیمت ندارند: ${noPrice.join('، ')}',
+                style: TextStyle(color: scheme.error)),
+          ),
+        const SizedBox(height: 4),
+        Text('میانگین وزنی بر اساس وزنِ برداشته‌شده از هر جنس (${faNum(sumW)} کیلو).',
+            style: const TextStyle(color: Colors.black54, fontSize: 12)),
+      ]);
+    }
+    return Card(child: Padding(padding: const EdgeInsets.all(12), child: body));
   }
 
   void _toggle(int id, bool v) {
@@ -335,151 +410,170 @@ class _MixFormState extends State<MixForm> with EditGuard<MixForm> {
     }
     final sel = _selected;
     final scheme = Theme.of(context).colorScheme;
-    return Scaffold(
-      appBar: AppBar(title: Text(_isEdit ? 'ویرایش مخلوط/جداسازی' : 'مخلوط / جداسازی')),
-      body: Form(
-        key: _form,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            Card(
-              color: scheme.primaryContainer,
-              child: const Padding(
-                padding: EdgeInsets.all(12),
-                child: Text('هزینه ضایعات به صورت میانگین از سود همه اجناس جدا/مخلوط شده کم می‌شود.'),
+    final double g = kFormGap;
+    final bool wide = kWideForm(context);
+
+    final Widget sources = FormSection(title: '۱) انتخاب اجناس مبدأ', children: [
+      Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: TextField(
+          decoration: const InputDecoration(
+            labelText: 'جستجو',
+            prefixIcon: Icon(Icons.search),
+            border: OutlineInputBorder(),
+          ),
+          onChanged: (v) => setState(() => _query = v),
+        ),
+      ),
+      Align(
+        alignment: AlignmentDirectional.centerEnd,
+        child: TextButton.icon(
+          onPressed: _selectAll,
+          icon: const Icon(Icons.select_all),
+          label: const Text('انتخاب همه اجناس'),
+        ),
+      ),
+      FormGrid(gap: 8, minColWidth: 340, children: [for (final e in _visibleLots) _lotTile(e)]),
+    ]);
+
+    final Widget taken = FormSection(title: '۲) چقدر از هرکدام برمی‌دارید', children: [
+      for (final e in sel) _sourceCard(e),
+      Card(
+        child: Padding(
+          padding: const EdgeInsets.all(12),
+          child: infoRow('جمع وزن برداشته‌شده (خالص)', '${faNum(_takenSum)} کیلو'),
+        ),
+      ),
+      Card(
+        child: SwitchListTile(
+          value: _showAvg,
+          onChanged: (v) => setState(() => _showAvg = v),
+          title: const Text('مشاهده میانگین کوت‌ریزی'),
+          subtitle: const Text('میانگین گرم، انس و قیمت اجناس انتخاب‌شده، بر اساس وزن هرکدام'),
+        ),
+      ),
+      if (_showAvg) _avgCard(context),
+    ]);
+
+    final Widget result = FormSection(title: '۳) مشخصات قلم تازه (مخلوط/جداسازی)', children: [
+      FormGrid(gap: 12, minColWidth: 240, children: [
+        Padding(
+          padding: EdgeInsets.only(bottom: g),
+          child: Row(children: [
+            Expanded(
+              child: DropdownButtonFormField<int>(
+                value: _categoryId,
+                decoration: const InputDecoration(labelText: 'دسته', border: OutlineInputBorder()),
+                items: _categories
+                    .map((c) => DropdownMenuItem(value: c['id'] as int, child: Text(c['name'] as String)))
+                    .toList(),
+                onChanged: (v) {
+                  setState(() {
+                    _categoryId = v;
+                    _baseType = null;
+                  });
+                  _loadBaseTypes();
+                },
               ),
             ),
-            const SizedBox(height: 12),
-            sectionTitle(context, '۱) انتخاب اجناس مبدأ'),
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: TextField(
+            const SizedBox(width: 8),
+            IconButton.filledTonal(
+              onPressed: _addCategory,
+              icon: const Icon(Icons.add),
+              tooltip: 'افزودن دسته',
+            ),
+          ]),
+        ),
+        Padding(
+          padding: EdgeInsets.only(bottom: g),
+          child: Row(children: [
+            Expanded(
+              child: DropdownButtonFormField<String>(
+                value: _baseType,
+                isExpanded: true,
                 decoration: const InputDecoration(
-                  labelText: 'جستجو',
-                  prefixIcon: Icon(Icons.search),
-                  border: OutlineInputBorder(),
-                ),
-                onChanged: (v) => setState(() => _query = v),
+                    labelText: 'نوع پسته (زیردسته)',
+                    helperText: 'مشخص می‌کند این قلم در نمودارها جزو کدام نوع پسته حساب شود',
+                    helperMaxLines: 2,
+                    border: OutlineInputBorder()),
+                items: _baseTypes
+                    .map((t) => DropdownMenuItem<String>(value: t['name'] as String, child: Text(t['name'] as String)))
+                    .toList(),
+                onChanged: (v) => setState(() => _baseType = v),
               ),
             ),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: _selectAll,
-                icon: const Icon(Icons.select_all),
-                label: const Text('انتخاب همه اجناس'),
-              ),
+            const SizedBox(width: 8),
+            IconButton.filledTonal(
+              onPressed: _addBaseType,
+              icon: const Icon(Icons.add),
+              tooltip: 'افزودن نوع',
             ),
-            for (final e in _visibleLots) _lotTile(e),
-            const SizedBox(height: 8),
-            if (sel.isNotEmpty) ...[
-              sectionTitle(context, '۲) چقدر از هرکدام برمی‌دارید'),
-              for (final e in sel) _sourceCard(e),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: infoRow('جمع وزن برداشته‌شده (خالص)', '${faNum(_takenSum)} کیلو'),
-                ),
-              ),
-              const SizedBox(height: 8),
-              sectionTitle(context, '۳) مشخصات قلم تازه (مخلوط/جداسازی)'),
-              Row(children: [
-                Expanded(
-                  child: DropdownButtonFormField<int>(
-                    value: _categoryId,
-                    decoration:
-                        const InputDecoration(labelText: 'دسته', border: OutlineInputBorder()),
-                    items: _categories
-                        .map((c) =>
-                            DropdownMenuItem(value: c['id'] as int, child: Text(c['name'] as String)))
-                        .toList(),
-                    onChanged: (v) {
-                      setState(() {
-                        _categoryId = v;
-                        _baseType = null;
-                      });
-                      _loadBaseTypes();
-                    },
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton.filledTonal(
-                  onPressed: _addCategory,
-                  icon: const Icon(Icons.add),
-                  tooltip: 'افزودن دسته',
-                ),
-              ]),
-              const SizedBox(height: 12),
-              Row(children: [
-                Expanded(
-                  child: DropdownButtonFormField<String>(
-                    value: _baseType,
-                    isExpanded: true,
-                    decoration: const InputDecoration(
-                        labelText: 'نوع پسته (زیردسته)',
-                        helperText: 'مشخص می‌کند این قلم در نمودارها جزو کدام نوع پسته حساب شود',
-                        border: OutlineInputBorder()),
-                    items: _baseTypes
-                        .map((t) => DropdownMenuItem<String>(value: t['name'] as String, child: Text(t['name'] as String)))
-                        .toList(),
-                    onChanged: (v) => setState(() => _baseType = v),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton.filledTonal(
-                  onPressed: _addBaseType,
-                  icon: const Icon(Icons.add),
-                  tooltip: 'افزودن نوع',
-                ),
-              ]),
-              const SizedBox(height: 12),
-              textField(_typeName, 'نام قلم تازه (مثلاً «کوت‌ریز» یا «دنبست جداشده»)', required: true),
-              numField(_netWeight, 'وزن نهایی (خالص) به کیلو — طبق ترازو',
-                  required: true, onChanged: () => setState(() {})),
-              numField(_waste, 'ضایعات / خاک (کیلو) — وزنِ کم‌شده هنگام مخلوط/جداسازی',
-                  hint: '0', onChanged: () => setState(() {})),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton.icon(
-                  onPressed: () {
-                    final d = double.parse((_takenSum - (parseNum(_netWeight.text) ?? 0)).toStringAsFixed(3));
-                    _waste.text = d > 0 ? plain(d) : '0';
-                    setState(() {});
-                  },
-                  icon: const Icon(Icons.balance),
-                  label: const Text('ثبت اختلاف به‌عنوان ضایعات'),
-                ),
-              ),
-              _balanceCard(context),
-              const SizedBox(height: 12),
-              Row(children: [
-                Expanded(child: numField(_smallSack, 'تعداد گونی کوچک (۱۰۰ گرم)', hint: '0')),
-                const SizedBox(width: 8),
-                Expanded(child: numField(_largeSack, 'تعداد گونی بزرگ (۲۰۰ گرم)', hint: '0')),
-              ]),
-              Row(children: [
-                Expanded(child: numField(_ounce, 'انس (اختیاری)', hint: '0')),
-                const SizedBox(width: 8),
-                Expanded(child: numField(_gram, 'گرم (اختیاری)', hint: '0')),
-              ]),
-              WarehousePicker(
-                  label: 'انبارِ بار مخلوط', value: _warehouseUid, useLast: !_isEdit, onChanged: (String? v) => _warehouseUid = v),
-              OuncePicker(value: _ounceUid, onChanged: (String? v) => _ounceUid = v),
-              textField(_note, 'توضیحات (اختیاری)', lines: 2),
-              const SizedBox(height: 8),
+          ]),
+        ),
+        FormSpan(child: textField(_typeName, 'نام قلم تازه (مثلاً «کوت‌ریز» یا «دنبست جداشده»)', required: true, gap: g)),
+        numField(_netWeight, 'وزن نهایی (خالص) به کیلو — طبق ترازو',
+            required: true, gap: g, onChanged: () => setState(() {})),
+        numField(_waste, 'ضایعات / خاک (کیلو) — وزنِ کم‌شده هنگام مخلوط/جداسازی',
+            hint: '0', gap: g, onChanged: () => setState(() {})),
+        FormSpan(
+          child: Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: TextButton.icon(
+              onPressed: () {
+                final d = double.parse((_takenSum - (parseNum(_netWeight.text) ?? 0)).toStringAsFixed(3));
+                _waste.text = d > 0 ? plain(d) : '0';
+                setState(() {});
+              },
+              icon: const Icon(Icons.balance),
+              label: const Text('ثبت اختلاف به‌عنوان ضایعات'),
+            ),
+          ),
+        ),
+        FormSpan(child: _balanceCard(context)),
+        numField(_smallSack, 'تعداد گونی کوچک (۱۰۰ گرم)', hint: '0', gap: g),
+        numField(_largeSack, 'تعداد گونی بزرگ (۲۰۰ گرم)', hint: '0', gap: g),
+        numField(_ounce, 'انس (اختیاری)', hint: '0', gap: g),
+        numField(_gram, 'گرم (اختیاری)', hint: '0', gap: g),
+        WarehousePicker(
+            label: 'انبارِ بار مخلوط', value: _warehouseUid, useLast: !_isEdit, onChanged: (String? v) => _warehouseUid = v),
+        FormSpan(child: textField(_note, 'توضیحات (اختیاری)', lines: wide ? 1 : 2, gap: g)),
+        OuncePicker(value: _ounceUid, onChanged: (String? v) => _ounceUid = v),
+      ]),
+    ]);
+
+    return FormPage(
+      title: _isEdit ? 'ویرایش مخلوط/جداسازی' : 'مخلوط / جداسازی',
+      formKey: _form,
+      actions: sel.isEmpty
+          ? const <Widget>[]
+          : <Widget>[
               FilledButton.icon(
                 onPressed: _saving ? null : _save,
                 icon: _saving
-                    ? const SizedBox(
-                        width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
                     : const Icon(Icons.check),
                 label: Text(_isEdit ? 'ذخیره تغییرات' : 'ثبت در انبار'),
               ),
             ],
-            const SizedBox(height: 24),
-          ],
+      children: [
+        Card(
+          color: scheme.primaryContainer,
+          child: const Padding(
+            padding: EdgeInsets.all(12),
+            child: Text('هزینه ضایعات به صورت میانگین از سود همه اجناس جدا/مخلوط شده کم می‌شود.'),
+          ),
         ),
-      ),
+        SizedBox(height: g),
+        if (sel.isEmpty)
+          sources
+        else if (wide)
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [sources, taken])),
+            const SizedBox(width: 12),
+            Expanded(child: result),
+          ])
+        else ...[sources, taken, result],
+      ],
     );
   }
 

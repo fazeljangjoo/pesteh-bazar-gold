@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 
 import 'db.dart';
+import 'fmt.dart' show Fmt, MoneyField;
 import 'pdf_output.dart';
 import 'pdf_service.dart';
 import 'returns_ui.dart' show ReturnsHelp;
@@ -25,6 +26,9 @@ int brokerCalc(String basis, double value, double kg, double price) {
   if (basis == 'per_kg') return (kg * value).round();
   return value.round();
 }
+
+/// «مشخصات پرداخت» ← uid؛ فقط بعد از خطای شبکه نگه داشته می‌شود (جلوگیری از ثبت دوبارهٔ پرداخت اجراشده‌ی بی‌پاسخ)
+final Map<String, String> _bpPendingUid = <String, String>{};
 
 double _d(dynamic v) => ReturnsHelp.d(v);
 
@@ -182,7 +186,7 @@ class _BrokerDialogState extends State<_BrokerDialog> {
               onChanged: (String? v) => setState(() => _basis = v ?? 'percent'),
             ),
             const SizedBox(height: 12),
-            numField(_value, _basis == 'percent' ? 'درصد' : 'مبلغ (ریال)', onChanged: () => setState(() {})),
+            numField(_value, _basis == 'percent' ? 'درصد' : 'مبلغ (ریال)', thousands: _basis != 'percent', onChanged: () => setState(() {})),
             DropdownButtonFormField<String>(
               value: _payer,
               decoration: const InputDecoration(labelText: 'پرداخت‌کننده'),
@@ -192,7 +196,7 @@ class _BrokerDialogState extends State<_BrokerDialog> {
               onChanged: (String? v) => setState(() => _payer = v ?? 'us'),
             ),
             const SizedBox(height: 12),
-            infoRow('کمیسیون محاسبه‌شده', '${faNum(_preview, dec: 0)} ریال'),
+            infoRow('کمیسیون محاسبه‌شده', '${Fmt.money(_preview)}'),
             Text(
               _payer != 'us'
                   ? 'کمیسیون را طرف مقابل می‌پردازد؛ روی هزینه و سود شما اثری ندارد.'
@@ -279,7 +283,7 @@ class _BrokerScreenState extends State<BrokerScreen> {
         child: AlertDialog(
           title: Text('پرداخت به ${broker['broker_name']}'),
           content: Column(mainAxisSize: MainAxisSize.min, children: <Widget>[
-            numField(amount, 'مبلغ (ریال)', thousands: true),
+            MoneyField(controller: amount, label: 'مبلغ'),
             textField(note, 'توضیح'),
           ]),
           actions: <Widget>[
@@ -289,22 +293,32 @@ class _BrokerScreenState extends State<BrokerScreen> {
         ),
       ),
     );
-    final double a = parseNum(amount.text) ?? 0;
+    final double a = (MoneyField.stored(amount) ?? 0).toDouble();
     if (ok != true) return;
     if (a <= 0) {
       if (mounted) snack(context, 'مبلغ نامعتبر است');
       return;
     }
+    // بعد از قطع اتصال، شاید سرور پرداخت را ثبت کرده باشد؛ تلاش دوبارهٔ همان پرداخت با همان uid ارسال شود تا دوبار ثبت نشود
+    final int bid = _d(broker['broker_id']).toInt();
+    final String fp = '$bid|$a|${note.text.trim()}';
+    final String uid = _bpPendingUid[fp] ?? ReturnsHelp.newUid('bp');
     try {
       await StockApi.call('broker_payments.save', <String, dynamic>{
-        'uid': ReturnsHelp.newUid('bp'),
-        'broker_id': _d(broker['broker_id']).toInt(),
+        'uid': uid,
+        'broker_id': bid,
         'amount': a,
         'date': ReturnsHelp.iso(DateTime.now()),
         if (note.text.trim().isNotEmpty) 'note': note.text.trim(),
       });
+      _bpPendingUid.remove(fp);
       _load();
     } on StockApiException catch (e) {
+      if (e.network) {
+        _bpPendingUid[fp] = uid;
+      } else {
+        _bpPendingUid.remove(fp);
+      }
       if (mounted) snack(context, e.message);
     }
   }
@@ -350,7 +364,7 @@ class _BrokerScreenState extends State<BrokerScreen> {
                   onChanged: (String? v) => set(() => basis = v ?? 'percent'),
                 ),
                 const SizedBox(height: 8),
-                numField(value, basis == 'percent' ? 'درصد' : 'مبلغ (ریال)'),
+                numField(value, basis == 'percent' ? 'درصد' : 'مبلغ (ریال)', thousands: basis != 'percent'),
                 DropdownButtonFormField<String>(
                   value: applies,
                   decoration: const InputDecoration(labelText: 'برای'),
@@ -410,15 +424,15 @@ class _BrokerScreenState extends State<BrokerScreen> {
       rows: ReturnsHelp.maps(rep['brokers'])
           .map((Map<String, dynamic> b) => <String>[
                 '${b['broker_name']}',
-                faNum(_d(b['purchase_commission']), dec: 0),
-                faNum(_d(b['sale_commission']), dec: 0),
-                faNum(_d(b['paid']), dec: 0),
-                faNum(_d(b['balance']), dec: 0),
+                Fmt.money(_d(b['purchase_commission']), label: false),
+                Fmt.money(_d(b['sale_commission']), label: false),
+                Fmt.money(_d(b['paid']), label: false),
+                Fmt.money(_d(b['balance']), label: false),
               ])
           .toList(),
       totals: <List<String>>[
-        <String>['جمع کمیسیون (ما می‌پردازیم)', faNum(_d(t['due']), dec: 0)],
-        <String>['جمع پرداخت‌شده', faNum(_d(t['paid']), dec: 0)],
+        <String>['جمع کمیسیون (ما می‌پردازیم)', Fmt.money(_d(t['due']), label: false)],
+        <String>['جمع پرداخت‌شده', Fmt.money(_d(t['paid']), label: false)],
       ],
     );
     if (!mounted) return;
@@ -468,10 +482,10 @@ class _BrokerScreenState extends State<BrokerScreen> {
                           padding: const EdgeInsets.all(12),
                           child: Column(children: <Widget>[
                             sectionTitle(context, 'جمع بازه'),
-                            infoRow('کمیسیون خرید (به بهای تمام‌شده)', '${faNum(_d(t['purchase_commission']), dec: 0)} ریال'),
-                            infoRow('کمیسیون فروش (هزینهٔ فروش)', '${faNum(_d(t['sale_commission']), dec: 0)} ریال'),
-                            infoRow('پرداخت‌شده در بازه', '${faNum(_d(t['paid']), dec: 0)} ریال'),
-                            infoRow('کمیسیون به‌عهدهٔ طرف مقابل', '${faNum(_d(t['counterparty_commission']), dec: 0)} ریال'),
+                            infoRow('کمیسیون خرید (به بهای تمام‌شده)', '${Fmt.money(_d(t['purchase_commission']))}'),
+                            infoRow('کمیسیون فروش (هزینهٔ فروش)', '${Fmt.money(_d(t['sale_commission']))}'),
+                            infoRow('پرداخت‌شده در بازه', '${Fmt.money(_d(t['paid']))}'),
+                            infoRow('کمیسیون به‌عهدهٔ طرف مقابل', '${Fmt.money(_d(t['counterparty_commission']))}'),
                           ]),
                         ),
                       ),
@@ -479,8 +493,8 @@ class _BrokerScreenState extends State<BrokerScreen> {
                         Card(
                           child: ListTile(
                             title: Text('${b['broker_name']}'),
-                            subtitle: Text('خرید: ${faNum(_d(b['purchase_commission']), dec: 0)}  ·  فروش: ${faNum(_d(b['sale_commission']), dec: 0)}\n'
-                                'پرداخت‌شده کل: ${faNum(_d(b['total_paid_all']), dec: 0)}  ·  مانده بدهی ما: ${faNum(_d(b['balance']), dec: 0)}'),
+                            subtitle: Text('خرید: ${Fmt.money(_d(b['purchase_commission']), label: false)}  ·  فروش: ${Fmt.money(_d(b['sale_commission']), label: false)}\n'
+                                'پرداخت‌شده کل: ${Fmt.money(_d(b['total_paid_all']), label: false)}  ·  مانده بدهی ما: ${Fmt.money(_d(b['balance']), label: false)}'),
                             isThreeLine: true,
                             trailing: IconButton(tooltip: 'ثبت پرداخت', icon: const Icon(Icons.payments_outlined), onPressed: () => _addPayment(b)),
                           ),
@@ -511,7 +525,7 @@ class _BrokerScreenState extends State<BrokerScreen> {
                       for (final Map<String, dynamic> p in _pays)
                         ListTile(
                           dense: true,
-                          title: Text('${p['broker_name']} — ${faNum(_d(p['amount']), dec: 0)} ریال'),
+                          title: Text('${p['broker_name']} — ${Fmt.money(_d(p['amount']))}'),
                           subtitle: Text(jalaliDate('${p['date']}') + ((p['note'] ?? '') == '' ? '' : ' · ${p['note']}')),
                           trailing: IconButton(
                               icon: const Icon(Icons.delete_outline),
@@ -585,8 +599,8 @@ class _BrokerProfitCardState extends State<BrokerProfitCard> {
         padding: const EdgeInsets.all(12),
         child: Column(children: <Widget>[
           sectionTitle(context, 'کارمزد دلال (فروش)'),
-          infoRow('کارمزد دلال فروش در این بازه', '${faNum(_saleComm, dec: 0)} ریال'),
-          infoRow('سود پس از کارمزد دلال', '${faNum(widget.profit - _saleComm, dec: 0)} ریال'),
+          infoRow('کارمزد دلال فروش در این بازه', '${Fmt.money(_saleComm)}'),
+          infoRow('سود پس از کارمزد دلال', '${Fmt.money(widget.profit - _saleComm)}'),
         ]),
       ),
     );

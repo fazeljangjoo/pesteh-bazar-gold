@@ -9,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 
 import 'db.dart';
 import 'fx_doc_field.dart';
+import 'doc_drafts.dart' show DocDraftsLocal;
 import 'form_settings.dart' show FormSettingsLocal;
 import 'grade_lines_ui.dart';
 import 'fx_local.dart';
@@ -16,7 +17,11 @@ import 'license_service.dart';
 import 'party_field.dart';
 import 'price_table_ui.dart' show PriceSuggestionHint;
 import 'tax_choice.dart';
+import 'fmt.dart' show Fmt, MoneyField;
+import 'form_layout.dart';
 import 'utils.dart';
+import 'voucher_preview_ui.dart' show confirmVoucherPreview;
+import 'doc_summary_ui.dart' show confirmDocSummary; // S35.T35.13
 import 'warehouse_ui.dart';
 import 'widgets.dart';
 
@@ -71,6 +76,7 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
   final _driver = TextEditingController();
   // S35.T35.6c: بلوک مالی (فقط وقتی form.fin_block روشن است). وضعیت مالیاتی از TaxChoiceField می‌آید.
   bool _finOn = false;
+  bool _draftOn = false; // S35.T35.9b form.draft
   final _finDisc = TextEditingController();
   final _finWb = TextEditingController();
   String _finPayer = 'us';
@@ -106,7 +112,7 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
   }
 
   bool get _useGrades => _gradesOn && _gc.hasRows && !_fxc.active; // S35.T35.3b: price = weighted average of the grade lines
-  double get _priceVal => _fxc.active ? (_fxc.priceStored ?? 0) : (_useGrades ? _gc.weightedPrice : (parseNum(_price.text) ?? 0));
+  double get _priceVal => _fxc.active ? (_fxc.priceStored ?? 0) : (_useGrades ? _gc.weightedPrice : (MoneyField.stored(_price) ?? 0).toDouble());
 
   /// ارزهای فعال از کش دستگاه؛ سپس تازه‌سازی بی‌صدای کش (آنلاین) و دوباره‌خوانی نرخ.
   Future<void> _initFx() async {
@@ -160,7 +166,7 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
       _ounce.text = e['ounce'] == null ? '' : plain(e['ounce'] as num);
       _warehouseUid = e['warehouse_uid'] as String?;
       _ounceUid = e['ounce_uid'] as String?;
-      _price.text = plain(e['price'] as num);
+      MoneyField.setStored(_price, e['price'] as num);
       if (e['ccy'] != null && (e['ccy'] as String).isNotEmpty) _fxEditBlocked = true;
       _total.text = plain(e['total_weight'] as num);
       final smallVal = (e['small_sack_count'] as num).toDouble();
@@ -174,10 +180,10 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
       _pctCrooked.text = e['pct_crooked'] == null ? '' : plain(e['pct_crooked'] as num);
       _seller.text = (e['seller'] as String?) ?? '';
       _note.text = (e['note'] as String?) ?? '';
-    _laborCost.text = e['labor_cost'] == null ? '' : plain(e['labor_cost'] as num);
+    MoneyField.setStored(_laborCost, e['labor_cost'] as num?);
     _taxStatus = e['tax_status'] as String?;
     _taxRate.text = taxRateTextFromMilli(e['tax_rate_milli']);
-    _transportCost.text = e['transport_cost'] == null ? '' : plain(e['transport_cost'] as num);
+    MoneyField.setStored(_transportCost, e['transport_cost'] as num?);
       final specs = AppDb.decodeCustomSpecs(e['custom_specs'] as String?);
       for (final s in specs) {
         final row = _CustomSpecRow();
@@ -244,6 +250,7 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
     final bool gOn = await FormSettingsLocal.isOn('grades');
     final bool ptOn = await FormSettingsLocal.isOn('price_table'); // S35.T35.4
     final bool fin = await FormSettingsLocal.isOn('fin_block'); // S35.T35.6c
+    final bool draftOn = await FormSettingsLocal.isOn('draft'); // S35.T35.9b
     List<Map<String, dynamic>> gl = <Map<String, dynamic>>[];
     final Map<String, dynamic>? ex = widget.existing;
     if (gOn && ex != null && ex['id'] is int) gl = await GradeLinesLocal.load('purchase', ex['id'] as int);
@@ -257,11 +264,12 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
       _sackSmallKg = k[0];
       _sackLargeKg = k[1];
       _finOn = fin;
+      _draftOn = draftOn;
       if (ex != null) {
         final Object? d = ex['discount_amount'] ?? ex['discount']; // S35.T35.6c: prefill
         final Object? w = ex['weighbridge_cost'];
-        if (d is num && d > 0) _finDisc.text = plain(d);
-        if (w is num && w > 0) _finWb.text = plain(w);
+        if (d is num && d > 0) MoneyField.setStored(_finDisc, d);
+        if (w is num && w > 0) MoneyField.setStored(_finWb, w);
         _finPayer = ex['side_cost_payer'] == 'party' ? 'party' : 'us';
       }
     });
@@ -403,7 +411,7 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
     );
   }
 
-  Future<void> _save() async {
+  Future<void> _save({bool draft = false}) async {
     if (_saving) return;
     if (!_form.currentState!.validate()) return;
 
@@ -412,11 +420,11 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
       setState(() => _saving = true);
       final lockedData = <String, dynamic>{
         if (_photoChanged) 'photo': _photo,
-        'price': parseNum(_price.text),
+        'price': MoneyField.stored(_price),
         'seller': _seller.text.trim().isEmpty ? null : _seller.text.trim(),
         'note': _note.text.trim().isEmpty ? null : _note.text.trim(),
-        'labor_cost': parseNum(_laborCost.text),
-        'transport_cost': parseNum(_transportCost.text),
+        'labor_cost': MoneyField.stored(_laborCost),
+        'transport_cost': MoneyField.stored(_transportCost),
       };
       final okLocked = await saveConfirmed(
         context,
@@ -484,7 +492,7 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
           .toList();
     }
 
-    final data = {
+    final Map<String, dynamic> data = <String, dynamic>{
       'category_id': _categoryId,
       'type_name': typeName,
       'photo': _photo,
@@ -506,8 +514,8 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
       'vehicle_plate': _weighOn && _plate.text.trim().isNotEmpty ? _plate.text.trim() : null,
       'driver_name': _weighOn && _driver.text.trim().isNotEmpty ? _driver.text.trim() : null,
       if (_finOn) ...<String, dynamic>{ // S35.T35.6c: server applies only when form.fin_block is on
-        'discount_amount': parseNum(_finDisc.text) ?? 0,
-        'weighbridge_cost': parseNum(_finWb.text) ?? 0,
+        'discount_amount': MoneyField.stored(_finDisc) ?? 0,
+        'weighbridge_cost': MoneyField.stored(_finWb) ?? 0,
         'side_cost_payer': _finPayer,
       },
       'gram': preset == 'dombest' ? parseNum(_gram.text) : null,
@@ -520,12 +528,40 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
           : null,
       'seller': _seller.text.trim().isEmpty ? null : _seller.text.trim(),
       'note': _note.text.trim().isEmpty ? null : _note.text.trim(),
-        'labor_cost': parseNum(_laborCost.text),
-        'transport_cost': parseNum(_transportCost.text),
+        'labor_cost': MoneyField.stored(_laborCost),
+        'transport_cost': MoneyField.stored(_transportCost),
       if (taxChoiceAvailable()) 'tax_status': _taxStatus,
       if (taxChoiceAvailable()) 'tax_rate_milli': _taxStatus == 'taxable' ? taxRateMilliFromText(_taxRate.text) : null,
     };
 
+    if (draft) {
+      // S35.T35.9b: پیش‌نویس فقط محلی ذخیره می‌شود؛ هیچ اثری روی انبار/حساب ندارد
+      data['date'] = DateTime.now().toIso8601String();
+      await DocDraftsLocal.save('purchase', '${data['type_name'] ?? ''} — ${faNum(_net)} کیلو', data);
+      if (!mounted) return;
+      snack(context, 'پیش‌نویس ذخیره شد (بدون اثر روی انبار و حساب‌ها)');
+      Navigator.pop(context);
+      return;
+    }
+    if (!_isEdit) {
+      // S35.T35.9d: gold dry-run preview of the voucher (display-only; never blocks when offline)
+      final bool go = await confirmVoucherPreview(context, docType: 'purchase', doc: <String, dynamic>{...data, 'date': DateTime.now().toIso8601String()});
+      if (!go || !mounted) return;
+    }
+    if (await FormSettingsLocal.isOn('confirm_summary')) { // S35.T35.13
+      if (!mounted) return;
+      final bool okSum = await confirmDocSummary(context, title: 'تأیید خرید', rows: <MapEntry<String, String>>[
+        MapEntry<String, String>('طرف حساب', '${data['seller'] ?? '—'}'),
+        MapEntry<String, String>('وزن ناخالص', Fmt.kg((data['total_weight'] as num?) ?? 0)),
+        MapEntry<String, String>('فی خرید', Fmt.money((data['price'] as num?) ?? 0)),
+        if (data['discount_amount'] != null) MapEntry<String, String>('تخفیف', Fmt.money(data['discount_amount'] as num)),
+        if (data['weighbridge_cost'] != null) MapEntry<String, String>('هزینه باسکول', Fmt.money(data['weighbridge_cost'] as num)),
+        if (data['labor_cost'] != null) MapEntry<String, String>('هزینه کارگر', Fmt.money(data['labor_cost'] as num)),
+        if (data['transport_cost'] != null) MapEntry<String, String>('حمل‌ونقل', Fmt.money(data['transport_cost'] as num)),
+        MapEntry<String, String>('وضعیت مالیاتی', '${data['tax_status'] ?? 'بدون مالیات'}'),
+      ]);
+      if (!okSum || !mounted) return;
+    }
     setState(() => _saving = true);
     if (_isEdit) {
       if (!_photoChanged) data.remove('photo');
@@ -569,52 +605,74 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
       );
     }
     final preset = _presetKey;
-    return Scaffold(
-      appBar: AppBar(title: Text(_isEdit ? 'ویرایش خرید' : 'خرید جدید')),
-      body: Form(
-        key: _form,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            if (_locked)
-              Card(
-                color: Theme.of(context).colorScheme.errorContainer,
-                child: const Padding(
-                  padding: EdgeInsets.all(12),
-                  child: Text(
-                    'چون بخشی از این خرید فروخته شده، دسته/نوع/وزن و مشخصات کیفی قابل ویرایش نیست. '
-                    'فقط فی خرید، فروشنده، عکس و توضیحات قابل تغییرند.',
+    final double g = kFormGap;
+    Widget locked(Widget c) => IgnorePointer(ignoring: _locked, child: Opacity(opacity: _locked ? 0.5 : 1, child: c));
+    final bool wide = kWideForm(context);
+    final Widget saveBtn = FilledButton.icon(
+      onPressed: _saving ? null : _save,
+      icon: _saving
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+            )
+          : const Icon(Icons.check),
+      label: Text(_isEdit ? 'ذخیره تغییرات' : 'ثبت خرید'),
+    );
+    final Widget? draftBtn = (_draftOn && !_isEdit)
+        ? OutlinedButton.icon(
+            onPressed: _saving ? null : () => _save(draft: true),
+            icon: const Icon(Icons.edit_note),
+            label: const Text('ذخیره به‌عنوان پیش‌نویس'),
+          )
+        : null;
+    return FormPage(
+      title: _isEdit ? 'ویرایش خرید' : 'خرید جدید',
+      formKey: _form,
+      actions: <Widget>[
+        saveBtn,
+        if (draftBtn != null) ...<Widget>[if (!wide) const SizedBox(height: 8), draftBtn],
+      ],
+      children: [
+        if (_locked)
+          Card(
+            color: Theme.of(context).colorScheme.errorContainer,
+            child: const Padding(
+              padding: EdgeInsets.all(12),
+              child: Text(
+                'چون بخشی از این خرید فروخته شده، دسته/نوع/وزن و مشخصات کیفی قابل ویرایش نیست. '
+                'فقط فی خرید، فروشنده، عکس و توضیحات قابل تغییرند.',
+              ),
+            ),
+          ),
+        if (_locked) SizedBox(height: g),
+        FormSection(title: 'مشخصات پسته', children: [
+          FormGrid(gap: 12, children: [
+            locked(Padding(
+              padding: EdgeInsets.only(bottom: g),
+              child: Row(children: [
+                Expanded(
+                  child: DropdownButtonFormField<int>(
+                    value: _categoryId,
+                    decoration: const InputDecoration(labelText: 'دسته', border: OutlineInputBorder()),
+                    items: _categories
+                        .map((c) => DropdownMenuItem(value: c['id'] as int, child: Text(c['name'] as String)))
+                        .toList(),
+                    onChanged: (v) async {
+                      if (v == null) return;
+                      setState(() => _categoryId = v);
+                      await _loadTypes();
+                    },
                   ),
                 ),
-              ),
-            if (_locked) const SizedBox(height: 12),
-            IgnorePointer(
-              ignoring: _locked,
-              child: Opacity(
-                opacity: _locked ? 0.5 : 1,
-                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                  sectionTitle(context, 'دسته و نوع پسته'),
-                  Row(children: [
-                    Expanded(
-                      child: DropdownButtonFormField<int>(
-                        value: _categoryId,
-                        decoration: const InputDecoration(labelText: 'دسته', border: OutlineInputBorder()),
-                        items: _categories
-                            .map((c) => DropdownMenuItem(value: c['id'] as int, child: Text(c['name'] as String)))
-                            .toList(),
-                        onChanged: (v) async {
-                          if (v == null) return;
-                          setState(() => _categoryId = v);
-                          await _loadTypes();
-                        },
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    IconButton.filledTonal(onPressed: _addCategory, icon: const Icon(Icons.add), tooltip: 'افزودن دسته'),
-                  ]),
-                  const SizedBox(height: 12),
-                  if (_isPreset)
-                    Row(children: [
+                const SizedBox(width: 8),
+                IconButton.filledTonal(onPressed: _addCategory, icon: const Icon(Icons.add), tooltip: 'افزودن دسته'),
+              ]),
+            )),
+            locked(_isPreset
+                ? Padding(
+                    padding: EdgeInsets.only(bottom: g),
+                    child: Row(children: [
                       Expanded(
                         child: DropdownButtonFormField<int>(
                           key: ValueKey('$_categoryId-$_typeId'),
@@ -628,194 +686,184 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
                       ),
                       const SizedBox(width: 8),
                       IconButton.filledTonal(onPressed: _addType, icon: const Icon(Icons.add), tooltip: 'افزودن نوع'),
-                    ])
-                  else
-                    textField(_customTypeCtrl, 'نوع پسته', required: true),
-                ]),
+                    ]),
+                  )
+                : textField(_customTypeCtrl, 'نوع پسته', required: true, gap: g)),
+            locked(WarehousePicker(
+                value: _warehouseUid, useLast: !_isEdit, onChanged: (String? v) => _warehouseUid = v)),
+            locked(numField(_ounce, 'انس پسته (اختیاری)', gap: g)),
+            if (preset == 'dombest') ...[
+              locked(numField(_gram, 'گرم', gap: g)),
+              locked(numField(_pctKhandan, 'درصد پسته خندان در دنبست', suffix: '٪', max: 100, gap: g)),
+              locked(numField(_pctCrooked, 'درصد پسته کج / ناخالص', suffix: '٪', max: 100, gap: g)),
+            ] else if (preset == 'khandan') ...[
+              locked(numField(_pctDombest, 'درصد دنبست در پسته خندان', suffix: '٪', max: 100, gap: g)),
+              locked(numField(_pctTuchin, 'درصد توچین', suffix: '٪', max: 100, gap: g)),
+              locked(numField(_pctCrooked, 'درصد پسته کج / ناخالص', suffix: '٪', max: 100, gap: g)),
+            ] else ...[
+              FormSpan(
+                child: locked(Row(children: [
+                  Expanded(child: sectionTitle(context, 'مشخصات (حداکثر ۴ مورد دلخواه)')),
+                  if (_customSpecs.length < kMaxCustomSpecs)
+                    IconButton(onPressed: _addCustomSpec, icon: const Icon(Icons.add_circle_outline)),
+                ])),
               ),
-            ),
-            const SizedBox(height: 16),
-            sectionTitle(context, 'عکس نمونه (اختیاری)'),
-            InkWell(
-              onTap: _photoSheet,
-              child: Container(
-                height: 140,
-                decoration: BoxDecoration(border: Border.all(color: Colors.black26), borderRadius: BorderRadius.circular(8)),
-                clipBehavior: Clip.antiAlias,
-                child: _photo == null
-                    ? const Center(child: Icon(Icons.add_a_photo_outlined, size: 36))
-                    : Image.memory(photoBytes(_photo!), fit: BoxFit.cover, width: double.infinity),
-              ),
-            ),
-            const SizedBox(height: 16),
-            IgnorePointer(
-              ignoring: _locked,
-              child: Opacity(
-                opacity: _locked ? 0.5 : 1,
-                child: WarehousePicker(
-                    value: _warehouseUid, useLast: !_isEdit, onChanged: (String? v) => _warehouseUid = v),
-              ),
-            ),
-            OuncePicker(value: _ounceUid, onChanged: (String? v) => _ounceUid = v),
-            IgnorePointer(
-              ignoring: _locked,
-              child: Opacity(
-                opacity: _locked ? 0.5 : 1,
-                child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                  sectionTitle(context, 'قیمت و وزن'),
-                  numField(_ounce, 'انس پسته (اختیاری)'),
-                  if (_fx && !_isEdit)
-                    FxDocFields(c: _fxc, priceLabel: 'فی خرید ارزی (هر کیلو)', onChanged: () => setState(() {})),
-                  if (!_fxc.active && !_useGrades)
-                    numField(_price, 'فی خرید (ریال به ازای هر کیلو)',
-                        required: true, thousands: true, onChanged: () => setState(() {})),
-                  if (_priceTableOn && !_fxc.active && !_useGrades)
-                    PriceSuggestionHint(
-                        typeName: _suggestTypeName, ounceUid: _ounceUid, onAccept: (num v) => setState(() => _price.text = plain(v))), // S35.T35.4
-                  if (_gradesOn && !_fxc.active) GradeLinesEditor(c: _gc, netKg: _net, onChanged: () => setState(() {})),
-                  if (!_fx) fxLockedField('خرید به ارز'),
-                  numField(_total, 'وزن کل (ناخالص) به کیلو', required: true, onChanged: () => setState(() {})),
-                  Row(children: [
+              for (var i = 0; i < _customSpecs.length; i++)
+                locked(Padding(
+                  padding: EdgeInsets.only(bottom: g),
+                  child: Row(children: [
                     Expanded(
-                        child: numField(_smallSack, 'تعداد گونی کوچک (۱۰۰ گرم)', hint: '0', onChanged: () => setState(() {}))),
-                    const SizedBox(width: 8),
+                      flex: 2,
+                      child: TextField(
+                        controller: _customSpecs[i].label,
+                        decoration: const InputDecoration(labelText: 'عنوان', border: OutlineInputBorder()),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
                     Expanded(
-                        child: numField(_largeSack, 'تعداد گونی بزرگ (۲۰۰ گرم)', hint: '0', onChanged: () => setState(() {}))),
+                      flex: 3,
+                      child: TextField(
+                        controller: _customSpecs[i].value,
+                        decoration: const InputDecoration(labelText: 'مقدار', border: OutlineInputBorder()),
+                      ),
+                    ),
+                    IconButton(
+                      onPressed: () => _removeCustomSpec(i),
+                      icon: const Icon(Icons.close, size: 20),
+                    ),
                   ]),
-                  if (_weighOn) ...[
-                    sectionTitle(context, 'توزین'),
-                    const Padding(
-                      padding: EdgeInsets.only(bottom: 4),
-                      child: Text('تارا یعنی وزن گونی یا ظرف خالی که از وزن کل کم می‌شود', style: TextStyle(fontSize: 12, color: Colors.black54)),
+                )),
+              if (_customSpecs.isEmpty)
+                FormSpan(
+                  child: locked(Padding(
+                    padding: EdgeInsets.only(bottom: g),
+                    child: Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: OutlinedButton.icon(
+                        onPressed: _addCustomSpec,
+                        icon: const Icon(Icons.add),
+                        label: const Text('افزودن مشخصه'),
+                      ),
                     ),
-                    numField(_tareManual, 'تارا (کیلو) — خالی = از تعداد گونی', hint: faNum(_sackTare), onChanged: () => setState(() {})),
-                    Row(children: [
-                      Expanded(child: numField(_deduct, _deductPct ? 'کسر کیفیت (درصد)' : 'کسر کیفیت (کیلو)', onChanged: () => setState(() {}))),
-                      const SizedBox(width: 8),
-                      DropdownButton<bool>(
-                        value: _deductPct,
-                        items: const <DropdownMenuItem<bool>>[
-                          DropdownMenuItem<bool>(value: false, child: Text('کیلو')),
-                          DropdownMenuItem<bool>(value: true, child: Text('درصد')),
-                        ],
-                        onChanged: (bool? v) => setState(() => _deductPct = v ?? false),
-                      ),
-                    ]),
-                    textField(_ticket, 'شمارهٔ قبض باسکول'),
-                    Row(children: [
-                      Expanded(child: textField(_plate, 'پلاک')),
-                      const SizedBox(width: 8),
-                      Expanded(child: textField(_driver, 'راننده')),
-                    ]),
-                  ],
-                  Card(
-                    color: Theme.of(context).colorScheme.primaryContainer,
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Column(children: [
-                        infoRow(_weighOn ? 'تارا' : 'وزن گونی‌ها', '${faNum(_tare)} کیلو'),
-                        if (_weighOn && _deductKg > 0) infoRow('کسر کیفیت', '${faNum(_deductKg)} کیلو'),
-                        infoRow('وزن پسته (خالص)', '${faNum(_net)} کیلو'),
-                        infoRow('ارزش کل', '${faNum(_net * _priceVal, dec: 0)} ریال'),
-                        if (_fxc.active && _fxc.priceCcyNum != null) ...[
-                          infoRow('فی خرید ارزی (هر کیلو)', faCcy(_fxc.ccy!, _fxc.priceCcyNum!, dec: _fxc.decimals)),
-                          infoRow('ارزش کل ارزی', faCcy(_fxc.ccy!, _net * _fxc.priceCcyNum!, dec: _fxc.decimals)),
-                        ],
-                      ]),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  if (preset == 'dombest') ...[
-                    sectionTitle(context, 'مشخصات پسته دنبست'),
-                    numField(_gram, 'گرم'),
-                    numField(_pctKhandan, 'درصد پسته خندان در دنبست', suffix: '٪', max: 100),
-                    numField(_pctCrooked, 'درصد پسته کج / ناخالص', suffix: '٪', max: 100),
-                  ] else if (preset == 'khandan') ...[
-                    sectionTitle(context, 'مشخصات پسته خندان'),
-                    numField(_pctDombest, 'درصد دنبست در پسته خندان', suffix: '٪', max: 100),
-                    numField(_pctTuchin, 'درصد توچین', suffix: '٪', max: 100),
-                    numField(_pctCrooked, 'درصد پسته کج / ناخالص', suffix: '٪', max: 100),
-                  ] else ...[
-                    Row(children: [
-                      Expanded(child: sectionTitle(context, 'مشخصات (حداکثر ۴ مورد دلخواه)')),
-                      if (_customSpecs.length < kMaxCustomSpecs)
-                        IconButton(onPressed: _addCustomSpec, icon: const Icon(Icons.add_circle_outline)),
-                    ]),
-                    for (var i = 0; i < _customSpecs.length; i++)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Row(children: [
-                          Expanded(
-                            flex: 2,
-                            child: TextField(
-                              controller: _customSpecs[i].label,
-                              decoration: const InputDecoration(labelText: 'عنوان', border: OutlineInputBorder()),
-                            ),
-                          ),
-                          const SizedBox(width: 6),
-                          Expanded(
-                            flex: 3,
-                            child: TextField(
-                              controller: _customSpecs[i].value,
-                              decoration: const InputDecoration(labelText: 'مقدار', border: OutlineInputBorder()),
-                            ),
-                          ),
-                          IconButton(
-                            onPressed: () => _removeCustomSpec(i),
-                            icon: const Icon(Icons.close, size: 20),
-                          ),
-                        ]),
-                      ),
-                    if (_customSpecs.isEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: OutlinedButton.icon(
-                          onPressed: _addCustomSpec,
-                          icon: const Icon(Icons.add),
-                          label: const Text('افزودن مشخصه'),
-                        ),
-                      ),
-                  ],
-                ]),
+                  )),
+                ),
+            ],
+            OuncePicker(value: _ounceUid, onChanged: (String? v) => _ounceUid = v),
+          ]),
+        ]),
+        FormSection(title: 'وزن و گونی', children: [
+          FormGrid(gap: 12, minColWidth: 230, children: [
+            locked(numField(_total, 'وزن کل (ناخالص) به کیلو', required: true, gap: g, onChanged: () => setState(() {}))),
+            locked(numField(_smallSack, 'تعداد گونی کوچک (۱۰۰ گرم)', hint: '0', gap: g, onChanged: () => setState(() {}))),
+            locked(numField(_largeSack, 'تعداد گونی بزرگ (۲۰۰ گرم)', hint: '0', gap: g, onChanged: () => setState(() {}))),
+            if (_weighOn) ...[
+              FormSpan(
+                child: Padding(
+                  padding: EdgeInsets.only(bottom: g),
+                  child: Text('توزین — تارا یعنی وزن گونی یا ظرف خالی که از وزن کل کم می‌شود',
+                      style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.primary)),
+                ),
               ),
-            ),
-            sectionTitle(context, 'سایر'),
-            PartyField(controller: _seller, label: 'فروشنده (اختیاری)'),
-            textField(_note, 'توضیحات (اختیاری)', lines: 2),
-            numField(_laborCost, 'هزینه کارگر (ریال) — اختیاری', thousands: true, hint: 'اگر وارد شود از سود این پسته کم می‌شود'),
+              locked(numField(_tareManual, 'تارا (کیلو) — خالی = از تعداد گونی', hint: faNum(_sackTare), gap: g, onChanged: () => setState(() {}))),
+              locked(Row(children: [
+                Expanded(child: numField(_deduct, _deductPct ? 'کسر کیفیت (درصد)' : 'کسر کیفیت (کیلو)', gap: g, onChanged: () => setState(() {}))),
+                const SizedBox(width: 8),
+                Padding(
+                  padding: EdgeInsets.only(bottom: g),
+                  child: DropdownButton<bool>(
+                    value: _deductPct,
+                    items: const <DropdownMenuItem<bool>>[
+                      DropdownMenuItem<bool>(value: false, child: Text('کیلو')),
+                      DropdownMenuItem<bool>(value: true, child: Text('درصد')),
+                    ],
+                    onChanged: (bool? v) => setState(() => _deductPct = v ?? false),
+                  ),
+                ),
+              ])),
+              locked(textField(_ticket, 'شمارهٔ قبض باسکول', gap: g)),
+              locked(textField(_plate, 'پلاک', gap: g)),
+              locked(textField(_driver, 'راننده', gap: g)),
+            ],
+          ]),
+        ]),
+        FormSection(title: 'قیمت و پرداخت', children: [
+          if (_fx && !_isEdit)
+            locked(FxDocFields(c: _fxc, priceLabel: 'فی خرید ارزی (هر کیلو)', onChanged: () => setState(() {}))),
+          FormGrid(gap: 12, children: [
+            if (!_fxc.active && !_useGrades)
+              locked(MoneyField(controller: _price, label: 'فی خرید (به ازای هر کیلو)', required: true, gap: g, onChanged: () => setState(() {}))),
+            MoneyField(controller: _laborCost, label: 'هزینه کارگر — اختیاری', hint: 'اگر وارد شود از سود این پسته کم می‌شود', gap: g),
+            MoneyField(controller: _transportCost, label: 'هزینه حمل‌ونقل / باسکول — اختیاری', hint: 'اگر وارد شود از سود این پسته کم می‌شود', gap: g),
             if (_finOn) ...[
-              sectionTitle(context, 'بلوک مالی'),
-              numField(_finDisc, 'تخفیف (ریال) — اختیاری', thousands: true),
-              numField(_finWb, 'هزینهٔ باسکول (ریال) — اختیاری', thousands: true),
-              DropdownButtonFormField<String>(
-                value: _finPayer,
-                decoration: const InputDecoration(labelText: 'هزینه‌های جانبی بر عهدهٔ'),
-                items: const <DropdownMenuItem<String>>[
-                  DropdownMenuItem<String>(value: 'us', child: Text('ما')),
-                  DropdownMenuItem<String>(value: 'party', child: Text('طرف حساب')),
-                ],
-                onChanged: (String? v) => setState(() => _finPayer = v ?? 'us'),
+              MoneyField(controller: _finDisc, label: 'تخفیف — اختیاری', gap: g),
+              MoneyField(controller: _finWb, label: 'هزینهٔ باسکول — اختیاری', gap: g),
+              Padding(
+                padding: EdgeInsets.only(bottom: g),
+                child: DropdownButtonFormField<String>(
+                  value: _finPayer,
+                  decoration: const InputDecoration(labelText: 'هزینه‌های جانبی بر عهدهٔ'),
+                  items: const <DropdownMenuItem<String>>[
+                    DropdownMenuItem<String>(value: 'us', child: Text('ما')),
+                    DropdownMenuItem<String>(value: 'party', child: Text('طرف حساب')),
+                  ],
+                  onChanged: (String? v) => setState(() => _finPayer = v ?? 'us'),
+                ),
               ),
             ],
-            if (_finOn && widget.existing != null) FinBlockCard(docType: 'purchase', docId: (widget.existing!['id'] as num?)?.toInt()), // S35.T35.6f
-            numField(_transportCost, 'هزینه حمل‌ونقل / باسکول (ریال) — اختیاری', thousands: true, hint: 'اگر وارد شود از سود این پسته کم می‌شود'),
-            TaxChoiceField(status: _taxStatus, rate: _taxRate, onChanged: (String? v) => setState(() => _taxStatus = v)),
-            const SizedBox(height: 8),
-            FilledButton.icon(
-              onPressed: _saving ? null : _save,
-              icon: _saving
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                    )
-                  : const Icon(Icons.check),
-              label: Text(_isEdit ? 'ذخیره تغییرات' : 'ثبت خرید'),
+            if (!_fx) FormSpan(span: 2, child: locked(fxLockedField('خرید به ارز'))),
+            FormSpan(child: TaxChoiceField(status: _taxStatus, rate: _taxRate, onChanged: (String? v) => setState(() => _taxStatus = v))),
+          ]),
+          if (_priceTableOn && !_fxc.active && !_useGrades)
+            locked(PriceSuggestionHint(
+                typeName: _suggestTypeName, ounceUid: _ounceUid, onAccept: (num v) => setState(() => MoneyField.setStored(_price, v)))), // S35.T35.4
+          if (_gradesOn && !_fxc.active) locked(GradeLinesEditor(c: _gc, netKg: _net, onChanged: () => setState(() {}))),
+          if (_finOn && widget.existing != null) FinBlockCard(docType: 'purchase', docId: (widget.existing!['id'] as num?)?.toInt()), // S35.T35.6f
+          locked(Card(
+            color: Theme.of(context).colorScheme.primaryContainer,
+            child: Padding(
+              padding: EdgeInsets.all(wide ? 8 : 12),
+              child: Column(children: [
+                infoRow(_weighOn ? 'تارا' : 'وزن گونی‌ها', '${faNum(_tare)} کیلو'),
+                if (_weighOn && _deductKg > 0) infoRow('کسر کیفیت', '${faNum(_deductKg)} کیلو'),
+                infoRow('وزن پسته (خالص)', '${faNum(_net)} کیلو'),
+                infoRow('ارزش کل', Fmt.money(_net * _priceVal)),
+                if (_fxc.active && _fxc.priceCcyNum != null) ...[
+                  infoRow('فی خرید ارزی (هر کیلو)', faCcy(_fxc.ccy!, _fxc.priceCcyNum!, dec: _fxc.decimals)),
+                  infoRow('ارزش کل ارزی', faCcy(_fxc.ccy!, _net * _fxc.priceCcyNum!, dec: _fxc.decimals)),
+                ],
+              ]),
             ),
-            const SizedBox(height: 24),
-          ],
-        ),
-      ),
+          )),
+        ]),
+        FormSection(title: 'توضیحات', children: [
+          FormGrid(gap: 12, children: [
+            PartyField(controller: _seller, label: 'فروشنده (اختیاری)', gap: g),
+            FormSpan(span: 2, child: textField(_note, 'توضیحات (اختیاری)', lines: wide ? 1 : 2, gap: g)),
+            FormSpan(
+              child: Padding(
+                padding: EdgeInsets.only(bottom: g),
+                child: InkWell(
+                  onTap: _photoSheet,
+                  child: Container(
+                    height: wide ? 90 : 140,
+                    decoration: BoxDecoration(border: Border.all(color: Colors.black26), borderRadius: BorderRadius.circular(8)),
+                    clipBehavior: Clip.antiAlias,
+                    child: _photo == null
+                        ? Center(
+                            child: Row(mainAxisSize: MainAxisSize.min, children: const [
+                              Icon(Icons.add_a_photo_outlined, size: 32),
+                              SizedBox(width: 8),
+                              Text('عکس نمونه (اختیاری)'),
+                            ]),
+                          )
+                        : Image.memory(photoBytes(_photo!), fit: BoxFit.cover, width: double.infinity),
+                  ),
+                ),
+              ),
+            ),
+          ]),
+        ]),
+      ],
     );
   }
 }

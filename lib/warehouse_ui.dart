@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 
 import 'db.dart';
 import 'entity_store.dart';
+import 'form_layout.dart';
 import 'license_service.dart';
 import 'sync_service.dart';
 import 'utils.dart';
@@ -30,7 +31,8 @@ class StockApiException implements Exception {
   final String message;
   /// true = no connection (the request never reached the server) → offline-capable callers may queue instead of failing.
   final bool network;
-  StockApiException(this.message, {this.network = false});
+  final int code; // کد HTTP (۰ = پاسخی نبوده)
+  StockApiException(this.message, {this.network = false, this.code = 0});
   @override
   String toString() => message;
 }
@@ -42,7 +44,7 @@ class StockApi {
   static Future<Map<String, dynamic>> call(String action, [Map<String, dynamic> payload = const <String, dynamic>{}]) async {
     final cred = await LicenseService.I.credentials();
     if (cred == null) throw StockApiException('نیاز به ورود مجدد است');
-    final body = <String, dynamic>{'phone': cred.$1, 'token': cred.$2, 'action': action, 'payload': payload};
+    final body = <String, dynamic>{'phone': cred.$1, 'token': cred.$2, 'action': action, 'payload': payload, 'unit': AppDb.I.moneyUnit}; // S10: واحد پول را مثل SyncService اعلام می‌کند
     http.Response resp;
     try {
       resp = await http
@@ -58,7 +60,10 @@ class StockApi {
       if (j is Map<String, dynamic>) data = j;
     } catch (_) {}
     if (resp.statusCode != 200) {
-      throw StockApiException((data['error'] ?? 'خطای سرور (کد ${resp.statusCode})').toString());
+      // STAGE11.3: سرور برای برخی خطاها هم کد (error) و هم پیام فارسی (message) می‌دهد (upgrade_blocked، rollback_blocked، tier_not_entitled، upgrade_required، unit_mismatch)؛ پیام فارسی اولویت دارد
+      final Object? m = data['message'];
+      final String shown = (m is String && m.trim().isNotEmpty) ? m : (data['error'] ?? 'خطای سرور (کد ${resp.statusCode})').toString();
+      throw StockApiException(shown, code: resp.statusCode);
     }
     return data;
   }
@@ -137,7 +142,7 @@ class StockLookup {
 }
 
 /// انتخاب انبار برای خرید/مخلوط. [value] = null یعنی هنوز انتخاب نشده (انبار پیش‌فرض / آخرین انتخاب).
-/// اگر هیچ انباری روی گوشی نیست (هنوز دریافت نشده) چیزی نشان داده نمی‌شود و null = پیش‌فرضِ سرور.
+/// اگر هیچ انباری روی سیستم نیست (هنوز دریافت نشده) چیزی نشان داده نمی‌شود و null = پیش‌فرضِ سرور.
 class WarehousePicker extends StatefulWidget {
   final String? value;
   final ValueChanged<String?> onChanged;
@@ -356,6 +361,7 @@ class _StockTransferScreenState extends State<StockTransferScreen> {
   String? _to;
   bool _busy = false;
   String? _err;
+  String? _pendingUid; // همان uid در تلاش دوباره بعد از قطع اتصال؛ وگرنه انتقالِ اجراشده‌ی بدون پاسخ دوبار ثبت می‌شد
 
   @override
   void initState() {
@@ -418,9 +424,10 @@ class _StockTransferScreenState extends State<StockTransferScreen> {
       return;
     }
     setState(() => _busy = true);
+    final String uid = _pendingUid ??= EntityStore.newUid();
     try {
       await StockApi.call('stock.transfer', <String, dynamic>{
-        'uid': EntityStore.newUid(),
+        'uid': uid,
         'lot_id': _lot,
         'from_warehouse_uid': _from,
         'to_warehouse_uid': _to,
@@ -429,6 +436,7 @@ class _StockTransferScreenState extends State<StockTransferScreen> {
         'large_sacks': parseNum(_large.text) ?? 0,
         'note': _note.text.trim().isEmpty ? null : _note.text.trim(),
       });
+      _pendingUid = null;
       _kg.clear();
       _small.clear();
       _large.clear();
@@ -437,6 +445,8 @@ class _StockTransferScreenState extends State<StockTransferScreen> {
       unawaited(SyncService.I.syncNow(pull: true));
       await _loadTransfers();
     } catch (e) {
+      // خطای شبکه: شاید سرور اجرا کرده باشد ⇒ uid می‌ماند؛ ردِ سرور (مثلاً موجودی کم): انتقال ثبت نشده ⇒ uid تازه
+      if (!(e is StockApiException && e.network)) _pendingUid = null;
       if (mounted) snack(context, e.toString());
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -460,65 +470,80 @@ class _StockTransferScreenState extends State<StockTransferScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('انتقال بین انبارها')),
-      body: ListView(
-        padding: const EdgeInsets.all(16),
-        children: <Widget>[
-          if (_whs.length < 2)
-            const Padding(
-              padding: EdgeInsets.only(bottom: 12),
-              child: Text('برای انتقال حداقل دو انبار لازم است؛ از منوی «انبار» یک انبار تازه بسازید.',
-                  style: TextStyle(color: Colors.black54)),
-            ),
-          Form(
-            key: _form,
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: <Widget>[
-              DropdownButtonFormField<int>(
-                value: _lot,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'قلم انبار', border: OutlineInputBorder()),
-                items: <DropdownMenuItem<int>>[
-                  for (final l in _lots)
-                    DropdownMenuItem<int>(value: l['id'] as int, child: Text(_lotTitle(l), overflow: TextOverflow.ellipsis)),
-                ],
-                onChanged: (int? v) => setState(() => _lot = v),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                value: _from,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'از انبار', border: OutlineInputBorder()),
-                items: <DropdownMenuItem<String>>[
-                  for (final w in _whs) DropdownMenuItem<String>(value: w.uid, child: Text(w.name)),
-                ],
-                onChanged: (String? v) => setState(() => _from = v),
-              ),
-              const SizedBox(height: 12),
-              DropdownButtonFormField<String>(
-                value: _to,
-                isExpanded: true,
-                decoration: const InputDecoration(labelText: 'به انبار', border: OutlineInputBorder()),
-                items: <DropdownMenuItem<String>>[
-                  for (final w in _whs) DropdownMenuItem<String>(value: w.uid, child: Text(w.name)),
-                ],
-                onChanged: (String? v) => setState(() => _to = v),
-              ),
-              const SizedBox(height: 12),
-              numField(_kg, 'وزن انتقال (کیلو)', required: true),
-              Row(children: <Widget>[
-                Expanded(child: numField(_small, 'گونی کوچک', hint: '0')),
-                const SizedBox(width: 8),
-                Expanded(child: numField(_large, 'گونی بزرگ', hint: '0')),
-              ]),
-              textField(_note, 'توضیحات (اختیاری)'),
-              FilledButton.icon(
-                onPressed: _busy ? null : _submit,
-                icon: const Icon(Icons.swap_horiz),
-                label: Text(_busy ? 'در حال ثبت…' : 'ثبت انتقال'),
-              ),
+    final bool wide = kWideForm(context);
+    final double g = kFormGap;
+    final Widget lotF = DropdownButtonFormField<int>(
+      value: _lot,
+      isExpanded: true,
+      decoration: const InputDecoration(labelText: 'قلم انبار', border: OutlineInputBorder()),
+      items: <DropdownMenuItem<int>>[
+        for (final l in _lots)
+          DropdownMenuItem<int>(value: l['id'] as int, child: Text(_lotTitle(l), overflow: TextOverflow.ellipsis)),
+      ],
+      onChanged: (int? v) => setState(() => _lot = v),
+    );
+    final Widget fromF = DropdownButtonFormField<String>(
+      value: _from,
+      isExpanded: true,
+      decoration: const InputDecoration(labelText: 'از انبار', border: OutlineInputBorder()),
+      items: <DropdownMenuItem<String>>[
+        for (final w in _whs) DropdownMenuItem<String>(value: w.uid, child: Text(w.name)),
+      ],
+      onChanged: (String? v) => setState(() => _from = v),
+    );
+    final Widget toF = DropdownButtonFormField<String>(
+      value: _to,
+      isExpanded: true,
+      decoration: const InputDecoration(labelText: 'به انبار', border: OutlineInputBorder()),
+      items: <DropdownMenuItem<String>>[
+        for (final w in _whs) DropdownMenuItem<String>(value: w.uid, child: Text(w.name)),
+      ],
+      onChanged: (String? v) => setState(() => _to = v),
+    );
+    final Widget submitBtn = FilledButton.icon(
+      onPressed: _busy ? null : _submit,
+      icon: const Icon(Icons.swap_horiz),
+      label: Text(_busy ? 'در حال ثبت…' : 'ثبت انتقال'),
+    );
+    final Widget formBody = wide
+        ? Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: <Widget>[
+            FormGrid(gap: 12, minColWidth: 260, children: <Widget>[
+              FormSpan(span: 2, child: Padding(padding: EdgeInsets.only(bottom: g), child: lotF)),
+              Padding(padding: EdgeInsets.only(bottom: g), child: fromF),
+              Padding(padding: EdgeInsets.only(bottom: g), child: toF),
+              numField(_kg, 'وزن انتقال (کیلو)', required: true, gap: g),
+              numField(_small, 'گونی کوچک', hint: '0', gap: g),
+              numField(_large, 'گونی بزرگ', hint: '0', gap: g),
+              FormSpan(span: 2, child: textField(_note, 'توضیحات (اختیاری)', gap: g)),
             ]),
+            Align(alignment: AlignmentDirectional.centerStart, child: submitBtn),
+          ])
+        : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: <Widget>[
+            lotF,
+            const SizedBox(height: 12),
+            fromF,
+            const SizedBox(height: 12),
+            toF,
+            const SizedBox(height: 12),
+            numField(_kg, 'وزن انتقال (کیلو)', required: true),
+            Row(children: <Widget>[
+              Expanded(child: numField(_small, 'گونی کوچک', hint: '0')),
+              const SizedBox(width: 8),
+              Expanded(child: numField(_large, 'گونی بزرگ', hint: '0')),
+            ]),
+            textField(_note, 'توضیحات (اختیاری)'),
+            submitBtn,
+          ]);
+    final Widget list = ListView(
+      padding: const EdgeInsets.all(16),
+      children: <Widget>[
+        if (_whs.length < 2)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: Text('برای انتقال حداقل دو انبار لازم است؛ از منوی «انبار» یک انبار تازه بسازید.',
+                style: TextStyle(color: Colors.black54)),
           ),
+        Form(key: _form, child: formBody),
           const SizedBox(height: 20),
           sectionTitle(context, 'انتقال‌های اخیر'),
           if (_err != null) Text(_err!, style: const TextStyle(color: Colors.redAccent)),
@@ -536,8 +561,11 @@ class _StockTransferScreenState extends State<StockTransferScreen> {
                 ),
               ),
             ),
-        ],
-      ),
+      ],
+    );
+    return Scaffold(
+      appBar: AppBar(title: const Text('انتقال بین انبارها')),
+      body: wide ? Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 1180), child: list)) : list,
     );
   }
 }

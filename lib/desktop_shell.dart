@@ -133,7 +133,7 @@ ThemeData buildDeskTheme() {
     colorScheme: cs,
     fontFamily: 'Vazirmatn', // در پروژهٔ ویندوز در pubspec معرفی می‌شود؛ اگر نبود فونت سیستم
     scaffoldBackgroundColor: _kPageBg,
-    visualDensity: const VisualDensity(horizontal: -1, vertical: -1),
+    visualDensity: VisualDensity.compact, // S6: فشرده (فقط ویندوز؛ این تم فقط روی ویندوز اعمال می‌شود)
     splashFactory: InkRipple.splashFactory,
     appBarTheme: const AppBarTheme(
       backgroundColor: Colors.white,
@@ -163,7 +163,7 @@ ThemeData buildDeskTheme() {
       filled: true,
       fillColor: Colors.white,
       isDense: true,
-      contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       border: border,
       enabledBorder: border,
       focusedBorder: OutlineInputBorder(
@@ -264,7 +264,7 @@ class DeskShell extends StatelessWidget {
     _TabDef(Icons.home_outlined, Icons.home, 'خانه'),
     _TabDef(Icons.shopping_cart_outlined, Icons.shopping_cart, 'خرید'),
     _TabDef(Icons.sell_outlined, Icons.sell, 'فروش'),
-    _TabDef(Icons.warehouse_outlined, Icons.warehouse, 'موجودی'),
+    _TabDef(Icons.warehouse_outlined, Icons.warehouse, 'انبار'),
   ];
 
   void _back() {

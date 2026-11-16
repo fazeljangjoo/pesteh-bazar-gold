@@ -34,6 +34,8 @@ class _TierUpgradeBuyCardState extends State<TierUpgradeBuyCard> {
     _load();
   }
 
+  String _unitLabel = 'تومان'; // STAGE10: از pay.info.price_unit
+
   Future<void> _load() async {
     setState(() {
       _loading = true;
@@ -46,6 +48,7 @@ class _TierUpgradeBuyCardState extends State<TierUpgradeBuyCard> {
       _offer = t is Map ? Map<String, dynamic>.from(t) : null;
       final Object? m = item['methods'];
       _gateway = m is Map && m['gateway'] == true;
+      _unitLabel = item['price_unit'] == 'rial' ? 'ریال' : 'تومان'; // STAGE10
     } on PayException catch (e) {
       _error = e.message;
     } catch (e) {
@@ -116,7 +119,7 @@ class _TierUpgradeBuyCardState extends State<TierUpgradeBuyCard> {
     } else {
       final int amount = _amount();
       final String days = faNum((_offer!['remaining_days'] as num?) ?? 0, dec: 0);
-      body.add(Text('هزینهٔ ارتقا برای $days روز باقی‌ماندهٔ اشتراک: ${faNum(amount, dec: 0)} تومان. پس از پرداخت، ارتقا را از همین صفحه اجرا می‌کنید؛ تاریخ انقضای اشتراک تغییر نمی‌کند.'));
+      body.add(Text('هزینهٔ ارتقا برای $days روز باقی‌ماندهٔ اشتراک: ${faNum(amount, dec: 0)} $_unitLabel. پس از پرداخت، ارتقا را از همین صفحه اجرا می‌کنید؛ تاریخ انقضای اشتراک تغییر نمی‌کند.'));
       body.add(const SizedBox(height: 8));
       if (_gateway) {
         body.add(FilledButton.icon(

@@ -1,7 +1,11 @@
 import 'broker_ui.dart';
 import 'package:flutter/material.dart';
+import 'fmt.dart' show Fmt;
 
 import 'db.dart';
+import 'correction_ui.dart' show showCorrectionDialog;
+import 'doc_drafts.dart' show DraftsScreen;
+import 'form_settings.dart' show FormSettingsLocal;
 import 'grade_lines_ui.dart' show GradeCostRows;
 import 'vouchers_links.dart';
 import 'live_query.dart';
@@ -9,6 +13,8 @@ import 'invoice_service.dart';
 import 'license_service.dart';
 import 'payment_screen.dart';
 import 'pdf_output.dart';
+import 'weigh_docs_pdf.dart';
+import 'weigh_print_menu.dart' show weighPrintMenu;
 import 'pdf_service.dart';
 import 'purchase_form.dart';
 import 'returns_ui.dart';
@@ -16,6 +22,7 @@ import 'perms.dart';
 import 'notify_service.dart';
 import 'barcode_utils.dart';
 import 'utils.dart';
+import 'form_layout.dart' show CompactInfo;
 import 'widgets.dart';
 
 class PurchasesScreen extends StatefulWidget {
@@ -39,7 +46,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
       ['تاریخ', jalaliDate(p['date'] as String)],
       if (p['seller'] != null) ['فروشنده', p['seller']],
       if (p['ounce'] != null) ['انس', faNum(p['ounce'] as num)],
-      ['فی خرید', '${faNum(p['price'] as num, dec: 0)} ریال'],
+      ['فی خرید', '${Fmt.money(p['price'] as num)}'],
       if (LicenseService.I.isFx.value && p['usd_rate'] != null) ['قیمت دلار روز خرید', '${faNum(p['usd_rate'] as num, dec: 0)} ریال'],
       if (LicenseService.I.isFx.value && p['price_usd'] != null) ['فی خرید به دلار (هر کیلو)', faUsd(p['price_usd'] as num, dec: 4)],
       ['وزن کل (ناخالص)', '${faNum(p['total_weight'] as num)} کیلو'],
@@ -49,8 +56,8 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
       ['مانده در انبار (خالص)', '${faNum(p['remaining'] as num)} کیلو'],
       ['گونی کوچک مانده', faNum((p['small_sacks_remaining'] as num?) ?? 0)],
       ['گونی بزرگ مانده', faNum((p['large_sacks_remaining'] as num?) ?? 0)],
-      if (p['labor_cost'] != null) ['هزینه کارگر', '${faNum(p['labor_cost'] as num, dec: 0)} ریال'],
-      if (p['transport_cost'] != null) ['هزینه حمل‌ونقل / باسکول', '${faNum(p['transport_cost'] as num, dec: 0)} ریال'],
+      if (p['labor_cost'] != null) ['هزینه کارگر', '${Fmt.money(p['labor_cost'] as num)}'],
+      if (p['transport_cost'] != null) ['هزینه حمل‌ونقل / باسکول', '${Fmt.money(p['transport_cost'] as num)}'],
       if (((p['in_mix_codes'] as List?) ?? const []).isNotEmpty)
         ['داخل مخلوط/جداسازی (هنوز فروش نرفته)', ((p['in_mix_codes'] as List).cast<String>()).join('، ')],
       if (preset == 'dombest' && p['gram'] != null) ['گرم', faNum(p['gram'] as num)],
@@ -91,7 +98,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                   },
                 ),
               const SizedBox(height: 8),
-              for (final r in rows) infoRow(r[0], r[1]),
+              CompactInfo(children: [for (final r in rows) infoRow(r[0], r[1])]),
               GradeCostRows(docType: 'purchase', docId: p['id'] as int), // S35.T35.3c
               LocalDocVoucherLinks(mapKind: 'pur', localId: p['id'] as int, sourceType: 'purchase'),
               const SizedBox(height: 12),
@@ -126,6 +133,20 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                 icon: const Icon(Icons.picture_as_pdf_outlined),
                 label: const Text('دریافت کارتکس A6'),
               ),
+              const SizedBox(height: 8),
+              // S35.T35.13c: رسید باسکول و بارنامه (قالب A4/A5/رول)
+              Wrap(spacing: 8, children: [
+                weighPrintMenu(context, 'رسید باسکول', (WeighPaper w) async {
+                  final f = await WeighDocs.buildSlip(p, paper: w);
+                  if (context.mounted) await PdfOutput.show(context, f);
+                }),
+                weighPrintMenu(context, 'بارنامه', (WeighPaper w) async {
+                  final f = await WeighDocs.buildWaybill(p, paper: w, items: <Map<String, dynamic>>[
+                    <String, dynamic>{'type_name': p['type_name'], 'code': p['code'], 'weight': p['net_weight'], 'sacks': '${p['small_sack_count'] ?? 0} / ${p['large_sack_count'] ?? 0}'},
+                  ]);
+                  if (context.mounted) await PdfOutput.show(context, f);
+                }),
+              ]),
               const SizedBox(height: 8),
               OutlinedButton.icon(
                 onPressed: () => InvoiceService.forPurchase(context, p),
@@ -176,10 +197,15 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
       child: ListTile(
         onTap: () => _details(context, p),
         leading: CircleAvatar(child: Icon(hasPhoto ? Icons.photo_camera_outlined : Icons.grass)),
-        title: Text('${p['category_name']} - ${p['type_name']}'),
+        title: Text.rich(TextSpan(children: [
+          TextSpan(
+              text: 'فروشنده: ${(p['seller'] ?? '').toString().trim().isEmpty ? '—' : p['seller'].toString().trim()}',
+              style: const TextStyle(fontWeight: FontWeight.bold)),
+          TextSpan(text: '  •  ${p['category_name']} - ${p['type_name']}'),
+        ])),
         subtitle: Text(
             'کد ${p['code'] ?? '-'}  •  ${jalaliDate(p['date'] as String)}  •  ${faNum(p['net_weight'] as num)} کیلو (خالص)\n'
-            '${sold ? 'فروخته‌شده' : 'مانده ${faNum(p['remaining'] as num)} کیلو (خالص)'}  •  فی ${faNum(p['price'] as num, dec: 0)} ریال'
+            '${sold ? 'فروخته‌شده' : 'مانده ${faNum(p['remaining'] as num)} کیلو (خالص)'}  •  فی ${Fmt.money(p['price'] as num)}'
             '${LicenseService.I.isFx.value && p['price_usd'] != null ? ' (${faUsd(p['price_usd'] as num, dec: 3)})' : ''}'
             '${_inMixLine(p)}'),
         isThreeLine: true,
@@ -187,7 +213,11 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
           onSelected: (v) async {
             if (v == 'edit') {
               Navigator.push(context, MaterialPageRoute(builder: (_) => PurchaseForm(existing: p)));
-            } else if (v == 'del' && await confirm(context, 'این خرید حذف شود؟')) {
+            } else if (v == 'corr') {
+              await showCorrectionDialog(context, docType: 'purchase', id: p['id'] as int, price: p['price'] as num, netWeight: p['net_weight'] as num); // S35.T35.9c
+            } else if (v == 'del') {
+              final String? delReason = await askDeleteReason(context, 'این خرید حذف شود؟'); // S35.T35.9a
+              if (delReason == null) return;
               final pay = await AppDb.I.paymentOf(p['id'] as int);
               var creditIds = <int>[], chequeIds = <int>[];
               if (pay != null) {
@@ -195,7 +225,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                 creditIds = (await AppDb.I.creditInstList(payId)).map((r) => r['id'] as int).toList();
                 chequeIds = (await AppDb.I.chequeInstList(payId)).map((r) => r['id'] as int).toList();
               }
-              final ok = await AppDb.I.deletePurchase(p['id'] as int);
+              final ok = await AppDb.I.deletePurchase(p['id'] as int, reason: delReason);
               if (ok) {
                 for (final id in creditIds) {
                   await NotifyService.I.cancelCreditRow(id);
@@ -210,6 +240,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
           },
           itemBuilder: (_) => const [
             PopupMenuItem(value: 'edit', child: Text('ویرایش')),
+            PopupMenuItem(value: 'corr', child: Text('سند اصلاحی (فی/وزن)')),
             PopupMenuItem(value: 'del', child: Text('حذف')),
           ],
         ),
@@ -233,6 +264,18 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
       child: Scaffold(
         appBar: AppBar(
           title: const Text('خرید'),
+          actions: <Widget>[
+            FutureBuilder<bool>(
+              future: FormSettingsLocal.isOn('draft'), // S35.T35.9b
+              builder: (BuildContext c, AsyncSnapshot<bool> s) => s.data == true
+                  ? IconButton(
+                      tooltip: 'پیش‌نویس‌ها',
+                      icon: const Icon(Icons.edit_note),
+                      onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const DraftsScreen(docType: 'purchase'))),
+                    )
+                  : const SizedBox.shrink(),
+            ),
+          ],
           bottom: const TabBar(tabs: [
             Tab(text: 'خریدهای موجود'),
             Tab(text: 'خریدهای فروخته‌شده'),
@@ -293,3 +336,4 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
     );
   }
 }
+

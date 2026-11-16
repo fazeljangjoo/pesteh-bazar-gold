@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'db.dart';
+import 'fmt.dart' show Fmt, MoneyField;
 import 'utils.dart';
 
 Widget numField(
@@ -12,9 +13,10 @@ Widget numField(
   bool thousands = false,
   String? hint,
   VoidCallback? onChanged,
+  double gap = 12,
 }) {
   return Padding(
-    padding: const EdgeInsets.only(bottom: 12),
+    padding: EdgeInsets.only(bottom: gap),
     child: TextFormField(
       controller: c,
       keyboardType: const TextInputType.numberWithOptions(decimal: true),
@@ -38,9 +40,9 @@ Widget numField(
 }
 
 Widget textField(TextEditingController c, String label,
-    {int lines = 1, bool required = false}) {
+    {int lines = 1, bool required = false, double gap = 12}) {
   return Padding(
-    padding: const EdgeInsets.only(bottom: 12),
+    padding: EdgeInsets.only(bottom: gap),
     child: TextFormField(
       controller: c,
       maxLines: lines,
@@ -73,6 +75,45 @@ Widget infoRow(String k, String v, {Color? valueColor}) => Padding(
 
 void snack(BuildContext c, String m) =>
     ScaffoldMessenger.of(c).showSnackBar(SnackBar(content: Text(m)));
+
+/// S35.T35.9a: دلیل حذف اجباری (۵ تا ۳۰۰ نویسه). null = انصراف.
+Future<String?> askDeleteReason(BuildContext context, String msg) async {
+  final TextEditingController c = TextEditingController();
+  String? err;
+  final String? r = await showDialog<String>(
+    context: context,
+    builder: (BuildContext ctx) => StatefulBuilder(
+      builder: (BuildContext ctx, void Function(void Function()) setS) => AlertDialog(
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+          Text(msg),
+          const SizedBox(height: 12),
+          TextField(
+            controller: c,
+            maxLength: 300,
+            maxLines: 2,
+            decoration: InputDecoration(labelText: 'دلیل حذف (حداقل ۵ نویسه)', errorText: err, border: const OutlineInputBorder()),
+          ),
+        ]),
+        actions: <Widget>[
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('انصراف')),
+          FilledButton(
+            onPressed: () {
+              final String t = c.text.trim();
+              if (t.length < 5) {
+                setS(() => err = 'دلیل باید حداقل ۵ نویسه باشد');
+                return;
+              }
+              Navigator.pop(ctx, t);
+            },
+            child: const Text('حذف'),
+          ),
+        ],
+      ),
+    ),
+  );
+  c.dispose();
+  return r;
+}
 
 Future<bool> confirm(BuildContext context, String msg) async {
   final r = await showDialog<bool>(
@@ -297,6 +338,34 @@ Widget dateField(BuildContext context, String label, DateTime? value, ValueChang
   );
 }
 
+/// فیلد تاریخ شمسی فشرده (بدون فاصلهٔ اضافهٔ پایین)؛ مقدار داخلی DateTime میلادی است و فقط نمایش شمسی است.
+/// برای ارسال به API از `ReturnsHelp.iso(value)` استفاده کنید.
+class JalaliDateField extends StatelessWidget {
+  const JalaliDateField({super.key, required this.label, required this.value, required this.onChanged});
+
+  final String label;
+  final DateTime value;
+  final ValueChanged<DateTime> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: () async {
+        final DateTime? d = await pickDate(context, initial: value);
+        if (d != null) onChanged(d);
+      },
+      child: InputDecorator(
+        decoration: InputDecoration(
+          labelText: label,
+          border: const OutlineInputBorder(),
+          suffixIcon: const Icon(Icons.calendar_month_outlined, size: 20),
+        ),
+        child: Text(jalaliDateFromDt(value)),
+      ),
+    );
+  }
+}
+
 /// هشدار غیرمسدودکننده: اگر جمع همهٔ تراکنش‌های ثبت‌شده (به‌علاوهٔ مبلغ در حال ثبت) از مبلغ کل بیشتر شود نمایش داده می‌شود
 class OverpayWarning extends StatelessWidget {
   final TextEditingController controller;
@@ -316,7 +385,7 @@ class OverpayWarning extends StatelessWidget {
     return ValueListenableBuilder<TextEditingValue>(
       valueListenable: controller,
       builder: (_, __, ___) {
-        final sum = others + (parseNum(controller.text) ?? 0);
+        final sum = others + (MoneyField.stored(controller) ?? 0);
         if (total <= 0 || sum <= total + 0.5) return const SizedBox.shrink();
         return Container(
           margin: const EdgeInsets.only(bottom: 8),
@@ -328,7 +397,7 @@ class OverpayWarning extends StatelessWidget {
           ),
           child: Text(
             'هشدار: با این مبلغ، جمع همهٔ تراکنش‌های ثبت‌شده '
-            '${faNum(sum - total, dec: 0)} ریال بیشتر از مبلغ کل شده است؛ '
+            '${Fmt.money(sum - total)} بیشتر از مبلغ کل شده است؛ '
             'شما دارید بیشتر از مبلغ کل ${receipt ? 'دریافت' : 'پرداخت'} می‌کنید. ثبت آن همچنان ممکن است.',
             style: TextStyle(color: Colors.orange.shade900, fontSize: 12.5),
           ),

@@ -25,9 +25,12 @@ class PayInvoice {
     _bold = pw.Font.ttf(b);
   }
 
+  // STAGE10: واحد از فاکتور سرور (price_unit)؛ پیش‌فرض تومان برای سرور قدیمی
+  static String _unit = 'تومان';
+
   static String _money(dynamic v) {
     final n = v is num ? v.round() : 0;
-    return n < 0 ? '−${faNum(-n, dec: 0)} تومان' : '${faNum(n, dec: 0)} تومان';
+    return n < 0 ? '−${faNum(-n, dec: 0)} $_unit' : '${faNum(n, dec: 0)} $_unit';
   }
 
   static String _str(dynamic v) => v == null ? '' : '$v';
@@ -55,6 +58,7 @@ class PayInvoice {
 
   /// فایل PDF را در پوشهٔ موقت می‌سازد و مسیرش را برمی‌گرداند
   static Future<File> build(Map<String, dynamic> inv) async {
+    _unit = inv['price_unit'] == 'rial' ? 'ریال' : 'تومان';
     await _loadFonts();
     final doc = pw.Document(theme: pw.ThemeData.withFont(base: _reg, bold: _bold));
 

@@ -1,16 +1,17 @@
 import 'broker_ui.dart' show BrokerProfitCard;
-import 'returns_ui.dart' show ReturnsProfitCard;
 import 'package:flutter/material.dart';
 
 import 'charts.dart';
 import 'db.dart';
 import 'fx_profit.dart' show FxProfitBlock, FxRateBook;
 import 'live_query.dart';
+import 'offline_docs.dart';
 import 'license_service.dart';
 import 'perms.dart';
 import 'profit_lock.dart';
 import 'pdf_output.dart';
 import 'pdf_service.dart';
+import 'fmt.dart' show Fmt;
 import 'utils.dart';
 import 'widgets.dart';
 
@@ -29,6 +30,21 @@ class _ReportsScreenState extends State<ReportsScreen> {
   FxRateBook? _book; // نرخ‌های ثبت‌شدهٔ ارزها (فقط پلن ارزی)
   bool _lockChecked = false; // قفل صفحهٔ سود و زیان
   bool _unlocked = false;
+  List<Map<String, dynamic>> _rets = <Map<String, dynamic>>[]; // ردیف‌های برگشت از فروش (برای کسر از سود)
+  bool _retsFailed = false; // بارگذاری برگشت‌ها خطا داده؛ گزارش بدون کسر برگشت است ⇒ هشدار نشان بده
+
+  /// برگشت‌های فروش (آینهٔ محلی، آفلاین هم کار می‌کند). خطا ⇒ لیست خالی (گزارش فروش همچنان نشان داده می‌شود)
+  Future<List<Map<String, dynamic>>> _loadSales() async {
+    try {
+      final r = await OfflineDocs.call('sale_returns.profit_lines', <String, dynamic>{});
+      _rets = ((r['items'] as List?) ?? const <dynamic>[]).map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      _retsFailed = false;
+    } catch (_) {
+      _rets = <Map<String, dynamic>>[];
+      _retsFailed = true;
+    }
+    return AppDb.I.sales();
+  }
 
   @override
   void initState() {
@@ -93,7 +109,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
             r['kind'] as String,
             '${r['code'] ?? '-'}',
             jalaliDate(r['date'] as String),
-            faNum(r['amount'] as num, dec: 0),
+            Fmt.money(r['amount'] as num, label: false),
             '${r['name'] ?? '-'}',
           ],
       ];
@@ -119,8 +135,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
     final gains = useUsd ? usdData!.gains : gainsT;
     final losses = useUsd ? usdData!.losses : lossesT;
     final byType = useUsd ? usdData!.byType : byTypeT;
-    String fmtFull(double v) => useUsd ? '${faCompactCcy(v)} $cc' : '${faCompact(v)} ریال';
-    String fmtShort(double v) => useUsd ? faCompactCcy(v) : faCompact(v);
+    String fmtFull(double v) => useUsd ? '${faCompactCcy(v)} $cc' : '${faCompactMoney(v)} ${Fmt.unitLabel()}';
+    String fmtShort(double v) => useUsd ? faCompactCcy(v) : faCompactMoney(v);
     final groups = <BarGroup>[
       for (var i = 0; i < buckets.length; i++)
         BarGroup(buckets[i].label, buckets[i].fullLabel, [gains[i], losses[i]]),
@@ -225,7 +241,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
           : !_unlocked
               ? ProfitLockPad(onUnlocked: () => setState(() => _unlocked = true))
               : LiveQuery<List<Map<String, dynamic>>>(
-        load: AppDb.I.sales,
+        load: _loadSales,
         builder: (context, s) {
             if (!s.hasData) return const Center(child: CircularProgressIndicator());
             final scheme = Theme.of(context).colorScheme;
@@ -243,14 +259,23 @@ class _ReportsScreenState extends State<ReportsScreen> {
               }
               return true;
             }).toList();
+            // برگشت از فروش: به تاریخ «برگشت» حساب می‌شود (فیلتر بازه و کد پسته مثل فروش‌ها)
+            final retList = _rets.where((x) {
+              final dt = DateTime.parse('${x['date']}');
+              if (range.$1 != null && dt.isBefore(range.$1!)) return false;
+              if (range.$2 != null && !dt.isBefore(range.$2!.add(const Duration(days: 1)))) return false;
+              if (q.isNotEmpty && !'${x['code'] ?? ''}'.toLowerCase().contains(q)) return false;
+              return true;
+            }).toList();
 
             // ---- داده‌ی نمودار: سود و زیانِ هر روز (بازه تا ۳۱ روز) یا هر ماه شمسی، جدا از هم ----
             DateTime? cFrom = range.$1;
             DateTime? cTo = range.$2;
-            if (list.isNotEmpty) {
+            if (list.isNotEmpty || retList.isNotEmpty) {
               DateTime dtOf(Map<String, dynamic> x) => DateTime.parse(x['date'] as String);
-              cFrom ??= list.map(dtOf).reduce((a, b) => a.isBefore(b) ? a : b);
-              cTo ??= list.map(dtOf).reduce((a, b) => a.isAfter(b) ? a : b);
+              final allDates = <DateTime>[...list.map(dtOf), ...retList.map(dtOf)];
+              cFrom ??= allDates.reduce((a, b) => a.isBefore(b) ? a : b);
+              cTo ??= allDates.reduce((a, b) => a.isAfter(b) ? a : b);
             }
             final buckets = (cFrom != null && cTo != null) ? buildBuckets(cFrom, cTo) : <TimeBucket>[];
             final bucketTypes = List<Map<String, double>>.generate(buckets.length, (_) => <String, double>{});
@@ -274,7 +299,8 @@ class _ReportsScreenState extends State<ReportsScreen> {
                 final baseT = (it['base_type'] as String?)?.trim() ?? '';
                 final key = '${it['category_name']} - ${baseT.isNotEmpty ? baseT : it['type_name']}';
                 final w = (it['weight'] as num).toDouble();
-                final rev = w * (sale['price'] as num).toDouble();
+                // فی هر قلم (چند‌قلمی با فی‌های متفاوت): درآمد قلم = وزن × فی خودِ قلم؛ فی میانگینِ فروش تقسیم درآمد بین نوع‌ها را کج می‌کرد
+                final rev = w * ((it['item_price'] as num?) ?? (sale['price'] as num)).toDouble();
                 final extraCost = w * purchaseExtraPerKg(it as Map<String, dynamic>) + saleExtraShare(sale, it);
                 final cost = w * (it['cost_price'] as num).toDouble() + extraCost;
                 byType[key] = (byType[key] ?? 0) + (rev - cost);
@@ -326,11 +352,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
                       ),
                       Text(comp),
                       const SizedBox(height: 8),
-                      infoRow('مبلغ فروش', '${faNum(revenue, dec: 0)} ریال'),
-                      infoRow('بهای خرید و هزینه‌ها', '${faNum(cost, dec: 0)} ریال'),
+                      infoRow('مبلغ فروش', '${Fmt.money(revenue)}'),
+                      infoRow('بهای خرید و هزینه‌ها', '${Fmt.money(cost)}'),
                       if (saleExtraCosts(sale) > 0)
-                        infoRow('هزینه‌های ثبت‌شده در فروش (کارگر / حمل‌ونقل)', '${faNum(saleExtraCosts(sale), dec: 0)} ریال'),
-                      infoRow('سود / زیان', '${faNum(profit, dec: 0)} ریال'),
+                        infoRow('هزینه‌های ثبت‌شده در فروش (کارگر / حمل‌ونقل)', '${Fmt.money(saleExtraCosts(sale))}'),
+                      infoRow('سود / زیان', '${Fmt.money(profit)}'),
                       if (fx && usd != null) ...[
                         infoRow('مبلغ فروش (دلار)', faUsd(usd.revenue)),
                         infoRow('بهای خرید و هزینه‌ها (دلار)', faUsd(usd.cost)),
@@ -345,6 +371,71 @@ class _ReportsScreenState extends State<ReportsScreen> {
               ));
             }
 
+            // ---- کسر برگشت از فروش: فروش و بهای کالای برگشتی (بها + هزینهٔ جانبیِ خرید) از جمع کل، نوع پسته و نمودار کم می‌شود ----
+            final grossRevenue = totalRevenue, grossCost = totalCost;
+            double retRev = 0, retCost = 0, retUsdRev = 0, retUsdCost = 0;
+            var retUsdMissing = 0;
+            final retRows = <Widget>[];
+            for (final x in retList) {
+              final kg = (x['kg'] as num).toDouble();
+              final rev = kg * (x['unit_price'] as num).toDouble();
+              final extraKg = (x['extra_per_kg'] as num?)?.toDouble() ?? 0;
+              final cost = kg * ((x['cost_price'] as num).toDouble() + extraKg);
+              retRev += rev;
+              retCost += cost;
+              final baseT = '${x['base_type'] ?? ''}'.trim();
+              final key = '${x['category_name']} - ${baseT.isNotEmpty ? baseT : x['type_name']}';
+              byType[key] = (byType[key] ?? 0) - (rev - cost);
+              final rdt = DateTime.parse('${x['date']}');
+              final ubi = buckets.indexWhere((b) => b.contains(rdt));
+              if (ubi >= 0) bucketTypes[ubi][key] = (bucketTypes[ubi][key] ?? 0) - (rev - cost);
+              // نمودار دلاریِ «جدول نرخ»: برگشت دقیقاً با همان نرخ‌های فروش اصلی (روز فروش) معکوس می‌شود تا سود دلاری فروش را خنثی کند
+              if (fxChart && _chartCcy != null) {
+                final sdIso = '${x['sale_date'] ?? x['date']}';
+                final rS = _book!.rateOf(_chartCcy!, sdIso);
+                // S36: نرخ روز خرید قلم (purchase_date)؛ برای لات امانی یا وقتی نیست ⇒ روز فروش — همان مبنای فروش‌ها در همین صفحه
+                final pdStr = '${x['purchase_date'] ?? ''}'.trim();
+                final rB = pdStr.isNotEmpty ? _book!.rateOf(_chartCcy!, pdStr) : rS;
+                if (rS != null && rB != null) {
+                  final pu = rev / rS - kg * ((x['cost_price'] as num).toDouble() + extraKg) / rB;
+                  byTypeUsd[key] = (byTypeUsd[key] ?? 0) - pu;
+                  if (ubi >= 0) bucketTypesUsd[ubi][key] = (bucketTypesUsd[ubi][key] ?? 0) - pu;
+                }
+              }
+              if (fx) {
+                final rate = (x['usd_rate'] as num?)?.toDouble();
+                final cu = (x['cost_price_usd'] as num?)?.toDouble();
+                if (rate != null && rate > 0 && cu != null) {
+                  final uRev = rev / rate;
+                  final uCost = kg * cu + kg * extraKg / rate;
+                  retUsdRev += uRev;
+                  retUsdCost += uCost;
+                } else {
+                  retUsdMissing++;
+                }
+              }
+              retRows.add(Card(
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('↩ برگشت از فروش  •  ${jalaliDate('${x['date']}')}', style: Theme.of(context).textTheme.titleSmall),
+                      Text('${x['type_name'] ?? ''}${x['code'] != null ? ' (کد ${x['code']})' : ''} ${faNum(kg)}'),
+                      const SizedBox(height: 8),
+                      infoRow('فروش برگشتی (کسر از فروش)', Fmt.money(rev)),
+                      infoRow('بهای کالای برگشتی (کسر از بها)', Fmt.money(cost)),
+                      infoRow('سود برگشتی (کسر از سود)', Fmt.money(rev - cost)),
+                    ],
+                  ),
+                ),
+              ));
+            }
+            totalRevenue -= retRev;
+            totalCost -= retCost;
+            usdRevenue -= retUsdRev;
+            usdCost -= retUsdCost;
+            usdMissing += retUsdMissing;
             final totalProfit = totalRevenue - totalCost;
             final bucketGain = <double>[];
             final bucketLoss = <double>[]; // منفی
@@ -398,13 +489,17 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   child: Padding(
                     padding: const EdgeInsets.all(12),
                     child: Column(children: [
-                      infoRow('مجموع فروش', '${faNum(totalRevenue, dec: 0)} ریال'),
-                      infoRow('مجموع بهای خرید و هزینه‌ها', '${faNum(totalCost, dec: 0)} ریال'),
+                      infoRow('مجموع فروش', '${Fmt.money(grossRevenue)}'),
+                      if (retList.isNotEmpty)
+                        infoRow('برگشت از فروش (کسر از فروش)', '${Fmt.money(retRev)}', valueColor: kLossColor),
+                      infoRow('مجموع بهای خرید و هزینه‌ها', '${Fmt.money(grossCost)}'),
+                      if (retList.isNotEmpty)
+                        infoRow('بهای کالای برگشتی (کسر از بها)', '${Fmt.money(retCost)}', valueColor: kGainColor),
                       if (totalGain > 0)
-                        infoRow('مجموع سود اجناس سودده', '${faNum(totalGain, dec: 0)} ریال', valueColor: kGainColor),
+                        infoRow('مجموع سود اجناس سودده', '${Fmt.money(totalGain)}', valueColor: kGainColor),
                       if (totalLoss < 0)
-                        infoRow('مجموع زیان اجناس زیان‌ده', '${faNum(-totalLoss, dec: 0)} ریال', valueColor: kLossColor),
-                      infoRow(totalProfit >= 0 ? 'خالص سود' : 'خالص زیان', '${faNum(totalProfit.abs(), dec: 0)} ریال',
+                        infoRow('مجموع زیان اجناس زیان‌ده', '${Fmt.money(-totalLoss)}', valueColor: kLossColor),
+                      infoRow(totalProfit >= 0 ? 'خالص سود' : 'خالص زیان', '${Fmt.money(totalProfit.abs())}',
                           valueColor: totalProfit >= 0 ? kGainColor : kLossColor),
                       if (fx) ...[
                         const Divider(),
@@ -413,15 +508,26 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         infoRow('مجموع سود / زیان دلاری', faUsd(usdRevenue - usdCost),
                             valueColor: (usdRevenue - usdCost) >= 0 ? Colors.green.shade800 : scheme.error),
                         if (usdMissing > 0)
-                          Text('${faNum(usdMissing, dec: 0)} فروش به‌دلیل نبودنِ قیمت دلار یا فی دلاریِ خرید در جمع دلاری نیامده است',
+                          Text('${Fmt.money(usdMissing, label: false)} فروش به‌دلیل نبودنِ قیمت دلار یا فی دلاریِ خرید در جمع دلاری نیامده است',
                               style: const TextStyle(fontSize: 12, color: Colors.black54)),
-                        FxProfitBlock(sales: list), // S30.T30.5: سود هر ارز از جدول نرخ ثبت‌شده
+                        FxProfitBlock(sales: list, returns: retList), // S30.T30.5: سود هر ارز از جدول نرخ ثبت‌شده (برگشت‌ها با نرخ تاریخ فروش اصلی کسر می‌شوند)
                       ],
                     ]),
                   ),
                 ),
                 const SizedBox(height: 12),
-                ReturnsProfitCard(range: _effectiveRange(), profit: totalProfit), // S04.T04.4
+                if (_retsFailed)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Text('⚠ برگشت از فروش بارگذاری نشد؛ اعداد این گزارش بدون کسر برگشت‌ها هستند.',
+                        style: TextStyle(fontSize: 12, color: scheme.error)),
+                  ),
+                if (retList.isNotEmpty)
+                  const Padding(
+                    padding: EdgeInsets.only(bottom: 4),
+                    child: Text('برگشت‌ها بر اساس تاریخ برگشت حساب می‌شوند؛ هزینهٔ کارگر و حمل ثبت‌شده روی خودِ فروش اصلی تغییر نمی‌کند.',
+                        style: TextStyle(fontSize: 11, color: Colors.black54)),
+                  ),
                 BrokerProfitCard(range: _effectiveRange(), profit: totalProfit), // S05.T05.2
                 _chartCard(context, buckets, bucketGain, bucketLoss, byType,
                     usdData: fxChart ? (gains: bucketGainUsd, losses: bucketLossUsd, byType: byTypeUsd) : null),
@@ -434,7 +540,7 @@ class _ReportsScreenState extends State<ReportsScreen> {
                         sectionTitle(context, 'سود به تفکیک نوع پسته (بازهٔ انتخاب‌شده)'),
                         for (final e in (byType.entries.toList()
                           ..sort((a, b) => b.value.compareTo(a.value))))
-                          infoRow(e.key, '${faNum(e.value, dec: 0)} ریال',
+                          infoRow(e.key, '${Fmt.money(e.value)}',
                               valueColor: e.value >= 0 ? Colors.green.shade800 : scheme.error),
                       ]),
                     ),
@@ -492,6 +598,11 @@ class _ReportsScreenState extends State<ReportsScreen> {
                   ),
                 ),
                 const SizedBox(height: 8),
+                if (retRows.isNotEmpty) ...[
+                  sectionTitle(context, 'برگشت از فروش در این بازه'),
+                  ...retRows,
+                  const SizedBox(height: 8),
+                ],
                 ...rows,
               ],
             );

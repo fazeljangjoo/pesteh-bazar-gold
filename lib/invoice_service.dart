@@ -8,6 +8,7 @@ import 'license_service.dart';
 import 'pdf_output.dart';
 import 'pdf_service.dart';
 import 'warehouse_ui.dart' show StockApi; // S35.T35.6e: online fin.block
+import 'fmt.dart' show Fmt;
 import 'utils.dart';
 import 'widgets.dart';
 
@@ -183,7 +184,7 @@ class InvoiceService {
       final Map<String, dynamic> b = await StockApi.call('fin.block', <String, dynamic>{'doc_type': docType, 'id': id.toInt()});
       final Map<String, dynamic> side = (b['side_costs'] as Map?)?.cast<String, dynamic>() ?? <String, dynamic>{};
       final double mult = ((b['unit_mult'] as num?) ?? 1).toDouble(); // Q1: ریال = ذخیره × ضریب واحد (سرور)
-      String m(Object? v) => faNum((((v as num?) ?? 0) * mult), dec: 0);
+      String m(Object? v) => Fmt.money((((v as num?) ?? 0) * mult), from: 'rial'); // value is rial (server mult) -> shown in the display unit WITH label
       num n(Object? v) => (v as num?) ?? 0;
       return <List<String>>[
         <String>['ارزش کالا', m(b['goods'])],
@@ -213,7 +214,7 @@ class InvoiceService {
       for (final Map<String, dynamic> l in lines)
         <String>[
           'درجه ${lab['${l['grade_key']}'] ?? l['grade_key']}',
-          '${faNum((l['kg'] as num).toDouble())} کیلو × ${faNum((l['unit_price'] as num).toDouble(), dec: 0)} = ${faNum((l['kg'] as num).toDouble() * (l['unit_price'] as num).toDouble(), dec: 0)}',
+          '${faNum((l['kg'] as num).toDouble())} کیلو × ${Fmt.money(l['unit_price'] as num, label: false)} = ${Fmt.money((l['kg'] as num).toDouble() * (l['unit_price'] as num).toDouble())}',
         ],
     ];
   }

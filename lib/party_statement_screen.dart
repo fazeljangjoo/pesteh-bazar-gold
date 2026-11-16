@@ -1,10 +1,12 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'fmt.dart' show Fmt;
 
 import 'pdf_output.dart';
 import 'pdf_service.dart';
 import 'utils.dart';
+import 'widgets.dart' show pickDate;
 import 'warehouse_ui.dart';
 
 /// T03.2 — صورت‌حساب طرف‌حساب و سن بدهی/مطالبات. آنلاین از طریق StockApi
@@ -17,7 +19,7 @@ String _iso(DateTime d) =>
 
 String _balText(double v) {
   if (v.abs() < 0.5) return 'تسویه';
-  return '${faNum(v.abs(), dec: 0)} ${v > 0 ? 'بدهکار' : 'بستانکار'}';
+  return '${Fmt.money(v.abs(), label: false)} ${v > 0 ? 'بدهکار' : 'بستانکار'}';
 }
 
 class PartyStatementScreen extends StatefulWidget {
@@ -104,9 +106,9 @@ class _PartyStatementScreenState extends State<PartyStatementScreen> {
 
   Future<void> _pick(bool isFrom) async {
     final DateTime now = DateTime.now();
-    final DateTime? d = await showDatePicker(
-      context: context,
-      initialDate: (isFrom ? _from : _to) ?? now,
+    final DateTime? d = await pickDate(
+      context,
+      initial: (isFrom ? _from : _to) ?? now,
       firstDate: DateTime(now.year - 15),
       lastDate: DateTime(now.year + 5),
     );
@@ -144,8 +146,8 @@ class _PartyStatementScreenState extends State<PartyStatementScreen> {
         rows.add(<String>[
           jalaliDate('${r['date']}'),
           '${r['label'] ?? ''}${r['ref'] != null ? ' (${r['ref']})' : ''}',
-          d > 0 ? faNum(d, dec: 0) : '',
-          c > 0 ? faNum(c, dec: 0) : '',
+          d > 0 ? Fmt.money(d, label: false) : '',
+          c > 0 ? Fmt.money(c, label: false) : '',
           _balText(_num(r['balance'])),
         ]);
       }
@@ -155,8 +157,8 @@ class _PartyStatementScreenState extends State<PartyStatementScreen> {
         summary: <(String, String)>[
           ('مانده افتتاحیه ثبت‌شده', _balText(_num(_data['opening']))),
           ('مانده ابتدای بازه', _balText(_num(_data['brought_forward']))),
-          ('جمع بدهکار', faNum(_num(_data['total_debit']), dec: 0)),
-          ('جمع بستانکار', faNum(_num(_data['total_credit']), dec: 0)),
+          ('جمع بدهکار', Fmt.money(_num(_data['total_debit']), label: false)),
+          ('جمع بستانکار', Fmt.money(_num(_data['total_credit']), label: false)),
           ('مانده پایان بازه', _balText(_num(_data['closing']))),
         ],
         rows: rows,
@@ -234,8 +236,8 @@ class _PartyStatementScreenState extends State<PartyStatementScreen> {
                         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
                           Text('مانده افتتاحیه ثبت‌شده: ${_balText(_num(_data['opening']))}'),
                           Text('مانده ابتدای بازه: ${_balText(_num(_data['brought_forward']))}'),
-                          Text('جمع بدهکار: ${faNum(_num(_data['total_debit']), dec: 0)}'),
-                          Text('جمع بستانکار: ${faNum(_num(_data['total_credit']), dec: 0)}'),
+                          Text('جمع بدهکار: ${Fmt.money(_num(_data['total_debit']), label: false)}'),
+                          Text('جمع بستانکار: ${Fmt.money(_num(_data['total_credit']), label: false)}'),
                           const Divider(),
                           Text('مانده پایان بازه: ${_balText(_num(_data['closing']))}',
                               style: const TextStyle(fontWeight: FontWeight.w700)),
@@ -254,9 +256,9 @@ class _PartyStatementScreenState extends State<PartyStatementScreen> {
                             crossAxisAlignment: CrossAxisAlignment.end,
                             children: <Widget>[
                               if (_num(r['debit']) > 0)
-                                Text('+${faNum(_num(r['debit']), dec: 0)}', style: TextStyle(color: Colors.green.shade800)),
+                                Text('+${Fmt.money(_num(r['debit']), label: false)}', style: TextStyle(color: Colors.green.shade800)),
                               if (_num(r['credit']) > 0)
-                                Text('−${faNum(_num(r['credit']), dec: 0)}', style: TextStyle(color: Colors.red.shade800)),
+                                Text('−${Fmt.money(_num(r['credit']), label: false)}', style: TextStyle(color: Colors.red.shade800)),
                                   if ((r['ccy'] ?? '').toString().isNotEmpty)
                                 Text('${faNum(_num(r['ccy_amount']), dec: 2)} ${r['ccy']}', style: const TextStyle(fontSize: 11)),
                               Text(_balText(_num(r['balance'])), style: const TextStyle(fontSize: 11)),
@@ -324,11 +326,11 @@ class _PartyAgingScreenState extends State<PartyAgingScreen> {
       final TextStyle st = TextStyle(fontWeight: bold ? FontWeight.w700 : FontWeight.w400);
       return DataRow(cells: <DataCell>[
         DataCell(Text(name, style: st)),
-        DataCell(Text(faNum(_num(r['b0_30']), dec: 0), style: st)),
-        DataCell(Text(faNum(_num(r['b31_60']), dec: 0), style: st)),
-        DataCell(Text(faNum(_num(r['b61_90']), dec: 0), style: st)),
-        DataCell(Text(faNum(_num(r['b90p']), dec: 0), style: st)),
-        DataCell(Text(faNum(_num(r['total']), dec: 0), style: st)),
+        DataCell(Text(Fmt.money(_num(r['b0_30']), label: false), style: st)),
+        DataCell(Text(Fmt.money(_num(r['b31_60']), label: false), style: st)),
+        DataCell(Text(Fmt.money(_num(r['b61_90']), label: false), style: st)),
+        DataCell(Text(Fmt.money(_num(r['b90p']), label: false), style: st)),
+        DataCell(Text(Fmt.money(_num(r['total']), label: false), style: st)),
       ]);
     }
 

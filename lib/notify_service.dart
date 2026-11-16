@@ -20,7 +20,7 @@ class NotifyService {
   NotifyService._();
   static final NotifyService I = NotifyService._();
 
-  // lazy: روی ویندوز اصلاً ساخته نمی‌شود (اعلان سیستمی فقط روی گوشی است؛ در ویندوز DueAlertHost هشدار می‌دهد)
+  // lazy: روی ویندوز اصلاً ساخته نمی‌شود (اعلان سیستمی فقط روی سیستم است؛ در ویندوز DueAlertHost هشدار می‌دهد)
   late final FlutterLocalNotificationsPlugin _plugin = FlutterLocalNotificationsPlugin();
   bool _ready = false;
 

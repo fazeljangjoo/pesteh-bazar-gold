@@ -11,6 +11,7 @@ import 'print_service.dart';
 import 'pdf_service.dart';
 import 'perms.dart';
 import 'scan_entry.dart';
+import 'fmt.dart' show Fmt;
 import 'utils.dart';
 import 'widgets.dart';
 
@@ -23,6 +24,20 @@ const String _kShiftKey = 'pos_shift';
 
 double _r3p(double v) => (v * 1000).round() / 1000;
 double _r2p(double v) => (v * 100).round() / 100;
+// STAGE11.3: مبالغ داخل POS «واحد ذخیره» هستند؛ ورودی/خروجیِ فیلدهای متنی باید با «واحد نمایش» (تنظیم فرم‌ها) تبدیل شود.
+// وقتی دو واحد برابرند (پیش‌فرض) هر دو تابع identity‌اند و رفتار قبلی دقیقاً حفظ می‌شود. (sale_form از MoneyField همین تبدیل را می‌کند.)
+double _toDisp(double v) {
+  final String su = Fmt.storedUnit, du = Fmt.displayUnit;
+  if (su == du) return v;
+  return su == 'rial' ? v / 10 : v * 10;
+}
+
+double _fromDisp(double v) {
+  final String su = Fmt.storedUnit, du = Fmt.displayUnit;
+  if (su == du) return v;
+  return su == 'rial' ? v * 10 : v / 10;
+}
+
 String _n(String s) => toEnDigits(s.replaceAll('ي', 'ی').replaceAll('ك', 'ک')).trim().toLowerCase();
 
 class _Line {
@@ -418,8 +433,8 @@ class _PosScreenState extends State<PosScreen> {
           <String>[
             '${(raw as Map)['name']} (${raw['code']})',
             faNum(raw['qty'] as num),
-            faNum(raw['price'] as num),
-            faNum(raw['total'] as num),
+            Fmt.money(raw['price'] as num, label: false),
+            Fmt.money(raw['total'] as num, label: false),
           ]
       ];
       final String buyer = (r['buyer'] as String?) ?? '';
@@ -433,10 +448,10 @@ class _PosScreenState extends State<PosScreen> {
         columns: const <String>['شرح', 'وزن (کیلو)', 'فی', 'مبلغ'],
         rows: rows,
         totals: <List<String>>[
-          <String>['جمع کل', faNum(r['total'] as num)],
-          <String>['نقد', faNum(r['cash'] as num)],
-          <String>['کارت', faNum(r['card'] as num)],
-          <String>['نسیه', faNum(r['credit'] as num)],
+          <String>['جمع کل', Fmt.money(r['total'] as num)],
+          <String>['نقد', Fmt.money(r['cash'] as num)],
+          <String>['کارت', Fmt.money(r['card'] as num)],
+          <String>['نسیه', Fmt.money(r['credit'] as num)],
         ],
         qrData: 'POS-${DateTime.parse(r['ts'] as String).millisecondsSinceEpoch}',
       );
@@ -457,12 +472,12 @@ class _PosScreenState extends State<PosScreen> {
       credit += (m['credit'] as num).toDouble();
       total += (m['total'] as num).toDouble();
     }
-    final TextEditingController fl = TextEditingController(text: plain((_shift['float'] as num?) ?? 0));
+    final TextEditingController fl = TextEditingController(text: plain(_toDisp(((_shift['float'] as num?) ?? 0).toDouble())));
     final String? act = await showDialog<String>(
       context: context,
       builder: (BuildContext c) => StatefulBuilder(
         builder: (BuildContext c2, StateSetter ss) {
-          final double fv = parseNum(fl.text) ?? 0;
+          final double fv = _fromDisp(parseNum(fl.text) ?? 0);
           return AlertDialog(
             title: const Text('خلاصهٔ شیفت'),
             content: SingleChildScrollView(
@@ -473,19 +488,19 @@ class _PosScreenState extends State<PosScreen> {
                   Text('شروع: ${jalaliDate(_shift['start'] as String)}'),
                   Text('تعداد فروش: ${faNum(sales.length)}'),
                   const Divider(),
-                  Text('جمع فروش: ${faNum(total)}'),
-                  Text('نقد: ${faNum(cash)}'),
-                  Text('کارت: ${faNum(card)}'),
-                  Text('نسیه: ${faNum(credit)}'),
+                  Text('جمع فروش: ${Fmt.money(total)}'),
+                  Text('نقد: ${Fmt.money(cash)}'),
+                  Text('کارت: ${Fmt.money(card)}'),
+                  Text('نسیه: ${Fmt.money(credit)}'),
                   const Divider(),
                   TextField(
                     controller: fl,
                     keyboardType: TextInputType.number,
-                    decoration: const InputDecoration(labelText: 'موجودی اولیهٔ کشو'),
+                    decoration: InputDecoration(labelText: 'موجودی اولیهٔ کشو', suffixText: Fmt.unitLabel()),
                     onChanged: (_) => ss(() {}),
                   ),
                   const SizedBox(height: 8),
-                  Text('موجودی مورد انتظار کشو: ${faNum(fv + cash)}',
+                  Text('موجودی مورد انتظار کشو: ${Fmt.money(fv + cash)}',
                       style: const TextStyle(fontWeight: FontWeight.bold)),
                 ],
               ),
@@ -499,7 +514,7 @@ class _PosScreenState extends State<PosScreen> {
         },
       ),
     );
-    final double fv = parseNum(fl.text) ?? 0;
+    final double fv = _fromDisp(parseNum(fl.text) ?? 0);
     fl.dispose();
     if (act == null || act == 'close') return;
     if (act == 'save') {
@@ -613,6 +628,7 @@ class _PosScreenState extends State<PosScreen> {
                   child: TextField(
                     controller: _usdRate,
                     keyboardType: TextInputType.number,
+                    inputFormatters: [ThousandsInputFormatter()],
                     decoration: const InputDecoration(
                         labelText: 'قیمت دلار امروز', border: OutlineInputBorder()),
                   ),
@@ -632,11 +648,11 @@ class _PosScreenState extends State<PosScreen> {
                       minVerticalPadding: 12,
                       title: Text('${l.name} (${l.code})', style: const TextStyle(fontSize: 16)),
                       subtitle: Text(
-                          '${faNum(l.qty)} کیلو × ${faNum(l.effPrice)}${l.discPct > 0 ? '  (تخفیف ${faNum(l.discPct)}٪)' : ''}'),
+                          '${faNum(l.qty)} کیلو × ${Fmt.money(l.effPrice, label: false)}${l.discPct > 0 ? '  (تخفیف ${faNum(l.discPct)}٪)' : ''}'),
                       trailing: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: <Widget>[
-                          Text(faNum(l.total), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                          Text(Fmt.money(l.total, label: false), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                           IconButton(
                               icon: const Icon(Icons.delete_outline),
                               onPressed: () => setState(() => _cart.removeAt(i))),
@@ -653,7 +669,7 @@ class _PosScreenState extends State<PosScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              Text('جمع کل: ${faNum(_total)}',
+              Text('جمع کل: ${Fmt.money(_total)}',
                   textAlign: TextAlign.center, style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               Row(
@@ -765,7 +781,7 @@ class _QtyDialogState extends State<_QtyDialog> {
   void initState() {
     super.initState();
     _qty = widget.qty == null ? '' : plain(widget.qty!);
-    _price = TextEditingController(text: widget.price == null ? '' : plain(widget.price!));
+    _price = TextEditingController(text: widget.price == null ? '' : plain(_toDisp(widget.price!)));
     _disc = TextEditingController(text: (widget.disc ?? 0) > 0 ? plain(widget.disc!) : '');
   }
 
@@ -792,7 +808,7 @@ class _QtyDialogState extends State<_QtyDialog> {
 
   void _ok() {
     final double q = _r3p(double.tryParse(_qty) ?? 0);
-    final double p = parseNum(_price.text) ?? 0;
+    final double p = _fromDisp(parseNum(_price.text) ?? 0);
     final double d = parseNum(_disc.text) ?? 0;
     if (q <= 0) return snack(context, 'وزن را وارد کنید');
     if (q > widget.avail + 1e-6) return snack(context, 'بیشتر از موجودی (${faNum(widget.avail)} کیلو) است');
@@ -848,7 +864,8 @@ class _QtyDialogState extends State<_QtyDialog> {
               TextField(
                 controller: _price,
                 keyboardType: TextInputType.number,
-                decoration: const InputDecoration(labelText: 'فی فروش (هر کیلو)', border: OutlineInputBorder()),
+                inputFormatters: [ThousandsInputFormatter()],
+                decoration: InputDecoration(labelText: 'فی فروش (هر کیلو)', suffixText: Fmt.unitLabel(), border: const OutlineInputBorder()),
               ),
               const SizedBox(height: 8),
               TextField(
@@ -877,7 +894,7 @@ class _PayDialog extends StatefulWidget {
 }
 
 class _PayDialogState extends State<_PayDialog> {
-  late final TextEditingController _cash = TextEditingController(text: plain(widget.total));
+  late final TextEditingController _cash = TextEditingController(text: plain(_toDisp(widget.total)));
   final TextEditingController _card = TextEditingController();
 
   @override
@@ -887,8 +904,8 @@ class _PayDialogState extends State<_PayDialog> {
     super.dispose();
   }
 
-  double get _cashV => parseNum(_cash.text) ?? 0;
-  double get _cardV => parseNum(_card.text) ?? 0;
+  double get _cashV => _fromDisp(parseNum(_cash.text) ?? 0);
+  double get _cardV => _fromDisp(parseNum(_card.text) ?? 0);
   double get _credit => _r2p(widget.total - _cashV - _cardV);
 
   void _ok() {
@@ -903,7 +920,7 @@ class _PayDialogState extends State<_PayDialog> {
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text('پرداخت — ${faNum(widget.total)}'),
+      title: Text('پرداخت — ${Fmt.money(widget.total)}'),
       content: SizedBox(
         width: 340,
         child: Column(
@@ -913,7 +930,7 @@ class _PayDialogState extends State<_PayDialog> {
               controller: _cash,
               keyboardType: TextInputType.number,
               style: const TextStyle(fontSize: 20),
-              decoration: const InputDecoration(labelText: 'نقد', border: OutlineInputBorder()),
+              decoration: InputDecoration(labelText: 'نقد', suffixText: Fmt.unitLabel(), border: const OutlineInputBorder()),
               onChanged: (_) => setState(() {}),
             ),
             const SizedBox(height: 10),
@@ -921,11 +938,11 @@ class _PayDialogState extends State<_PayDialog> {
               controller: _card,
               keyboardType: TextInputType.number,
               style: const TextStyle(fontSize: 20),
-              decoration: const InputDecoration(labelText: 'کارت', border: OutlineInputBorder()),
+              decoration: InputDecoration(labelText: 'کارت', suffixText: Fmt.unitLabel(), border: const OutlineInputBorder()),
               onChanged: (_) => setState(() {}),
             ),
             const SizedBox(height: 12),
-            Text('نسیه (باقی‌مانده): ${faNum(_credit < 0 ? 0 : _credit)}',
+            Text('نسیه (باقی‌مانده): ${Fmt.money(_credit < 0 ? 0 : _credit)}',
                 style: TextStyle(fontSize: 18, color: _credit < -0.005 ? Colors.red : null)),
           ],
         ),

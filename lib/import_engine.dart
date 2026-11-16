@@ -93,6 +93,13 @@ const List<ImpKind> kImportKinds = <ImpKind>[
     ImpField('price', 'قیمت هر کیلو', aliases: <String>['قیمت', 'فی'], type: ImpType.decimal, required: true, example: '1000000'),
     ImpField('date', 'تاریخ', aliases: <String>['تاریخ قیمت'], required: true, max: 30, example: '1405/08/07'),
   ], <String>['type', 'grade', 'date']),
+  // S31.T31.16 — daily currency rates (FX plan only; date: Jalali 1405/08/07 or 2026-10-29; one rate per currency per day)
+  ImpKind('fx_rates', 'نرخ روزانهٔ ارز (پلن ارزی)', <ImpField>[
+    ImpField('ccy', 'کد ارز', aliases: <String>['ارز', 'واحد پول'], required: true, max: 8, example: 'USD'),
+    ImpField('date', 'تاریخ', aliases: <String>['تاریخ نرخ'], required: true, max: 30, example: '1405/08/07'),
+    ImpField('rate', 'نرخ', aliases: <String>['نرخ تبدیل', 'قیمت'], type: ImpType.decimal, required: true, example: '1000000'),
+    ImpField('source', 'منبع', aliases: <String>['مرجع'], max: 60, example: 'صرافی'),
+  ], <String>['ccy', 'date']),
   // S15.T15.2b — chart of accounts (gold only; parents first, `parent_code` for level 2/3)
   ImpKind('accounts', 'سرفصل حساب‌ها (طلایی)', <ImpField>[
     ImpField('code', 'کد حساب', aliases: <String>['کد'], required: true, max: 20, example: '1101'),

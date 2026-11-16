@@ -11,9 +11,12 @@ import 'db_crypto.dart';
 import 'package:sqflite/sqflite.dart';
 
 import 'barcode_utils.dart';
+import 'code_kind.dart' show codeLetterForCategoryName, mixGroupKeys; // T2: حرف کد مثل سرور
 import 'entity_store.dart';
 import 'money_unit.dart'; // S29.T29.3
+import 'fmt.dart' show Fmt; // S35.T35.11
 import 'fx_doc_field.dart' show kFxRialPerStoredUnit;
+import 'return_calc.dart' show settleDueRow, DueSettle; // S36: return-credit settlement (pure)
 
 
 const List<String> kPresetTypesNormal = ['اکبری', 'احمدآقایی', 'فندقی', 'کله‌قوچی'];
@@ -45,17 +48,17 @@ const List<(String, List<String>)> _kSnapshot = [
   ('payments', ['id', 'purchase_id', 'pay_type', 'staged_type']),
   (
     'lump_tx',
-    ['id', 'payment_id', 'from_account', 'payer_name', 'to_account', 'seller_name', 'amount', 'date', 'paid', 'ccy', 'ccy_amount', 'fx_rate']
+    ['id', 'payment_id', 'from_account', 'payer_name', 'to_account', 'seller_name', 'amount', 'date', 'paid', 'ccy', 'ccy_amount', 'fx_rate', 'credit_used']
   ),
   (
     'credit_inst',
-    ['id', 'payment_id', 'due_date', 'amount', 'from_account', 'payer_name', 'to_account', 'seller_name', 'paid', 'ccy', 'ccy_amount', 'fx_rate']
+    ['id', 'payment_id', 'due_date', 'amount', 'from_account', 'payer_name', 'to_account', 'seller_name', 'paid', 'ccy', 'ccy_amount', 'fx_rate', 'credit_used']
   ),
   (
     'cheque_inst',
     [
       'id', 'payment_id', 'due_date', 'amount', 'cheque_no', 'bank_name', 'from_account', 'payer_name',
-      'to_account', 'seller_name', 'paid', 'ccy', 'ccy_amount', 'fx_rate', 'sayad_id' // S35.T35.7c
+      'to_account', 'seller_name', 'paid', 'ccy', 'ccy_amount', 'fx_rate', 'sayad_id', 'credit_used' // S35.T35.7c + v71
     ]
   ),
   (
@@ -72,20 +75,20 @@ const List<(String, List<String>)> _kSnapshot = [
   ('receipts', ['id', 'sale_id', 'recv_type', 'staged_type']),
   (
     'receipt_lump_tx',
-    ['id', 'receipt_id', 'from_account', 'payer_name', 'to_account', 'receiver_name', 'amount', 'date', 'paid', 'ccy', 'ccy_amount', 'fx_rate']
+    ['id', 'receipt_id', 'from_account', 'payer_name', 'to_account', 'receiver_name', 'amount', 'date', 'paid', 'ccy', 'ccy_amount', 'fx_rate', 'credit_used']
   ),
   (
     'receipt_credit_inst',
     [
       'id', 'receipt_id', 'due_date', 'amount', 'from_account', 'payer_name', 'to_account',
-      'receiver_name', 'paid', 'ccy', 'ccy_amount', 'fx_rate'
+      'receiver_name', 'paid', 'ccy', 'ccy_amount', 'fx_rate', 'credit_used'
     ]
   ),
   (
     'receipt_cheque_inst',
     [
       'id', 'receipt_id', 'due_date', 'amount', 'cheque_no', 'bank_name', 'from_account', 'payer_name',
-      'to_account', 'receiver_name', 'paid', 'ccy', 'ccy_amount', 'fx_rate', 'sayad_id' // S35.T35.7c
+      'to_account', 'receiver_name', 'paid', 'ccy', 'ccy_amount', 'fx_rate', 'sayad_id', 'credit_used' // S35.T35.7c + v71
     ]
   ),
   // طرف‌حساب‌های تعریف‌شده‌ی دستی و دفتر قرض/وام (در سود و زیان حساب نمی‌شوند)
@@ -104,7 +107,24 @@ const List<(String, List<String>)> _kSnapshot = [
 const List<(String, List<String>)> _kDocTables = [
   ('proformas', ['id', 'uid', 'number', 'party', 'date', 'valid_until', 'status', 'reserve', 'note', 'terms', 'converted_at', 'tax_amount', 'created_at']),
   ('proforma_items', ['id', 'proforma_id', 'lot_id', 'description', 'kg', 'unit_price', 'discount', 'sale_id']),
+  // S36: شرایط تسویهٔ بار امانی (یک ردیف برای هر لات امانی؛ `id` = شناسهٔ consignment_items سرور) ⇒ مبنای هزینه در سود
+  ('cons_terms', ['id', 'lot_id', 'settlement_mode', 'commission_type', 'commission_value', 'agreed_price']),
 ];
+
+/// purchases.is_mix of a consigned-in lot (server PB_CONS_LOT_KIND)
+const int kConsLotKind = 3;
+
+/// SQL: effective COST per kg of a sold lot (mirror of server `pb_cons_cost_sql()`).
+/// [p] = alias of purchases (the lot); [unitExpr] = SQL of the sale unit price per kg of that line.
+/// Own lots: p.price. Consigned-in lot: purchase_on_sale → agreed_price; commission → unit×(1−v/100) | unit−v; no terms → p.price.
+String consCostSql(String unitExpr, {String p = 'p'}) =>
+    "(CASE WHEN $p.is_mix=$kConsLotKind THEN COALESCE((SELECT CASE ct.settlement_mode "
+    "WHEN 'purchase_on_sale' THEN ct.agreed_price "
+    "ELSE (CASE ct.commission_type WHEN 'percent' THEN ($unitExpr) * (1 - ct.commission_value / 100) ELSE ($unitExpr) - ct.commission_value END) END "
+    "FROM cons_terms ct WHERE ct.lot_id=$p.id LIMIT 1), $p.price) ELSE $p.price END)";
+
+/// SQL: purchase date of a lot; null for consigned lots (no purchase happened ⇒ no purchase-date FX rate).
+String consPurchaseDateSql({String p = 'p'}) => '(CASE WHEN $p.is_mix=$kConsLotKind THEN NULL ELSE $p.date END)';
 
 /// جدول‌هایی که اگر سرور هنوز نفرستاد (سرور قدیمی)، داده‌ی محلی‌شان پاک نمی‌شود
 const Set<String> _kOptionalTables = {
@@ -130,6 +150,7 @@ const Set<String> _kRealCols = {
   'gram', 'pct_dombest', 'pct_tuchin', 'pct_crooked', 'pct_khandan', 'weight', 'small_sacks',
   'large_sacks', 'item_price', 'amount', 'usd_rate', 'price_usd', 'fx_rate', 'ccy_amount', 'price_ccy', 'total_ccy', 'waste',
   'kg', 'unit_price', 'refund_amount', 'discount', 'tax_amount', 'gross_kg', 'tare_kg', 'quality_deduct_kg',
+  'credit_used', 'commission_value', 'agreed_price', // S36
 };
 const Set<String> _kIntCols = {
   'id', 'category_id', 'mix_purchase_id', 'source_purchase_id', 'purchase_id', 'payment_id', 'sale_id',
@@ -165,7 +186,7 @@ class AppDb {
   /// با هر تغییر داده زیاد می‌شود تا صفحه‌ها بازخوانی شوند
   final ValueNotifier<int> version = ValueNotifier<int>(0);
 
-  static const int schemaVersion = 28;
+  static const int schemaVersion = 29;
 
   String? _phone;
   Database? _db;
@@ -190,11 +211,23 @@ class AppDb {
     });
   }
 
+  /// کلید رمزگذاری + تنظیمات سرعت (کش بزرگ‌تر و جداول موقت در حافظه؛ بدون تغییر در ایمنی داده)
+  static Future<void> _configure(Database d) async {
+    await DbCrypto.configure(d);
+    try {
+      await d.execute('PRAGMA temp_store = MEMORY');
+      await d.execute('PRAGMA cache_size = -32768'); // ~32MB
+    } catch (_) {}
+  }
+
   Future<Database> _open(String phone) async {
     final path = join(await getDatabasesPath(), 'pesteh_$phone.db');
     final Database d = await openDatabase(path,
-        version: schemaVersion, onConfigure: DbCrypto.configure, onCreate: _onCreate, onUpgrade: _onUpgrade);
+        version: schemaVersion, onConfigure: _configure, onCreate: _onCreate, onUpgrade: _onUpgrade);
+    // سرعت: ایندکس‌های جدید روی دیتابیس‌های قدیمی هم ساخته می‌شود (IF NOT EXISTS؛ بار دوم تقریباً رایگان است)
+    try { await _createSpeedIndexes(d); } catch (_) {}
     moneyUnit = await MoneyUnit.localUnit(d);
+    try { await Fmt.loadFrom(d); } catch (_) {} // S35.T35.11: display unit / digits (meta table may be absent on first open)
     return d;
   }
 
@@ -359,6 +392,28 @@ class AppDb {
     if (oldV < 28) {
       await _addSayadCols(d); // S35.T35.7c: sayad id on cheque lines (local mirror)
     }
+    if (oldV < 29) {
+      await _addCreditUsedCols(d); // S36 (server v71): return credit consumed by a paid line
+      await createConsTerms(d); // S36: consignment settlement terms mirror
+    }
+  }
+
+  /// S36: شرایط تسویهٔ بار امانی (آینهٔ `docs.cons_terms` سرور). IF NOT EXISTS ⇒ اجرای دوباره بی‌خطر.
+  static Future<void> createConsTerms(DatabaseExecutor d) async {
+    await d.execute('CREATE TABLE IF NOT EXISTS cons_terms(id INTEGER PRIMARY KEY, lot_id INTEGER NOT NULL, '
+        'settlement_mode TEXT, commission_type TEXT, commission_value REAL, agreed_price REAL)');
+    await d.execute('CREATE INDEX IF NOT EXISTS ix_cons_terms_lot ON cons_terms(lot_id)');
+  }
+
+  /// S36 (server migration 71): `credit_used` REAL NULL on the six line tables (NULL = 0).
+  static Future<void> _addCreditUsedCols(DatabaseExecutor d) async {
+    for (final String t in const <String>[
+      'lump_tx', 'credit_inst', 'cheque_inst', 'receipt_lump_tx', 'receipt_credit_inst', 'receipt_cheque_inst',
+    ]) {
+      try {
+        await d.execute('ALTER TABLE $t ADD COLUMN credit_used REAL'); // fails when the column already exists
+      } catch (_) {/* column already exists */}
+    }
   }
 
   /// جدول‌های آینهٔ برگشت‌ها و پیش‌فاکتورها (IF NOT EXISTS ⇒ اجرای دوباره بی‌خطر)
@@ -375,6 +430,7 @@ class AppDb {
         'valid_until TEXT, status TEXT, reserve INTEGER, note TEXT, terms TEXT, converted_at TEXT, tax_amount REAL, created_at TEXT)');
     await d.execute('CREATE TABLE IF NOT EXISTS proforma_items(id INTEGER PRIMARY KEY, proforma_id INTEGER NOT NULL, lot_id INTEGER, '
         'description TEXT, kg REAL NOT NULL DEFAULT 0, unit_price REAL NOT NULL DEFAULT 0, discount REAL, sale_id INTEGER)');
+    await createConsTerms(d); // S36
     for (final s in const [
       'CREATE INDEX IF NOT EXISTS ix_sri_ret ON sale_return_items(return_id)',
       'CREATE INDEX IF NOT EXISTS ix_sri_sale ON sale_return_items(sale_id)',
@@ -403,6 +459,22 @@ class AppDb {
     ];
     for (final q in stmts) {
       await d.execute(q);
+    }
+  }
+
+  /// ایندکس‌های سرعت (هر باز شدن دیتابیس؛ IF NOT EXISTS ⇒ بی‌خطر). هر ایندکس جدا try/catch دارد.
+  Future<void> _createSpeedIndexes(Database d) async {
+    const stmts = [
+      // سرعت لیست/گزارش/صف ارسال (فقط ایندکس؛ بدون تغییر ستون)
+      'CREATE INDEX IF NOT EXISTS ix_pur_date ON purchases(date)',
+      'CREATE INDEX IF NOT EXISTS ix_pur_cat ON purchases(category_id)',
+      'CREATE INDEX IF NOT EXISTS ix_sale_date ON sales(date)',
+      'CREATE INDEX IF NOT EXISTS ix_ops_state ON sync_ops(state, seq)',
+    ];
+    for (final q in stmts) {
+      try {
+        await d.execute(q);
+      } catch (_) {}
     }
   }
 
@@ -691,6 +763,7 @@ class AppDb {
     await _addFinCols(d); // S35.T35.6b
     await GradeLinesLocal.createTables(d); // S35.T35.3b
     await _addTxFxCols(d); // S28.T28.2b
+    await _addCreditUsedCols(d); // S36
     await _createIndexes(d);
     // نکته: دسته‌ها و انواع پیش‌فرض را سرور می‌سازد (bootstrap) و هنگام ورود دریافت می‌شوند.
   }
@@ -934,6 +1007,15 @@ class AppDb {
     await t.delete('sync_ops', where: 'ref_kind=? AND ref_id=?', whereArgs: [refKind, refId]);
   }
 
+  /// آیا رکوردی که شناسهٔ موقت (منفی) دارد قبلاً به سرور رسیده؟ (نگاشتش ثبت شده ولی هنوز دریافت کامل انجام نشده)
+  /// شناسهٔ مثبت همیشه یعنی «روی سرور هست».
+  Future<bool> hasServerCopy(DatabaseExecutor t, String kind, int id) async {
+    if (id >= 0) return true;
+    final r = await t.query('sync_idmap',
+        columns: ['server_id'], where: 'kind=? AND local_id=?', whereArgs: [kind, id], limit: 1);
+    return r.isNotEmpty;
+  }
+
   /// شناسهٔ واقعی سرور برای یک شناسهٔ محلی (null = هنوز ارسال نشده)
   Future<int?> serverIdOf(String kind, int localId) async {
     if (localId >= 0) return localId;
@@ -943,7 +1025,7 @@ class AppDb {
   }
 
   /// اگر شناسهٔ موقتِ منفیِ این رکورد در دریافت از سرور به شناسهٔ واقعی تبدیل شده باشد، آن را برمی‌گرداند
-  /// (فقط وقتی رکوردی با همین شناسه در گوشی نیست؛ وگرنه null).
+  /// (فقط وقتی رکوردی با همین شناسه در سیستم نیست؛ وگرنه null).
   Future<int?> aliasOf(String kind, int id) async {
     if (id >= 0) return null;
     if (await localExists(kind, id)) return null;
@@ -961,10 +1043,22 @@ class AppDb {
       await t.insert('sync_idmap', {'kind': kind, 'local_id': localId, 'server_id': serverId},
           conflictAlgorithm: ConflictAlgorithm.replace);
       if (kind == 'pur') {
-        final r = await t.query('purchases', columns: ['is_mix'], where: 'id=?', whereArgs: [localId]);
+        final r = await t.query('purchases', columns: ['is_mix', 'category_id'], where: 'id=?', whereArgs: [localId]);
         if (r.isNotEmpty) {
           final isMix = ((r.first['is_mix'] as num?) ?? 0) == 1;
-          final code = '${isMix ? 'MX' : 'KH'}${serverId.toString().padLeft(5, '0')}';
+          // T2: مخلوط ⇒ M؛ خرید عادی ⇒ حرف از نام دسته (خندان→KH، دهنبست→D، غیر از این→G)؛ دستهٔ در دسترس نبود ⇒ KH.
+          // (نقشهٔ دستی lot_prefix_map فقط روی سرور است؛ با اولین همگام‌سازی کد سرور جایگزین می‌شود.)
+          var letter = 'KH';
+          if (isMix) {
+            letter = 'M';
+          } else {
+            final catId = (r.first['category_id'] as num?)?.toInt();
+            if (catId != null) {
+              final cat = await t.query('categories', columns: ['name'], where: 'id=?', whereArgs: [catId], limit: 1);
+              if (cat.isNotEmpty) letter = codeLetterForCategoryName('${cat.first['name'] ?? ''}');
+            }
+          }
+          final code = '$letter${serverId.toString().padLeft(5, '0')}';
           await t.update('purchases', {'code': code},
               where: 'id=?', whereArgs: [localId], conflictAlgorithm: ConflictAlgorithm.ignore);
         }
@@ -1068,7 +1162,7 @@ class AppDb {
   }
 
   /// همهٔ داده‌های محلی را با خروجی `backup.export` سرور جایگزین می‌کند.
-  /// (فقط وقتی صف ارسال خالی است صدا زده می‌شود.) عکس‌هایی که از قبل روی گوشی هست نگه داشته می‌شود.
+  /// (فقط وقتی صف ارسال خالی است صدا زده می‌شود.) عکس‌هایی که از قبل روی سیستم هست نگه داشته می‌شود.
   ///
   /// [discardQueue]=false: اگر همزمان عملیاتی در صف باشد (کاربر حین دریافت چیزی ثبت کرده)
   /// چیزی جایگزین نمی‌شود و false برمی‌گردد تا هیچ تغییر محلی گم نشود.
@@ -1086,8 +1180,8 @@ class AppDb {
         final n = Sqflite.firstIntValue(await t.rawQuery('SELECT COUNT(*) FROM sync_ops')) ?? 0;
         if (n > 0) return;
         // سپر ایمنی: اگر در ۱۵ دقیقهٔ اخیر پرداخت/دریافت (قسط، چک، تراکنش) به سرور فرستاده‌ایم
-        // و سرور ردیف کمتری از گوشی دارد، یعنی آن ارسال روی سرور ثبت نشده. به‌جای پاک‌کردنِ
-        // داده‌ی گوشی، وضعیت کامل پرداخت/دریافت‌ها دوباره به صف می‌رود تا دوباره ارسال شود.
+        // و سرور ردیف کمتری از سیستم دارد، یعنی آن ارسال روی سرور ثبت نشده. به‌جای پاک‌کردنِ
+        // داده‌ی سیستم، وضعیت کامل پرداخت/دریافت‌ها دوباره به صف می‌رود تا دوباره ارسال شود.
         final lp = await t.query('meta', columns: ['v'], where: 'k=?', whereArgs: ['last_tx_push'], limit: 1);
         final lastPush = lp.isEmpty ? null : DateTime.tryParse((lp.first['v'] as String?) ?? '');
         if (lastPush != null && DateTime.now().difference(lastPush) < const Duration(minutes: 15)) {
@@ -1292,7 +1386,7 @@ class AppDb {
     return r.isNotEmpty;
   }
 
-  /// حذفِ رکوردی که وسط ارسال «ساخت» آن، در گوشی حذف شده بود
+  /// حذفِ رکوردی که وسط ارسال «ساخت» آن، در سیستم حذف شده بود
   /// (action: purchases.delete | mixes.delete | sales.delete)
   Future<void> enqueueServerDelete(String action, int serverId) async {
     final d = await db;
@@ -1707,6 +1801,10 @@ class AppDb {
       cur.forEach((k, v) => merged[k] = v);
       p.forEach((k, v) => merged[k] = v);
       final v = _purchaseValues(merged);
+      // سرور در ویرایش «بدون انبار» را «بدون تغییر» می‌داند (فقط warehouse_uid رشته‌ای فرستاده می‌شود)؛ آینهٔ محلی هم همان‌طور
+      if (v.containsKey('warehouse_uid') && v['warehouse_uid'] == null && cur['warehouse_uid'] != null) {
+        v['warehouse_uid'] = cur['warehouse_uid'];
+      }
       final oldNet = (cur['net_weight'] as num).toDouble();
       final oldRem = (cur['remaining'] as num).toDouble();
       final sold = oldNet - oldRem;
@@ -1749,7 +1847,7 @@ class AppDb {
 
   /// اگر از این خرید فروشی انجام شده یا در ساخت یک مخلوط استفاده شده باشد حذف نمی‌شود؛
   /// اگر خودش نتیجه‌ی یک مخلوط باشد هم باید با deleteMix حذف شود، نه این متد
-  Future<bool> deletePurchase(int id) async {
+  Future<bool> deletePurchase(int id, {String? reason}) async {
     final d = await db;
     final used = await d.query('sale_items', where: 'purchase_id=?', whereArgs: [id], limit: 1);
     if (used.isNotEmpty) return false;
@@ -1785,10 +1883,10 @@ class AppDb {
       }
       await t.delete('doc_grade_lines', where: 'doc_type=? AND doc_id=?', whereArgs: <Object?>['purchase', id]); // S35.T35.3b
       await t.delete('purchases', where: 'id=?', whereArgs: [id]);
-      if (id < 0) {
+      if (!await hasServerCopy(t, 'pur', id)) {
         await _purgeOps(t, 'pur', id); // هرگز به سرور نرسیده بود
       } else {
-        await _enqueue(t, 'purchases.delete', {'id': id}, refKind: 'pur', refId: id);
+        await _enqueue(t, 'purchases.delete', {'id': id, if (reason != null && reason.isNotEmpty) 'reason': reason}, refKind: 'pur', refId: id);
       }
     });
     if (ok) version.value++;
@@ -1891,7 +1989,19 @@ class AppDb {
         SELECT $_pSel, c.name AS category_name, c.preset_key AS category_preset
         FROM purchases p JOIN categories c ON c.id = p.category_id
         ORDER BY c.name, p.type_name, p.id''');
-    return _withMixInfo(d, await _withSacksLeft(d, rows));
+    final withInfo = await _withMixInfo(d, await _withSacksLeft(d, rows));
+    // T3a: فیلد افزایشی mix_group (همان نام و قاعدهٔ سرور) برای رنگ/راهنمای گروه مخلوط در انبار
+    final groups = await mixGroupKeyMap();
+    return [for (final r in withInfo) {...r, 'mix_group': groups[(r['id'] as num).toInt()]}];
+  }
+
+  /// T3a: نقشهٔ «شناسهٔ لات → کلید گروه مخلوط» از جدول‌های محلی purchases و mix_sources (بدون تغییر schema).
+  /// قواعد در [mixGroupKeys] (code_kind.dart): مخلوط = کلید خودش؛ منبعِ چند مخلوط = جدیدترین مخلوط؛ بقیه null.
+  Future<Map<int, int?>> mixGroupKeyMap() async {
+    final d = await db;
+    final lots = await d.rawQuery('SELECT id, is_mix FROM purchases');
+    final links = await d.rawQuery('SELECT mix_purchase_id, source_purchase_id FROM mix_sources');
+    return mixGroupKeys(lots.cast<Map<String, dynamic>>(), links.cast<Map<String, dynamic>>());
   }
 
   /// گونی باقی‌مانده‌ی هر خرید مستقیماً از دو ستون ذخیره‌شده خوانده می‌شود
@@ -2301,7 +2411,7 @@ class AppDb {
       }
       await t.delete('mix_sources', where: 'mix_purchase_id=?', whereArgs: [mixPurchaseId]);
       await t.delete('purchases', where: 'id=?', whereArgs: [mixPurchaseId]);
-      if (mixPurchaseId < 0) {
+      if (!await hasServerCopy(t, 'pur', mixPurchaseId)) {
         await _purgeOps(t, 'pur', mixPurchaseId);
       } else {
         await _enqueue(t, 'mixes.delete', {'id': mixPurchaseId}, refKind: 'pur', refId: mixPurchaseId);
@@ -2382,7 +2492,8 @@ class AppDb {
             'gram': _rn(gram, 2),
             'waste': wasteV,
             'note': nt,
-            if (uidsGiven) 'warehouse_uid': _uidOrNull(warehouseUid),
+            // سرور در ویرایش «بدون انبار» را «بدون تغییر» می‌داند (pb_wh_apply_lot)؛ آینهٔ محلی هم همان‌طور
+            if (uidsGiven && _uidOrNull(warehouseUid) != null) 'warehouse_uid': _uidOrNull(warehouseUid),
             if (uidsGiven) 'ounce_uid': _uidOrNull(ounceUid),
           },
           where: 'id=?',
@@ -2445,6 +2556,10 @@ class AppDb {
     if (out.containsKey('bank_name')) out['bank_name'] = _s(out['bank_name'], 100);
     if (out.containsKey('sayad_id')) out['sayad_id'] = _s(out['sayad_id'], 16); // S35.T35.7c
     if (out.containsKey('paid')) out['paid'] = (out['paid'] == true || out['paid'] == 1) ? 1 : 0;
+    if (out.containsKey('credit_used')) {
+      final double cu = _n(out['credit_used']);
+      out['credit_used'] = (cu > 0.004 && cu <= 1e13 && out['paid'] != 0) ? _r(cu, 2) : null;
+    }
     return out;
   }
 
@@ -2609,11 +2724,24 @@ class AppDb {
   Future<void> _updateTx(String table, int id, Map<String, dynamic> row) async {
     final meta = _txMeta[table]!;
     await _write((d) => d.transaction((t) async {
-          final cur = await t.query(table, columns: [meta.$1], where: 'id=?', whereArgs: [id]);
+          final cur = await t.query(table,
+              columns: [meta.$1, 'amount', 'paid', 'credit_used', 'ccy_amount', 'fx_rate'], where: 'id=?', whereArgs: [id]);
           if (cur.isEmpty) {
             throw SaveNotConfirmed('این ردیف دیگر وجود ندارد (اطلاعات در این بین به‌روز شده). صفحه را ببندید و دوباره باز کنید.');
           }
-          final n = await t.update(table, _txRow(row), where: 'id=?', whereArgs: [id]);
+          final upd = _txRow(row);
+          // S36: a paid line that consumed return credit is un-paid through a form ⇒ same as setPaid(false): the reduction is restored
+          // (only when the amount was not edited); otherwise just drop credit_used so the pool never counts an unpaid line.
+          if (upd['paid'] == 0 && ((cur.first['paid'] as num?) ?? 0) == 1 && _n(cur.first['credit_used']) > 0.004) {
+            final double curAmt = _n(cur.first['amount']);
+            if (!upd.containsKey('amount') || (_n(upd['amount']) - curAmt).abs() < 0.005) {
+              final DueSettle s = _settle(cur.first, false, 0);
+              upd['amount'] = s.amount;
+              if (s.ccyAmount != null) upd['ccy_amount'] = s.ccyAmount;
+            }
+            upd['credit_used'] = null;
+          }
+          final n = await t.update(table, upd, where: 'id=?', whereArgs: [id]);
           if (n < 1) throw SaveNotConfirmed();
           await _queueByParent(t, meta.$2, (cur.first[meta.$1] as num).toInt());
         }));
@@ -2723,13 +2851,17 @@ class AppDb {
       (await db).query('receipt_cheque_inst', where: 'paid=0');
 
   // ======================= فروش =======================
+  /// cost per kg of the lot of a sale line (alias si = sale_items): consigned lots follow their settlement terms (S36)
+  static final String _salesCostSql =
+      consCostSql('COALESCE(si.item_price, (SELECT sx.price FROM sales sx WHERE sx.id=si.sale_id))');
+
   Future<List<Map<String, dynamic>>> sales() async {
     final d = await db;
     final rows = await d.query('sales', orderBy: 'ord DESC, id DESC');
     // یک کوئری برای همهٔ اقلام (قبلاً برای هر فروش یک کوئری جدا بود)
     final all = await d.rawQuery('''
         SELECT si.sale_id AS _sid, si.weight, si.item_price, si.small_sacks, si.large_sacks, si.purchase_id AS purchase_id,
-               p.code AS code, p.price AS cost_price, p.price_usd AS cost_price_usd, p.type_name AS type_name, p.base_type AS base_type, p.labor_cost AS p_labor_cost, p.transport_cost AS p_transport_cost, p.net_weight AS p_net_weight, c.name AS category_name
+               p.code AS code, $_salesCostSql AS cost_price, p.price_usd AS cost_price_usd, ${consPurchaseDateSql()} AS purchase_date, p.type_name AS type_name, p.base_type AS base_type, p.labor_cost AS p_labor_cost, p.transport_cost AS p_transport_cost, p.net_weight AS p_net_weight, c.name AS category_name
         FROM sale_items si
         JOIN purchases p ON p.id = si.purchase_id
         JOIN categories c ON c.id = p.category_id
@@ -3068,7 +3200,7 @@ class AppDb {
   }
 
   /// حذف فروش و برگرداندن وزن و گونی به انبار
-  Future<void> deleteSale(int id) async {
+  Future<void> deleteSale(int id, {String? reason}) async {
     await _write((d) => d.transaction((t) async {
       if (await _hasReturns(t, 'sale_id', id)) throw Exception('این فروش برگشت ثبت‌شده دارد؛ ابتدا برگشت‌ها را حذف کنید');
       await _restoreSaleItems(t, id);
@@ -3083,10 +3215,10 @@ class AppDb {
         await t.delete('receipt_cheque_inst', where: 'receipt_id=?', whereArgs: [rid]);
         await t.delete('receipts', where: 'id=?', whereArgs: [rid]);
       }
-      if (id < 0) {
+      if (!await hasServerCopy(t, 'sale', id)) {
         await _purgeOps(t, 'sale', id);
       } else {
-        await _enqueue(t, 'sales.delete', {'id': id}, refKind: 'sale', refId: id);
+        await _enqueue(t, 'sales.delete', {'id': id, if (reason != null && reason.isNotEmpty) 'reason': reason}, refKind: 'sale', refId: id);
       }
     }));
     version.value++;
@@ -3102,8 +3234,30 @@ class AppDb {
     'receipt_cheque_inst',
   };
 
-  /// وضعیت «پرداخت/دریافت شد» یک تراکنش (یکجا، قسط یا چک) را عوض می‌کند
-  Future<void> setPaid(String table, int id, bool paid) async {
+  /// S36: pure settlement of one line row (mirror of server `pb_dues_set_paid`); see return_calc.dart [settleDueRow].
+  DueSettle _settle(Map<String, Object?> row, bool paid, double take) => settleDueRow(
+        amount: _n(row['amount']),
+        creditUsed: _n(row['credit_used']),
+        wasPaid: ((row['paid'] as num?) ?? 0) == 1,
+        paid: paid,
+        take: take,
+        ccyAmount: row['ccy_amount'] == null ? null : _n(row['ccy_amount']),
+        fxRateInStored: (_n(row['fx_rate']) > 0) ? _n(row['fx_rate']) / kFxRialPerStoredUnit : null,
+      );
+
+  /// مبلغ ذخیره‌شدهٔ (کاهش‌نیافتهٔ نمایشی) یک ردیف پرداخت/دریافت؛ null اگر نبود.
+  Future<double?> lineAmount(String table, int id) async {
+    if (!_paidTables.contains(table)) return null;
+    final rows = await (await db).query(table, columns: ['amount'], where: 'id=?', whereArgs: [id]);
+    return rows.isEmpty ? null : _n(rows.first['amount']);
+  }
+
+  /// وضعیت «پرداخت/دریافت شد» یک تراکنش (یکجا، قسط یا چک) را عوض می‌کند.
+  ///
+  /// [shownAmount] = مبلغ نمایش‌داده‌شده (بعد از کسر اعتبار برگشت). وقتی از مبلغ ذخیره‌شده کمتر باشد و [paid] درست باشد،
+  /// کاهش «واقعی» می‌شود: `amount -= take`, `credit_used = take` (همان `pb_dues_set_paid` سرور). با [paid]=false مبلغ اصلی برمی‌گردد.
+  /// بدون [shownAmount] فقط پرچم عوض می‌شود (و بازگرداندنِ credit_used در صورت وجود).
+  Future<void> setPaid(String table, int id, bool paid, {double? shownAmount}) async {
     if (table == 'loan_dues') {
       if (paid) await payLoanDue(id);
       return;
@@ -3111,9 +3265,19 @@ class AppDb {
     if (!_paidTables.contains(table)) throw ArgumentError('جدول نامعتبر');
     final meta = _txMeta[table]!;
     await _write((d) => d.transaction((t) async {
-      final cur = await t.query(table, columns: [meta.$1], where: 'id=?', whereArgs: [id]);
+      final cur = await t.query(table,
+          columns: [meta.$1, 'amount', 'paid', 'credit_used', 'ccy_amount', 'fx_rate'], where: 'id=?', whereArgs: [id]);
       if (cur.isEmpty) throw SaveNotConfirmed('این مورد دیگر وجود ندارد؛ صفحه را ببندید و دوباره باز کنید.');
-      await t.update(table, {'paid': paid ? 1 : 0}, where: 'id=?', whereArgs: [id]);
+      final double stored = _n(cur.first['amount']);
+      final double take = (paid && shownAmount != null && shownAmount < stored) ? stored - (shownAmount < 0 ? 0 : shownAmount) : 0.0;
+      final DueSettle s = _settle(cur.first, paid, take);
+      final Map<String, Object?> vals = <String, Object?>{'paid': paid ? 1 : 0};
+      if (s.changed) {
+        vals['amount'] = s.amount;
+        vals['credit_used'] = s.creditUsed > 0.004 ? s.creditUsed : null;
+        if (s.ccyAmount != null) vals['ccy_amount'] = s.ccyAmount;
+      }
+      await t.update(table, vals, where: 'id=?', whereArgs: [id]);
       await _queueByParent(t, meta.$2, (cur.first[meta.$1] as num).toInt());
     }));
     version.value++;

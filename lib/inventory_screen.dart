@@ -2,9 +2,16 @@ import 'package:flutter/material.dart';
 
 import 'barcode_utils.dart';
 import 'charts.dart';
+import 'code_kind.dart';
 import 'consignment_ui.dart';
+import 'crack_ui.dart' show CrackListScreen; // CP7
+import 'feed_ui.dart' show FeedStockScreen;
+import 'perms.dart' show StaffPerms;
+import 'reports_ui.dart' show WorkshopReportsScreen;
 import 'db.dart';
 import 'live_query.dart';
+import 'lot_cartex_ui.dart' show LotCartexView;
+import 'lot_chain_ui.dart';
 import 'mix_form.dart';
 import 'orchard_ui.dart';
 import 'pdf_output.dart';
@@ -12,6 +19,7 @@ import 'pdf_service.dart';
 import 'processing_ui.dart';
 import 'separation_form.dart';
 import 'stock_reports_screen.dart';
+import 'fmt.dart' show Fmt;
 import 'utils.dart';
 import 'warehouse_ui.dart';
 import 'widgets.dart';
@@ -25,10 +33,29 @@ class InventoryScreen extends StatefulWidget {
   State<InventoryScreen> createState() => _InventoryScreenState();
 }
 
-class _InventoryScreenState extends State<InventoryScreen> {
+class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProviderStateMixin {
+  bool get _canCartex => StaffPerms.I.can('stock.view');
+  late final TabController _subTabs; // مرحلهٔ ۱۱: «موجودی انبار» | «کارتکس»
+
+  @override
+  void initState() {
+    super.initState();
+    _subTabs = TabController(length: 2, vsync: this);
+    _subTabs.addListener(() {
+      if (mounted) setState(() {}); // فقط برای نمایش/پنهان‌کردن دکمهٔ شناور
+    });
+  }
+
+  @override
+  void dispose() {
+    _subTabs.dispose();
+    super.dispose();
+  }
+
   String _query = '';
   bool _showSold = false; // false = موجود | true = فروش رفته (مثل وب)
   bool _showMixed = false; // false = پسته‌های خریداری‌شده | true = مخلوط/جداسازی (ساخته‌شده از انبار خودمان)
+  int? _groupFilter; // T3b: کلید گروه مخلوطِ انتخاب‌شده (null = همه)
 
   Future<void> _showMixDetails(BuildContext context, Map<String, dynamic> l) async {
     final sources = await AppDb.I.mixSourcesOf(l['id'] as int);
@@ -157,7 +184,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('موجودی انبار'),
+        title: const Text('انبار'),
         actions: <Widget>[
           IconButton(
             tooltip: 'جداسازی چندخروجی و ردیابی',
@@ -183,6 +210,33 @@ class _InventoryScreenState extends State<InventoryScreen> {
               MaterialPageRoute<void>(builder: (_) => const ProcessingScreen()),
             ),
           ),
+          if (StaffPerms.I.can('workshop.manage')) // CP7: مدیر کارگاه ⇒ ثبت/فهرست گزارش‌های خط شکست
+            IconButton(
+              tooltip: 'گزارش‌های خط شکست (ثبت جدید و فهرست)',
+              icon: const Icon(Icons.factory_outlined),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(builder: (_) => const CrackListScreen(pushed: true)),
+              ),
+            ),
+          if (StaffPerms.I.can('workshop.feed'))
+            IconButton(
+              tooltip: 'موجودی پستهٔ خرجی (کارگاه‌ها)',
+              icon: const Icon(Icons.inventory_2_outlined),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(builder: (_) => const FeedStockScreen()),
+              ),
+            ),
+          if (StaffPerms.I.can('workshop.feed'))
+            IconButton(
+              tooltip: 'گزارش‌های کارگاه (کارتکس مالک، خلاصه، مقایسه)',
+              icon: const Icon(Icons.assessment_outlined),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute<void>(builder: (_) => const WorkshopReportsScreen()),
+              ),
+            ),
           IconButton(
             tooltip: 'امانی (دریافتی و ارسالی)',
             icon: const Icon(Icons.swap_horiz),
@@ -200,14 +254,17 @@ class _InventoryScreenState extends State<InventoryScreen> {
             ),
           ),
         ],
+        // بدون مجوز stock.view زیرتب «کارتکس» نشان داده نمی‌شود (TabBar حذف؛ کنترلر ۲تایی می‌ماند، ولی تب دوم قابل‌دسترس نیست)
+        bottom: _canCartex ? TabBar(controller: _subTabs, tabs: const [Tab(text: 'موجودی انبار'), Tab(text: 'کارتکس')]) : null,
       ),
-      floatingActionButton: FloatingActionButton.extended(
+      floatingActionButton: (_canCartex && _subTabs.index != 0) ? null : FloatingActionButton.extended(
         onPressed: () =>
             Navigator.push(context, MaterialPageRoute(builder: (_) => const MixForm())),
         icon: const Icon(Icons.merge_type),
         label: const Text('مخلوط / جداسازی'),
       ),
-      body: LiveQuery<List<Map<String, dynamic>>>(
+      body: TabBarView(controller: _subTabs, physics: const NeverScrollableScrollPhysics(), children: [
+        LiveQuery<List<Map<String, dynamic>>>(
         tab: 3,
         load: AppDb.I.inventoryAll,
         builder: (context, s) {
@@ -231,7 +288,21 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 _norm('${p['code']} ${p['category_name']} ${p['type_name']}').contains(q);
             final base = _showSold ? soldOut : available;
             final other = _showSold ? available : soldOut;
-            final lots = base.where(match).toList();
+            final matched = base.where(match).toList();
+            // T3b: راهنمای گروه‌های مخلوط (از فهرست جاری، پیش از اعمال فیلتر گروه)
+            final groupKeys = <int, int?>{
+              for (final r in all)
+                if (r['id'] is num) (r['id'] as num).toInt(): (r['mix_group'] as num?)?.toInt()
+            };
+            final groups = mixGroupCounts(matched, groupKeys);
+            final int? gf = groups.any((g) => g.key == _groupFilter) ? _groupFilter : null;
+            final lots = gf == null
+                ? matched
+                : (matched.where((l) => groupKeys[(l['id'] as num).toInt()] == gf).toList()
+                  ..sort((a, b) {
+                    int rank(Map<String, dynamic> l) => (l['id'] as num).toInt() == gf ? 0 : 1; // خودِ مخلوط اول
+                    return rank(a).compareTo(rank(b));
+                  }));
 
             final totalWaste = mixedAll.fold<double>(0, (a, p) => a + ((p['waste'] as num?) ?? 0).toDouble());
             final children = <Widget>[
@@ -278,7 +349,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   padding: const EdgeInsets.all(12),
                   child: Column(children: [
                     infoRow('مجموع موجودی (خالص)', '${faNum(totalKg)} کیلو'),
-                    infoRow('ارزش خرید موجودی', '${faNum(totalValue, dec: 0)} ریال'),
+                    infoRow('ارزش خرید موجودی', Fmt.money(totalValue)),
                     infoRow('تعداد گونی کل', '${faNum(totalSmall + totalLarge)} عدد'),
                     infoRow('گونی کوچک', faNum(totalSmall)),
                     infoRow('گونی بزرگ', faNum(totalLarge)),
@@ -302,7 +373,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   child: Column(children: [
                     infoRow('تعداد خریدهای فروش‌رفته', '${faNum(soldOut.length, dec: 0)} بار'),
                     infoRow('مجموع وزن فروش‌رفته (خالص)', '${faNum(soldKg)} کیلو'),
-                    infoRow('ارزش خرید آن‌ها', '${faNum(soldValue, dec: 0)} ریال'),
+                    infoRow('ارزش خرید آن‌ها', Fmt.money(soldValue)),
                     if (_showMixed && totalWaste > 0.0005)
                       infoRow('مجموع ضایعات ثبت‌شده', '${faNum(totalWaste)} کیلو'),
                   ]),
@@ -321,6 +392,8 @@ class _InventoryScreenState extends State<InventoryScreen> {
                 onChanged: (v) => setState(() => _query = v),
               ),
             ));
+
+            if (groups.isNotEmpty) children.add(_groupGuide(context, all, groups, gf));
 
             if (lots.isEmpty) {
               final otherHits = q.isEmpty ? 0 : other.where(match).length;
@@ -371,12 +444,12 @@ class _InventoryScreenState extends State<InventoryScreen> {
                   children.add(Card(
                     child: ExpansionTile(
                       // هنگام جستجو نتیجه‌ها باز نمایش داده می‌شوند
-                      key: PageStorageKey('${_showMixed}/${_showSold}/${catEntry.key}/${e.key}/${q.isNotEmpty}'),
-                      initiallyExpanded: q.isNotEmpty,
+                      key: PageStorageKey('${_showMixed}/${_showSold}/${catEntry.key}/${e.key}/${q.isNotEmpty}/${gf ?? ''}'),
+                      initiallyExpanded: q.isNotEmpty || gf != null,
                       title: Text(e.key),
                       subtitle: Text(
                           '${faNum(_showSold ? sumNet : sumRem)} کیلو (خالص)  •  ${faNum(e.value.length, dec: 0)} بار'),
-                      children: [for (final l in e.value) _lotTile(context, l)],
+                      children: [for (final l in e.value) _coloredLotTile(context, l)],
                     ),
                   ));
                 }
@@ -386,6 +459,64 @@ class _InventoryScreenState extends State<InventoryScreen> {
             return ListView(padding: const EdgeInsets.all(12), children: children);
           },
       ),
+        if (_canCartex) const LotCartexView() else const SizedBox.shrink(),
+      ]),
+    );
+  }
+
+  /// T3b: برچسب گروه از خودِ key (اگر کد مخلوط در انبار هست همان، وگرنه #شماره).
+  String _groupLabel(List<Map<String, dynamic>> all, int key) {
+    for (final r in all) {
+      if (r['id'] is num && (r['id'] as num).toInt() == key) {
+        final c = (r['code'] as String?)?.trim() ?? '';
+        if (c.isNotEmpty) return 'مخلوط $c';
+      }
+    }
+    return 'مخلوط #${faNum(key, dec: 0)}';
+  }
+
+  /// T3b: ردیف راهنما — یک چیپ برای هر گروه؛ لمس = فیلتر، لمس دوباره = لغو.
+  Widget _groupGuide(BuildContext context, List<Map<String, dynamic>> all, List<MixGroupCount> groups, int? gf) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 4,
+        children: [
+          for (final g in groups)
+            Builder(builder: (ctx) {
+              final c = groupColor(g.key);
+              final on = gf == g.key;
+              return FilterChip(
+                selected: on,
+                showCheckmark: false,
+                avatar: CircleAvatar(radius: 6, backgroundColor: c),
+                label: Text('${_groupLabel(all, g.key)} · ${faNum(g.count, dec: 0)} لات',
+                    style: const TextStyle(fontSize: 12)),
+                selectedColor: c.withAlpha(60),
+                side: BorderSide(color: c.withAlpha(on ? 230 : 140)),
+                visualDensity: VisualDensity.compact,
+                tooltip: on ? 'لغو فیلتر گروه' : 'نمایش فقط این گروه',
+                onSelected: (_) => setState(() => _groupFilter = on ? null : g.key),
+              );
+            }),
+        ],
+      ),
+    );
+  }
+
+  /// T3b: نوار رنگی ۴px سمت راست (start در RTL) + پس‌زمینهٔ ملایم (آلفا ≈ ۱۲٪)؛ لات بدون گروه = همان کارت ساده.
+  Widget _coloredLotTile(BuildContext context, Map<String, dynamic> l) {
+    final key = (l['mix_group'] as num?)?.toInt();
+    final tile = _lotTile(context, l);
+    if (key == null) return tile;
+    final c = groupColor(key);
+    return Container(
+      decoration: BoxDecoration(
+        color: c.withAlpha(30),
+        border: BorderDirectional(start: BorderSide(color: c, width: 4)),
+      ),
+      child: tile,
     );
   }
 
@@ -400,7 +531,7 @@ class _InventoryScreenState extends State<InventoryScreen> {
     final sold = !AppDb.isAvailable(l);
     final lines = <String>[
       'کد پسته: ${l['code'] ?? '-'}',
-      'خرید ${jalaliDate(l['date'] as String)}  •  فی ${faNum(l['price'] as num, dec: 0)}',
+      'خرید ${jalaliDate(l['date'] as String)}  •  فی ${Fmt.money(l['price'] as num, label: false)}',
       if (!sold && soldW > 1e-6) 'از ${faNum(net)} کیلو (خالص) خریداری‌شده، ${faNum(soldW)} کیلو (خالص) فروخته/مصرف شده',
       if (codes.isNotEmpty)
         '🔀 ${rem <= 1e-6 ? 'کل موجودی آن' : 'بخشی از آن'} داخل مخلوط/جداسازی ${codes.join('، ')} است (هنوز کامل فروش نرفته)',
@@ -425,6 +556,20 @@ class _InventoryScreenState extends State<InventoryScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Text(lines.join('\n')),
+          if (l['mix_group'] is num)
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                decoration: BoxDecoration(
+                  color: groupColor((l['mix_group'] as num).toInt()).withAlpha(45),
+                  border: Border.all(color: groupColor((l['mix_group'] as num).toInt()).withAlpha(160)),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text('مخلوط #${faNum(l['mix_group'] as num, dec: 0)}',
+                    style: TextStyle(fontSize: 11, color: groupColor((l['mix_group'] as num).toInt()))),
+              ),
+            ),
           // S01: انبار / درجه‌بندی اونس (بارِ بدون انبار = انبار پیش‌فرض)
           FutureBuilder<String>(
             future: StockLookup.lotLabel(l),
@@ -435,6 +580,13 @@ class _InventoryScreenState extends State<InventoryScreen> {
           ),
         ],
       ),
+      trailing: (StaffPerms.I.can('stock.view') && StaffPerms.I.can('purchases.view') && (l['code'] ?? '').toString().trim().isNotEmpty && !isPendingCode(l['code'] as String?))
+          ? IconButton(
+              tooltip: 'مسیر پسته',
+              icon: const Icon(Icons.timeline),
+              onPressed: () => Navigator.push<void>(context, MaterialPageRoute<void>(builder: (_) => LotChainScreen(code: l['code'] as String))),
+            )
+          : null,
       isThreeLine: lines.length >= 3,
     );
   }

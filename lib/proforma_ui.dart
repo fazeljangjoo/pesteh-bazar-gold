@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'db.dart';
+import 'fmt.dart' show Fmt, MoneyField;
+import 'form_layout.dart';
 import 'offline_docs.dart';
 import 'pdf_output.dart';
 import 'pdf_service.dart';
@@ -77,15 +79,15 @@ class _ProformaListScreenState extends State<ProformaListScreen> {
       rows: <List<String>>[
         for (int k = 0; k < its.length; k++)
           <String>[
-            faNum(k + 1, dec: 0),
+            Fmt.money(k + 1, label: false),
             '${its[k]['description'] ?? its[k]['type_name'] ?? '-'}${its[k]['code'] != null ? ' (${its[k]['code']})' : ''}',
             faNum(ReturnsHelp.d(its[k]['kg']), dec: 3),
-            faNum(ReturnsHelp.d(its[k]['unit_price']), dec: 0),
+            Fmt.money(ReturnsHelp.d(its[k]['unit_price']), label: false),
             faNum(ReturnsHelp.d(its[k]['discount']), dec: 0),
-            faNum(ReturnsHelp.d(its[k]['amount']), dec: 0),
+            Fmt.money(ReturnsHelp.d(its[k]['amount']), label: false),
           ],
       ],
-      totals: <List<String>>[<String>['جمع کل (ریال)', faNum(ReturnsHelp.d(r['total']), dec: 0)]],
+      totals: <List<String>>[<String>['جمع کل (ریال)', Fmt.money(ReturnsHelp.d(r['total']), label: false)]],
       note: [r['note'], r['terms']].where((x) => x != null && '$x'.trim().isNotEmpty).join('\n'),
     );
     if (!mounted) return;
@@ -104,7 +106,7 @@ class _ProformaListScreenState extends State<ProformaListScreen> {
       } else if (a == 'convert') {
         if (!await confirm(context, 'این پیش‌فاکتور به فروش تبدیل شود؟ موجودی انبار کم می‌شود و بازگشت‌پذیر نیست مگر با حذف فروش.')) return;
         final Map<String, dynamic> res = await OfflineDocs.call('proformas.convert', <String, dynamic>{'id': id, 'date': ReturnsHelp.iso(DateTime.now())});
-        if (mounted) snack(context, 'فروش ثبت شد (${faNum(((res['sale_ids'] as List?) ?? <dynamic>[]).length, dec: 0)} مورد). در فروش‌ها دیده می‌شود و خودکار همگام می‌شود.');
+        if (mounted) snack(context, 'فروش ثبت شد (${Fmt.money(((res['sale_ids'] as List?) ?? <dynamic>[]).length, label: false)} مورد). در فروش‌ها دیده می‌شود و خودکار همگام می‌شود.');
       } else if (a == 'del') {
         if (!await confirm(context, 'پیش‌فاکتور حذف شود؟')) return;
         await OfflineDocs.call('proformas.delete', <String, dynamic>{'id': id});
@@ -139,7 +141,7 @@ class _ProformaListScreenState extends State<ProformaListScreen> {
                             title: Text('${r['party']} — شمارهٔ ${faNum(ReturnsHelp.d(r['number']), dec: 0)}'),
                             subtitle: Text('${jalaliDate('${r['date']}')} • ${_kStatusFa['${r['status']}'] ?? r['status']}'),
                             trailing: Row(mainAxisSize: MainAxisSize.min, children: <Widget>[
-                              Text('${faNum(ReturnsHelp.d(r['total']), dec: 0)} ریال'),
+                              Text('${Fmt.money(ReturnsHelp.d(r['total']))}'),
                               PopupMenuButton<String>(
                                 onSelected: (String v) => _action(r, v),
                                 itemBuilder: (_) {
@@ -232,8 +234,8 @@ class _ProformaFormScreenState extends State<ProformaFormScreen> {
           final _Line l = _Line();
           l.lot = (i['lot_id'] as num?)?.toInt();
           l.kg.text = faNum(ReturnsHelp.d(i['kg']), dec: 3);
-          l.price.text = faNum(ReturnsHelp.d(i['unit_price']), dec: 0);
-          l.disc.text = ReturnsHelp.d(i['discount']) > 0 ? faNum(ReturnsHelp.d(i['discount']), dec: 0) : '';
+          MoneyField.setStored(l.price, ReturnsHelp.d(i['unit_price']));
+          MoneyField.setStored(l.disc, ReturnsHelp.d(i['discount']) > 0 ? ReturnsHelp.d(i['discount']) : null);
           _lines.add(l);
         }
       } catch (e) {
@@ -256,8 +258,8 @@ class _ProformaFormScreenState extends State<ProformaFormScreen> {
       items.add(<String, dynamic>{
         'lot_id': l.lot,
         'kg': parseNum(l.kg.text) ?? 0,
-        'unit_price': parseNum(l.price.text) ?? 0,
-        'discount': parseNum(l.disc.text) ?? 0,
+        'unit_price': MoneyField.stored(l.price) ?? 0,
+        'discount': MoneyField.stored(l.disc) ?? 0,
       });
     }
     _uid ??= ReturnsHelp.newUid('pf');
@@ -289,75 +291,114 @@ class _ProformaFormScreenState extends State<ProformaFormScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.editId == null ? 'پیش‌فاکتور جدید' : 'ویرایش پیش‌فاکتور')),
-      body: Form(
-        key: _form,
-        child: ListView(padding: const EdgeInsets.all(16), children: <Widget>[
-          textField(_party, 'نام مشتری', required: true),
-          dateField(context, 'تاریخ', _date, (DateTime d) => setState(() => _date = d)),
-          dateField(context, 'اعتبار تا (اختیاری)', _valid, (DateTime d) => setState(() => _valid = d)),
-          if (_valid != null)
-            Align(alignment: Alignment.centerRight, child: TextButton(onPressed: () => setState(() => _valid = null), child: const Text('حذف مهلت اعتبار'))),
-          sectionTitle(context, 'اقلام'),
-          for (int i = 0; i < _lines.length; i++) _lineCard(i),
-          OutlinedButton.icon(
-            onPressed: () => setState(() => _lines.add(_Line())),
-            icon: const Icon(Icons.add),
-            label: const Text('افزودن قلم'),
-          ),
-          const SizedBox(height: 12),
-          SwitchListTile(
-            value: _reserve,
-            onChanged: (bool v) => setState(() => _reserve = v),
-            title: const Text('رزرو نرم موجودی'),
-            subtitle: const Text('فقط یادآوری است و فروش را مسدود نمی‌کند'),
-          ),
-          textField(_note, 'یادداشت', lines: 2),
-          textField(_terms, 'شرایط', lines: 2),
-          if (_err != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(_err!, style: const TextStyle(color: Colors.red))),
-          FilledButton.icon(
-            onPressed: _busy ? null : _save,
-            icon: _busy ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.save_outlined),
-            label: const Text('ذخیره'),
-          ),
-        ]),
+    final bool wide = kWideForm(context);
+    final double g = kFormGap;
+    final Widget head = FormSection(title: 'مشخصات پیش‌فاکتور', children: <Widget>[
+      FormGrid(gap: 12, minColWidth: 260, children: <Widget>[
+        textField(_party, 'نام مشتری', required: true, gap: g),
+        dateField(context, 'تاریخ', _date, (DateTime d) => setState(() => _date = d)),
+        dateField(context, 'اعتبار تا (اختیاری)', _valid, (DateTime d) => setState(() => _valid = d)),
+      ]),
+      if (_valid != null)
+        Align(alignment: Alignment.centerRight, child: TextButton(onPressed: () => setState(() => _valid = null), child: const Text('حذف مهلت اعتبار'))),
+    ]);
+    final Widget items = FormSection(title: 'اقلام', children: <Widget>[
+      for (int i = 0; i < _lines.length; i++) _lineCard(i),
+      OutlinedButton.icon(
+        onPressed: () => setState(() => _lines.add(_Line())),
+        icon: const Icon(Icons.add),
+        label: const Text('افزودن قلم'),
       ),
+      SizedBox(height: g),
+    ]);
+    final Widget options = FormSection(title: 'گزینه‌ها و شرایط', children: <Widget>[
+      SwitchListTile(
+        value: _reserve,
+        onChanged: (bool v) => setState(() => _reserve = v),
+        title: const Text('رزرو نرم موجودی'),
+        subtitle: const Text('فقط یادآوری است و فروش را مسدود نمی‌کند'),
+      ),
+      textField(_note, 'یادداشت', lines: 2, gap: g),
+      textField(_terms, 'شرایط', lines: 2, gap: g),
+    ]);
+    return FormPage(
+      title: widget.editId == null ? 'پیش‌فاکتور جدید' : 'ویرایش پیش‌فاکتور',
+      formKey: _form,
+      actions: <Widget>[
+        FilledButton.icon(
+          onPressed: _busy ? null : _save,
+          icon: _busy ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.save_outlined),
+          label: const Text('ذخیره'),
+        ),
+      ],
+      children: <Widget>[
+        head,
+        if (wide)
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+            Expanded(flex: 3, child: items),
+            const SizedBox(width: 8),
+            Expanded(flex: 2, child: options),
+          ])
+        else ...<Widget>[
+          items,
+          const SizedBox(height: 12),
+          options,
+        ],
+        if (_err != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(_err!, style: const TextStyle(color: Colors.red))),
+      ],
     );
   }
 
   Widget _lineCard(int i) {
     final _Line l = _lines[i];
+    final bool wide = kWideForm(context);
+    final Widget lot = DropdownButtonFormField<int>(
+      value: _lots.any((Map<String, dynamic> x) => x['id'] == l.lot) ? l.lot : null,
+      isExpanded: true,
+      decoration: const InputDecoration(labelText: 'جنس انبار', border: OutlineInputBorder()),
+      items: <DropdownMenuItem<int>>[
+        for (final Map<String, dynamic> x in _lots)
+          DropdownMenuItem<int>(
+            value: x['id'] as int,
+            child: Text('${x['code'] ?? '-'} ${x['type_name'] ?? ''} (${faNum(ReturnsHelp.d(x['remaining']), dec: 1)} کیلو)', overflow: TextOverflow.ellipsis),
+          ),
+      ],
+      onChanged: (int? v) => setState(() => l.lot = v),
+    );
+    final Widget del = TextButton.icon(
+      onPressed: () => setState(() => _lines.removeAt(i).dispose()),
+      icon: const Icon(Icons.delete_outline),
+      label: const Text('حذف قلم'),
+    );
+    if (wide) {
+      return Card(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(10, 10, 10, 2),
+          child: Column(children: <Widget>[
+            lot,
+            SizedBox(height: kFormGap),
+            Row(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+              Expanded(child: numField(l.kg, 'وزن', required: true, suffix: 'کیلو', gap: kFormGap)),
+              const SizedBox(width: 8),
+              Expanded(child: MoneyField(controller: l.price, label: 'فی', required: true, gap: kFormGap)),
+              const SizedBox(width: 8),
+              Expanded(child: MoneyField(controller: l.disc, label: 'تخفیف این قلم (مبلغ)', gap: kFormGap)),
+            ]),
+            if (_lines.length > 1) Align(alignment: Alignment.centerLeft, child: del),
+          ]),
+        ),
+      );
+    }
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(10),
         child: Column(children: <Widget>[
-          DropdownButtonFormField<int>(
-            value: _lots.any((Map<String, dynamic> x) => x['id'] == l.lot) ? l.lot : null,
-            isExpanded: true,
-            decoration: const InputDecoration(labelText: 'جنس انبار', border: OutlineInputBorder()),
-            items: <DropdownMenuItem<int>>[
-              for (final Map<String, dynamic> x in _lots)
-                DropdownMenuItem<int>(
-                  value: x['id'] as int,
-                  child: Text('${x['code'] ?? '-'} ${x['type_name'] ?? ''} (${faNum(ReturnsHelp.d(x['remaining']), dec: 1)} کیلو)', overflow: TextOverflow.ellipsis),
-                ),
-            ],
-            onChanged: (int? v) => setState(() => l.lot = v),
-          ),
+          lot,
           const SizedBox(height: 10),
           numField(l.kg, 'وزن', required: true, suffix: 'کیلو'),
-          numField(l.price, 'فی', required: true, suffix: 'ریال', thousands: true),
-          numField(l.disc, 'تخفیف این قلم (مبلغ)', suffix: 'ریال', thousands: true),
-          if (_lines.length > 1)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: () => setState(() => _lines.removeAt(i).dispose()),
-                icon: const Icon(Icons.delete_outline),
-                label: const Text('حذف قلم'),
-              ),
-            ),
+          MoneyField(controller: l.price, label: 'فی', required: true),
+          MoneyField(controller: l.disc, label: 'تخفیف این قلم (مبلغ)'),
+          if (_lines.length > 1) Align(alignment: Alignment.centerLeft, child: del),
         ]),
       ),
     );

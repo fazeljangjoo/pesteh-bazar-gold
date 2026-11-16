@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import 'db.dart';
 import 'fx_local.dart';
+import 'ledger.dart' show setPaidWithCredit, updateLineWithCredit; // S36: paid toggle with return-credit accounting
+import 'fmt.dart' show Fmt, MoneyField;
 import 'fx_tx_fields.dart';
 import 'notify_service.dart';
 import 'pdf_output.dart';
@@ -184,14 +186,12 @@ class _ReceiptScreenState extends State<ReceiptScreen> with EditGuard<ReceiptScr
       builder: (_) => _ReceiptLumpForm(existing: existing, total: _total, others: _othersSum(_lump, existing['id'] as int?)),
     );
     if (row == null) return;
-    if (!await saveConfirmed(context, () => AppDb.I.updateReceiptLumpTx(existing['id'] as int, row), successMsg: 'ویرایش با موفقیت ثبت شد')) return;
+    if (!await saveConfirmed(context, () => updateLineWithCredit('receipt_lump_tx', existing['id'] as int, row, existing['paid'] == 1, AppDb.I.updateReceiptLumpTx), successMsg: 'ویرایش با موفقیت ثبت شد')) return;
     await _load();
   }
 
   Future<void> _toggleLumpPaid(Map<String, dynamic> row, bool paid) async {
-    final updated = Map<String, dynamic>.from(row)..remove('id')..remove('receipt_id');
-    updated['paid'] = paid ? 1 : 0;
-    if (!await saveConfirmed(context, () => AppDb.I.updateReceiptLumpTx(row['id'] as int, updated), successMsg: 'وضعیت تسویه با موفقیت ثبت شد')) return;
+    if (!await saveConfirmed(context, () => setPaidWithCredit('receipt_lump_tx', row['id'] as int, paid), successMsg: 'وضعیت تسویه با موفقیت ثبت شد')) return;
     await _load();
   }
 
@@ -221,7 +221,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> with EditGuard<ReceiptScr
       builder: (_) => _ReceiptCreditForm(existing: existing, total: _total, others: _othersSum(_credit, existing['id'] as int?)),
     );
     if (row == null) return;
-    if (!await saveConfirmed(context, () => AppDb.I.updateReceiptCreditInst(existing['id'] as int, row), successMsg: 'ویرایش با موفقیت ثبت شد')) return;
+    if (!await saveConfirmed(context, () => updateLineWithCredit('receipt_credit_inst', existing['id'] as int, row, existing['paid'] == 1, AppDb.I.updateReceiptCreditInst), successMsg: 'ویرایش با موفقیت ثبت شد')) return;
     if (row['paid'] == 1) {
       await NotifyService.I.cancelReceiptCreditRow(existing['id'] as int);
     } else {
@@ -233,7 +233,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> with EditGuard<ReceiptScr
   Future<void> _toggleCreditPaid(Map<String, dynamic> row, bool paid) async {
     final updated = Map<String, dynamic>.from(row)..remove('id')..remove('receipt_id');
     updated['paid'] = paid ? 1 : 0;
-    if (!await saveConfirmed(context, () => AppDb.I.updateReceiptCreditInst(row['id'] as int, updated), successMsg: 'وضعیت تسویه با موفقیت ثبت شد')) return;
+    if (!await saveConfirmed(context, () => setPaidWithCredit('receipt_credit_inst', row['id'] as int, paid), successMsg: 'وضعیت تسویه با موفقیت ثبت شد')) return;
     if (paid) {
       await NotifyService.I.cancelReceiptCreditRow(row['id'] as int);
     } else {
@@ -268,7 +268,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> with EditGuard<ReceiptScr
       builder: (_) => _ReceiptChequeForm(existing: existing, total: _total, others: _othersSum(_cheque, existing['id'] as int?)),
     );
     if (row == null) return;
-    if (!await saveConfirmed(context, () => AppDb.I.updateReceiptChequeInst(existing['id'] as int, row), successMsg: 'ویرایش با موفقیت ثبت شد')) return;
+    if (!await saveConfirmed(context, () => updateLineWithCredit('receipt_cheque_inst', existing['id'] as int, row, existing['paid'] == 1, AppDb.I.updateReceiptChequeInst), successMsg: 'ویرایش با موفقیت ثبت شد')) return;
     if (row['paid'] == 1) {
       await NotifyService.I.cancelReceiptChequeRow(existing['id'] as int);
     } else {
@@ -280,7 +280,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> with EditGuard<ReceiptScr
   Future<void> _toggleChequePaid(Map<String, dynamic> row, bool paid) async {
     final updated = Map<String, dynamic>.from(row)..remove('id')..remove('receipt_id');
     updated['paid'] = paid ? 1 : 0;
-    if (!await saveConfirmed(context, () => AppDb.I.updateReceiptChequeInst(row['id'] as int, updated), successMsg: 'وضعیت تسویه با موفقیت ثبت شد')) return;
+    if (!await saveConfirmed(context, () => setPaidWithCredit('receipt_cheque_inst', row['id'] as int, paid), successMsg: 'وضعیت تسویه با موفقیت ثبت شد')) return;
     if (paid) {
       await NotifyService.I.cancelReceiptChequeRow(row['id'] as int);
     } else {
@@ -362,10 +362,10 @@ class _ReceiptScreenState extends State<ReceiptScreen> with EditGuard<ReceiptScr
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(children: [
-          infoRow('مبلغ کل فروش', '${faNum(_total, dec: 0)} ریال'),
-          infoRow('وصول شده', '${faNum(_settled, dec: 0)} ریال'),
+          infoRow('مبلغ کل فروش', '${Fmt.money(_total)}'),
+          infoRow('وصول شده', '${Fmt.money(_settled)}'),
           infoRow(_remaining >= 0 ? 'باقیمانده' : 'دریافت اضافی',
-              '${faNum(_remaining.abs(), dec: 0)} ریال'),
+              '${Fmt.money(_remaining.abs())}'),
         ]),
       ),
     );
@@ -386,7 +386,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> with EditGuard<ReceiptScr
               value: (r['paid'] as int? ?? 1) == 1,
               onChanged: (v) => _toggleLumpPaid(r, v ?? false),
             ),
-            title: Text('${faNum(r['amount'] as num, dec: 0)} ریال — ${jalaliDate(r['date'] as String)}'),
+            title: Text('${Fmt.money(r['amount'] as num)} — ${jalaliDate(r['date'] as String)}'),
             subtitle: Text('از ${r['from_account'] ?? '-'} (${r['payer_name'] ?? '-'})\nبه ${r['to_account'] ?? '-'} (${r['receiver_name'] ?? '-'})'
                 '${(r['paid'] as int? ?? 1) == 1 ? '\nوصول شده' : ''}'),
             isThreeLine: true,
@@ -419,7 +419,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> with EditGuard<ReceiptScr
               value: (r['paid'] as int) == 1,
               onChanged: (v) => _toggleCreditPaid(r, v ?? false),
             ),
-            title: Text('${faNum(r['amount'] as num, dec: 0)} ریال — سررسید ${jalaliDate(r['due_date'] as String)}'),
+            title: Text('${Fmt.money(r['amount'] as num)} — سررسید ${jalaliDate(r['due_date'] as String)}'),
             subtitle: Text('از ${r['from_account'] ?? '-'} (${r['payer_name'] ?? '-'})\nبه ${r['to_account'] ?? '-'} (${r['receiver_name'] ?? '-'})'
                 '${(r['paid'] as int) == 1 ? '\nوصول شده' : ''}'),
             isThreeLine: true,
@@ -453,7 +453,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> with EditGuard<ReceiptScr
               value: (r['paid'] as int) == 1,
               onChanged: (v) => _toggleChequePaid(r, v ?? false),
             ),
-            title: Text('${faNum(r['amount'] as num, dec: 0)} ریال — سررسید ${jalaliDate(r['due_date'] as String)}'),
+            title: Text('${Fmt.money(r['amount'] as num)} — سررسید ${jalaliDate(r['due_date'] as String)}'),
             subtitle: Text('چک ${r['cheque_no'] ?? '-'} — بانک ${r['bank_name'] ?? '-'}\n'
                 'از ${r['from_account'] ?? '-'} (${r['payer_name'] ?? '-'}) به ${r['to_account'] ?? '-'} (${r['receiver_name'] ?? '-'})'
                 '${(r['paid'] as int) == 1 ? '\nوصول شده' : ''}'),
@@ -499,7 +499,8 @@ class _ReceiptLumpFormState extends State<_ReceiptLumpForm> {
   void initState() {
     super.initState();
     final e = widget.existing;
-    _amount = TextEditingController(text: e == null ? '' : plain(e['amount'] as num));
+    _amount = TextEditingController();
+    if (e != null) MoneyField.setStored(_amount, e['amount'] as num);
     _fx = FxTxController(_amount);
     _fx.load(e).then((_) {
       if (mounted) setState(() {});
@@ -521,7 +522,7 @@ class _ReceiptLumpFormState extends State<_ReceiptLumpForm> {
     }
     Navigator.pop(context, {
       ..._fx.fields(),
-      'amount': parseNum(_amount.text) ?? 0,
+      'amount': MoneyField.stored(_amount) ?? 0,
       'date': (_date ?? DateTime.now()).toIso8601String(),
       'from_account': _fromAccount.text.trim(),
       'payer_name': _payerName.text.trim(),
@@ -544,7 +545,7 @@ class _ReceiptLumpFormState extends State<_ReceiptLumpForm> {
                   style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 12),
               FxTxFields(c: _fx, dateIso: fxIsoDate(_date ?? DateTime.now()), onChanged: () => setState(() {})),
-              numField(_amount, 'مبلغ (ریال)', required: true, thousands: true),
+              MoneyField(controller: _amount, label: 'مبلغ', required: true),
               OverpayWarning(controller: _amount, total: widget.total, others: widget.others, receipt: true),
               dateField(context, 'تاریخ دریافت', _date, (d) => setState(() => _date = d)),
               textField(_fromAccount, 'از کدام حساب (خریدار)'),
@@ -593,7 +594,8 @@ class _ReceiptCreditFormState extends State<_ReceiptCreditForm> {
   void initState() {
     super.initState();
     final e = widget.existing;
-    _amount = TextEditingController(text: e == null ? '' : plain(e['amount'] as num));
+    _amount = TextEditingController();
+    if (e != null) MoneyField.setStored(_amount, e['amount'] as num);
     _fx = FxTxController(_amount);
     _fx.load(e).then((_) {
       if (mounted) setState(() {});
@@ -619,7 +621,7 @@ class _ReceiptCreditFormState extends State<_ReceiptCreditForm> {
     }
     Navigator.pop(context, {
       ..._fx.fields(),
-      'amount': parseNum(_amount.text) ?? 0,
+      'amount': MoneyField.stored(_amount) ?? 0,
       'due_date': _due!.toIso8601String(),
       'from_account': _fromAccount.text.trim(),
       'payer_name': _payerName.text.trim(),
@@ -641,7 +643,7 @@ class _ReceiptCreditFormState extends State<_ReceiptCreditForm> {
               Text(widget.existing == null ? 'قسط جدید' : 'ویرایش قسط', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 12),
               FxTxFields(c: _fx, dateIso: fxIsoDate(_due ?? DateTime.now()), onChanged: () => setState(() {})),
-              numField(_amount, 'مبلغ قسط (ریال)', required: true, thousands: true),
+              MoneyField(controller: _amount, label: 'مبلغ قسط', required: true),
               OverpayWarning(controller: _amount, total: widget.total, others: widget.others, receipt: true),
               dateField(context, 'تاریخ سررسید', _due, (d) => setState(() => _due = d)),
               textField(_fromAccount, 'از کدام حساب (خریدار)'),
@@ -692,7 +694,8 @@ class _ReceiptChequeFormState extends State<_ReceiptChequeForm> {
   void initState() {
     super.initState();
     final e = widget.existing;
-    _amount = TextEditingController(text: e == null ? '' : plain(e['amount'] as num));
+    _amount = TextEditingController();
+    if (e != null) MoneyField.setStored(_amount, e['amount'] as num);
     _fx = FxTxController(_amount);
     _fx.load(e).then((_) {
       if (mounted) setState(() {});
@@ -720,7 +723,7 @@ class _ReceiptChequeFormState extends State<_ReceiptChequeForm> {
     }
     Navigator.pop(context, {
       ..._fx.fields(),
-      'amount': parseNum(_amount.text) ?? 0,
+      'amount': MoneyField.stored(_amount) ?? 0,
       'due_date': _due!.toIso8601String(),
       'cheque_no': _chequeNo.text.trim(),
       'bank_name': _bankName.text.trim(),
@@ -744,7 +747,7 @@ class _ReceiptChequeFormState extends State<_ReceiptChequeForm> {
               Text(widget.existing == null ? 'چک دریافتی جدید' : 'ویرایش چک', style: Theme.of(context).textTheme.titleMedium),
               const SizedBox(height: 12),
               FxTxFields(c: _fx, dateIso: fxIsoDate(_due ?? DateTime.now()), onChanged: () => setState(() {})),
-              numField(_amount, 'مبلغ چک (ریال)', required: true, thousands: true),
+              MoneyField(controller: _amount, label: 'مبلغ چک', required: true),
               OverpayWarning(controller: _amount, total: widget.total, others: widget.others, receipt: true),
               dateField(context, 'تاریخ سررسید چک', _due, (d) => setState(() => _due = d)),
               textField(_chequeNo, 'شماره چک'),

@@ -326,7 +326,7 @@ double saleExtraShare(Map<String, dynamic> sale, Map<String, dynamic> item) {
   return (revenue: revenue, cost: cost, profit: revenue - cost);
 }
 
-/// تماس با پشتیبانی: روی گوشی شماره‌گیر باز می‌شود؛ روی ویندوز (تلفن ندارد) شماره کپی می‌شود.
+/// تماس با پشتیبانی: روی سیستم شماره‌گیر باز می‌شود؛ روی ویندوز (تلفن ندارد) شماره کپی می‌شود.
 Future<void> callSupport(BuildContext context, String callNumber, String displayPhone) async {
   if (Platform.isWindows) {
     await Clipboard.setData(ClipboardData(text: displayPhone));

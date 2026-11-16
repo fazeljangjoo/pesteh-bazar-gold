@@ -45,6 +45,8 @@ class _RenewalScreenState extends State<RenewalScreen> with WidgetsBindingObserv
   String? _loadErr;
 
   Map<String, dynamic> _info = {};
+  // STAGE10: واحد قیمت از سرور (PB_PRICE_UNIT)؛ پیش‌فرض تومان اگر سرور نفرستاد (سرور قدیمی)
+  String get _unitLabel => _info['price_unit'] == 'rial' ? 'ریال' : 'تومان';
   List<Map<String, dynamic>> _history = [];
 
   String _plan = 'rial';
@@ -109,7 +111,7 @@ class _RenewalScreenState extends State<RenewalScreen> with WidgetsBindingObserv
 
   String _money(dynamic v) {
     final n = _n(v);
-    return n < 0 ? '−${faNum(-n, dec: 0)} تومان' : '${faNum(n, dec: 0)} تومان';
+    return n < 0 ? '−${faNum(-n, dec: 0)} $_unitLabel' : '${faNum(n, dec: 0)} $_unitLabel';
   }
 
   String _defaultPlan() {
@@ -398,7 +400,7 @@ class _RenewalScreenState extends State<RenewalScreen> with WidgetsBindingObserv
     final gDate = jalaliToGregorian(_payJy, _payJm, _payJd);
     final whenDt = DateTime(gDate.year, gDate.month, gDate.day, _payHour, _payMin);
     final paidAt = '$_payJy/${_two(_payJm)}/${_two(_payJd)} ${_two(_payHour)}:${_two(_payMin)}';
-    final amount = enDigits(_amountCtl.text).trim();
+    final amount = enDigits(_amountCtl.text).replaceAll(',', '').trim();
     final track = enDigits(_trackCtl.text).trim();
     String? v;
     if (payer.length < 2) {
@@ -841,7 +843,8 @@ class _RenewalScreenState extends State<RenewalScreen> with WidgetsBindingObserv
         TextField(
           controller: _amountCtl,
           keyboardType: TextInputType.number,
-          decoration: const InputDecoration(labelText: 'مبلغ واریزی (تومان)', border: OutlineInputBorder()),
+          inputFormatters: [ThousandsInputFormatter()],
+          decoration: InputDecoration(labelText: 'مبلغ واریزی ($_unitLabel)', border: const OutlineInputBorder()),
         ),
         const SizedBox(height: 8),
         TextField(controller: _trackCtl, maxLength: 40, decoration: const InputDecoration(labelText: 'شمارهٔ پیگیری (اختیاری)', border: OutlineInputBorder())),

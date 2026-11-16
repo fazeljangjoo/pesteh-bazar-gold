@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'fmt.dart' show Fmt;
 
 import 'utils.dart' show faNum;
 import 'warehouse_ui.dart' show StockApi;
@@ -125,9 +126,9 @@ class _PayTermsPreviewState extends State<PayTermsPreview> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            Text('جمع اقساط/چک‌ها: ${faNum(total, dec: 0)} ریال'),
+            Text('جمع اقساط/چک‌ها: ${Fmt.money(total)}'),
             Text('سررسید میانگین: ${r['avg_due'] ?? '-'}'),
-            Text(cash == null ? 'معادل نقد: نرخ ماهانه تنظیم نشده' : 'معادل نقد: ${faNum(cash as num, dec: 0)} ریال'),
+            Text(cash == null ? 'معادل نقد: نرخ ماهانه تنظیم نشده' : 'معادل نقد: ${Fmt.money(cash as num)}'),
           ],
         );
       },
@@ -153,7 +154,7 @@ class PayCreditWarning extends StatelessWidget {
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
           child: Text(
-            'هشدار: مانده با این سند از سقف اعتبار طرف حساب (${faNum((r['credit_limit'] as num?) ?? 0, dec: 0)}) بیشتر می‌شود. (فقط هشدار است)',
+            'هشدار: مانده با این سند از سقف اعتبار طرف حساب (${Fmt.money((r['credit_limit'] as num?) ?? 0, label: false)}) بیشتر می‌شود. (فقط هشدار است)',
             style: TextStyle(color: Theme.of(context).colorScheme.error),
           ),
         );

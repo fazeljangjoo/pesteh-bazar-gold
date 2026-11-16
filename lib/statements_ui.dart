@@ -1,8 +1,10 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'fmt.dart' show Fmt;
 
 import 'edition.dart';
+import 'crack_profit_ui.dart' show CrackProfitScreen, cpCanProfit; // CP4
 import 'margin_ui.dart';
 import 'excel_io.dart';
 import 'pdf_output.dart';
@@ -17,7 +19,7 @@ import 'widgets.dart';
 /// Amounts are integer rial. Account→line mapping lives on the server (`statements.map`), the accountant reviews it.
 /// Gross margin + mapping editor: margin_ui.dart (T18.3b), opened from the AppBar here.
 
-String _m(dynamic v) => faNum(((v is num) ? v : num.tryParse('${v ?? 0}') ?? 0).toDouble(), dec: 0);
+String _m(dynamic v) => Fmt.money(((v is num) ? v : num.tryParse('${v ?? 0}') ?? 0).toDouble(), label: false);
 int _i(dynamic v) => (v is num) ? v.toInt() : (int.tryParse('${v ?? 0}') ?? 0);
 List<Map<String, dynamic>> _list(dynamic v) => <Map<String, dynamic>>[for (final dynamic e in (v as List<dynamic>? ?? <dynamic>[])) Map<String, dynamic>.from(e as Map)];
 
@@ -146,7 +148,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
     }
   }
 
-  List<String> get _headers => _tab == 2 ? <String>['مرکز هزینه', 'درآمد', 'هزینه', 'خالص'] : <String>['سرفصل', 'مبلغ (ریال)'];
+  List<String> get _headers => _tab == 2 ? <String>['مرکز هزینه', 'درآمد', 'هزینه', 'خالص'] : <String>['سرفصل', 'مبلغ (${Fmt.unitLabel()})'];
 
   List<List<String>> get _rows {
     final Map<String, dynamic>? r = _rep;
@@ -202,6 +204,7 @@ class _StatementsScreenState extends State<StatementsScreen> {
         appBar: AppBar(
           title: Text(_titles[_tab], style: const TextStyle(fontSize: 16)),
           actions: <Widget>[
+            if (cpCanProfit()) IconButton(tooltip: 'سود خط شکست', onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const CrackProfitScreen())), icon: const Icon(Icons.local_fire_department_outlined)), // CP4: فقط مدیر gold + profit.view
             IconButton(tooltip: 'حاشیه سود (لات/نوع/اونس)', onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const MarginScreen())), icon: const Icon(Icons.pie_chart_outline)),
             if (StaffPerms.I.can('settings.manage')) IconButton(tooltip: 'نگاشت حساب‌ها به سطرها', onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const StatementMapScreen())), icon: const Icon(Icons.tune)),
             IconButton(tooltip: 'خروجی PDF', onPressed: _rep == null || _loading ? null : _pdf, icon: const Icon(Icons.picture_as_pdf_outlined)),
@@ -345,7 +348,7 @@ class _InstantPnlCardState extends State<InstantPnlCard> {
               if (_d != null) ...<Widget>[
                 Text('درآمد: ${_m(_d!['revenue'])}   هزینه: ${_m(_d!['expense'])}'),
                 Text('سود ناخالص: ${_m(_d!['gross_profit'])}'),
-                Text('${_i(_d!['net_profit']) >= 0 ? 'سود' : 'زیان'} خالص: ${_m(_i(_d!['net_profit']).abs())} ریال', style: TextStyle(fontWeight: FontWeight.bold, color: _i(_d!['net_profit']) >= 0 ? Colors.green.shade800 : Colors.red.shade800)),
+                Text('${_i(_d!['net_profit']) >= 0 ? 'سود' : 'زیان'} خالص: ${_m(_i(_d!['net_profit']).abs())} ${Fmt.unitLabel()}', style: TextStyle(fontWeight: FontWeight.bold, color: _i(_d!['net_profit']) >= 0 ? Colors.green.shade800 : Colors.red.shade800)),
               ],
             ]),
           ),

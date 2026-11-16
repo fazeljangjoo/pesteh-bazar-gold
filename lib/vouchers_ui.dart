@@ -1,6 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'fmt.dart' show Fmt;
+import 'form_layout.dart' show kWideForm;
 
 import 'pdf_output.dart';
 import 'pdf_service.dart';
@@ -162,7 +164,7 @@ class _VouchersScreenState extends State<VouchersScreen> {
                                   title: Text('سند $no — ${_isoToJ(r['date'].toString())}'),
                                   subtitle: Text('${r['description'] ?? ''}\n${_kStatusFa[r['status']] ?? r['status']}$auto'),
                                   isThreeLine: true,
-                                  trailing: Text('${faNum(_asInt(r['total']), dec: 0)} ریال'),
+                                  trailing: Text('${Fmt.money(_asInt(r['total']))}'),
                                   onTap: () => _open(_asInt(r['id'])),
                                 );
                               },
@@ -367,7 +369,7 @@ class _VoucherEditorScreenState extends State<VoucherEditorScreen> {
         appBar: AppBar(title: Text(_id > 0 ? 'ویرایش سند' : 'سند جدید')),
         body: _loading
             ? const Center(child: CircularProgressIndicator())
-            : ListView(padding: const EdgeInsets.all(12), children: <Widget>[
+            : _voucherWide(context, ListView(padding: const EdgeInsets.all(12), children: <Widget>[
                 TextField(controller: _date, decoration: const InputDecoration(labelText: 'تاریخ (شمسی)')),
                 TextField(controller: _desc, decoration: const InputDecoration(labelText: 'شرح سند')),
                 const SizedBox(height: 8),
@@ -399,19 +401,22 @@ class _VoucherEditorScreenState extends State<VoucherEditorScreen> {
                   ),
                 TextButton.icon(onPressed: () => setState(() => _lines.add(_LineCtl())), icon: const Icon(Icons.add), label: const Text('افزودن ردیف')),
                 const Divider(),
-                Text('جمع بدهکار: ${faNum(d, dec: 0)}   جمع بستانکار: ${faNum(c, dec: 0)}'),
-                Text(balanced ? 'تراز است' : 'تراز نیست (اختلاف ${faNum((d - c).abs(), dec: 0)})', style: TextStyle(color: balanced ? Colors.green : Colors.red)),
+                Text('جمع بدهکار: ${Fmt.money(d, label: false)}   جمع بستانکار: ${Fmt.money(c, label: false)}'),
+                Text(balanced ? 'تراز است' : 'تراز نیست (اختلاف ${Fmt.money((d - c).abs(), label: false)})', style: TextStyle(color: balanced ? Colors.green : Colors.red)),
                 const SizedBox(height: 8),
                 Row(children: <Widget>[
                   Expanded(child: OutlinedButton(onPressed: _saving || !balanced || _status != 'draft' ? null : () => _save('draft'), child: const Text('ذخیره پیش‌نویس'))),
                   const SizedBox(width: 8),
                   Expanded(child: FilledButton(onPressed: _saving || !balanced ? null : () => _save(_status == 'final' ? 'final' : 'temporary'), child: Text(_status == 'final' ? 'ذخیره' : 'ثبت موقت'))),
                 ]),
-              ]),
+              ])),
       ),
     );
   }
 }
+
+Widget _voucherWide(BuildContext context, Widget child) =>
+    kWideForm(context) ? Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 1180), child: child)) : child;
 
 class VoucherDetailScreen extends StatefulWidget {
   const VoucherDetailScreen({super.key, required this.id});
@@ -503,8 +508,8 @@ class _VoucherDetailScreenState extends State<VoucherDetailScreen> {
             '${l['account_code']} ${l['account_name']}',
             (l['tafsili_name'] ?? '').toString(),
             (l['description'] ?? '').toString(),
-            _asInt(l['debit']) > 0 ? faNum(_asInt(l['debit']), dec: 0) : '',
-            _asInt(l['credit']) > 0 ? faNum(_asInt(l['credit']), dec: 0) : '',
+            _asInt(l['debit']) > 0 ? Fmt.money(_asInt(l['debit']), label: false) : '',
+            _asInt(l['credit']) > 0 ? Fmt.money(_asInt(l['credit']), label: false) : '',
           ],
       ];
       final String no = v['number'] == null ? 'بدون شماره' : faNum(_asInt(v['number']), dec: 0);
@@ -513,7 +518,7 @@ class _VoucherDetailScreenState extends State<VoucherDetailScreen> {
         subtitle: 'تاریخ: ${_isoToJ(v['date'].toString())} — ${_kStatusFa[v['status']] ?? v['status']}',
         kv: <List<String>>[
           <String>['شرح', (v['description'] ?? '').toString()],
-          <String>['جمع (ریال)', faNum(_asInt(v['total']), dec: 0)],
+          <String>['جمع (ریال)', Fmt.money(_asInt(v['total']), label: false)],
         ],
         headers: <String>['ردیف', 'حساب', 'تفصیلی', 'شرح', 'بدهکار', 'بستانکار'],
         rows: rows,
@@ -546,7 +551,7 @@ class _VoucherDetailScreenState extends State<VoucherDetailScreen> {
                 : ListView(padding: const EdgeInsets.all(12), children: <Widget>[
                     Text('تاریخ: ${_isoToJ(v['date'].toString())}   وضعیت: ${_kStatusFa[st] ?? st}${manual ? '' : '   (خودکار)'}'),
                     Text('شرح: ${v['description'] ?? ''}'),
-                    Text('جمع: ${faNum(_asInt(v['total']), dec: 0)} ریال'),
+                    Text('جمع: ${Fmt.money(_asInt(v['total']))}'),
                     if (_offline) const Text('آفلاین: نسخهٔ همگام‌شده (فقط مشاهده)', style: TextStyle(color: Colors.orange)),
                     const Divider(),
                     for (final Map<String, dynamic> l in _listOf(d['lines']))
@@ -554,7 +559,7 @@ class _VoucherDetailScreenState extends State<VoucherDetailScreen> {
                         dense: true,
                         title: Text('${l['account_code']} — ${l['account_name']}'),
                         subtitle: Text(<String>[if (l['tafsili_name'] != null) l['tafsili_name'].toString(), (l['description'] ?? '').toString()].where((String s) => s.isNotEmpty).join(' · ')),
-                        trailing: Text(_asInt(l['debit']) > 0 ? 'بد ${faNum(_asInt(l['debit']), dec: 0)}' : 'بس ${faNum(_asInt(l['credit']), dec: 0)}'),
+                        trailing: Text(_asInt(l['debit']) > 0 ? 'بد ${Fmt.money(_asInt(l['debit']), label: false)}' : 'بس ${Fmt.money(_asInt(l['credit']), label: false)}'),
                       ),
                     const SizedBox(height: 8),
                     Wrap(spacing: 8, children: _offline ? <Widget>[] : <Widget>[

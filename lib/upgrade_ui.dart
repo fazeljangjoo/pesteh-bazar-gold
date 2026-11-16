@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'fmt.dart' show Fmt;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'edition.dart';
@@ -254,7 +255,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
           child: CheckboxListTile(
             value: _ackBackup,
             onChanged: (bool? v) => setState(() => _ackBackup = v ?? false),
-            title: const Text('پیش از ارتقا یک نسخهٔ پشتیبان روی سرور ساخته می‌شود؛ پیشنهاد می‌کنم از «پشتیبان‌گیری» هم یک نسخه روی گوشی نگه دارم.'),
+            title: const Text('پیش از ارتقا یک نسخهٔ پشتیبان روی سرور ساخته می‌شود؛ پیشنهاد می‌کنم از «پشتیبان‌گیری» هم یک نسخه روی سیستم نگه دارم.'),
           ),
         ),
         sectionTitle(context, 'تنظیمات'),
@@ -344,10 +345,10 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
         ),
       ),
       sectionTitle(context, 'گزارش تطبیق'),
-      infoRow('موجودی دفتری', faNum((inv['book'] as num?) ?? 0, dec: 0)),
-      infoRow('ارزش انبار', faNum((inv['valuation'] as num?) ?? 0, dec: 0)),
-      infoRow('جمع بدهکار', faNum((tb['debit'] as num?) ?? 0, dec: 0)),
-      infoRow('جمع بستانکار', faNum((tb['credit'] as num?) ?? 0, dec: 0)),
+      infoRow('موجودی دفتری', Fmt.money((inv['book'] as num?) ?? 0, label: false)),
+      infoRow('ارزش انبار', Fmt.money((inv['valuation'] as num?) ?? 0, label: false)),
+      infoRow('جمع بدهکار', Fmt.money((tb['debit'] as num?) ?? 0, label: false)),
+      infoRow('جمع بستانکار', Fmt.money((tb['credit'] as num?) ?? 0, label: false)),
       infoRow('طرف‌حساب‌های کنترل‌شده', faNum((rep['parties_checked'] as num?) ?? 0, dec: 0)),
       if (diffs.isNotEmpty) sectionTitle(context, 'مغایرت‌ها (ریال)'),
       for (final Map<String, dynamic> d in diffs)
@@ -355,7 +356,7 @@ class _UpgradeScreenState extends State<UpgradeScreen> {
           dense: true,
           leading: Icon(d['level'] == 'error' ? Icons.error : Icons.warning_amber, color: d['level'] == 'error' ? Colors.red : Colors.orange),
           title: Text('${d['item']}'),
-          subtitle: d['diff'] == null ? null : Text('دفتر ${faNum((d['book'] as num?) ?? 0, dec: 0)} — مورد انتظار ${faNum((d['expected'] as num?) ?? 0, dec: 0)} — اختلاف ${faNum((d['diff'] as num?) ?? 0, dec: 0)}'),
+          subtitle: d['diff'] == null ? null : Text('دفتر ${Fmt.money((d['book'] as num?) ?? 0, label: false)} — مورد انتظار ${Fmt.money((d['expected'] as num?) ?? 0, label: false)} — اختلاف ${Fmt.money((d['diff'] as num?) ?? 0, label: false)}'),
         ),
       sectionTitle(context, 'چه چیزی تغییر کرد؟'),
       const Text('• اسناد خرید/فروش/چک شما دست‌نخورده است؛ برای هر کدام یک سند حسابداری خودکار (موقت) ساخته شد.\n'

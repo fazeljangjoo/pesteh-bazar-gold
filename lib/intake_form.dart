@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import 'db.dart';
 import 'entity_store.dart';
+import 'form_layout.dart';
 import 'utils.dart' show toEnDigits;
 
 /// S5.T2: فرم پذیرش اتاق انس.
@@ -60,13 +61,15 @@ String? validateIntakeForm({
   required int large,
   required bool isSample,
   required String owner,
+  required String note,
   required List<({String? defKey, double? pct, double? kernel})> pcts,
 }) {
   if (categoryId == null) return 'دسته را انتخاب کنید.';
   if (typeName == null || typeName.trim().isEmpty) return 'نوع پسته را انتخاب کنید.';
   if (grossKg == null || grossKg <= 0) return 'وزن کل باید بزرگ‌تر از صفر باشد.';
   if (small < 0 || large < 0) return 'تعداد گونی نمی‌تواند منفی باشد.';
-  if (!isSample && owner.trim().isEmpty) return 'نام صاحب پسته را وارد کنید (یا تیک «نمونه» را بزنید).';
+  if (owner.trim().isEmpty) return isSample ? 'نام صاحب نمونه الزامی است.' : 'نام صاحب پسته را وارد کنید.';
+  if (isSample && note.trim().isEmpty) return 'برای «نمونه» توضیح بنویسید (این نمونه برای چیست/کیست؟).';
   final seen = <String>{};
   double sum = 0;
   for (final r in pcts) {
@@ -104,6 +107,8 @@ class _IntakeFormScreenState extends State<IntakeFormScreen> {
   bool _loading = true;
   bool _busy = false;
   bool _readOnly = false;
+  String _status = 'draft';
+  String? _rejectReason; // دلیل برگشت (وضعیت returned)
   String? _uid; // پیش‌نویس فعلی؛ با اولین ذخیره ساخته می‌شود
   String? _error;
   String? _doneCode; // بعد از «ثبت نهایی»: کد موقت تا وقتی سرور کد نهایی را بدهد
@@ -142,7 +147,9 @@ class _IntakeFormScreenState extends State<IntakeFormScreen> {
       _defs = defs.isEmpty ? kFallbackPctDefs : defs;
       _uid = widget.uid;
       if (row != null) {
-        _readOnly = (row['status'] ?? 'draft') != 'draft';
+        _status = (row['status'] ?? 'draft').toString();
+        _rejectReason = row['reject_reason'] as String?;
+        _readOnly = _status != 'draft' && _status != 'returned';
         _categoryId = (row['category_id'] as num?)?.toInt();
         _typeName = row['type_name'] as String?;
         _gross.text = row['gross_kg']?.toString() ?? '';
@@ -179,10 +186,63 @@ class _IntakeFormScreenState extends State<IntakeFormScreen> {
     });
   }
 
+  Future<String?> _askName(String title) async {
+    final c = TextEditingController();
+    final r = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: TextField(controller: c, autofocus: true, maxLength: 100, decoration: const InputDecoration(border: OutlineInputBorder())),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('انصراف')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('افزودن')),
+        ],
+      ),
+    );
+    c.dispose();
+    return (r == null || r.isEmpty) ? null : r;
+  }
+
+  /// اتاق انس می‌تواند دسته/نوع جدید تعریف کند (محلی ساخته و در صف همگام‌سازی ارسال می‌شود).
+  Future<void> _addCategory() async {
+    final name = await _askName('نام دستهٔ جدید');
+    if (name == null || !mounted) return;
+    try {
+      final id = await AppDb.I.addCategory(name);
+      final cats = await AppDb.I.categories();
+      if (!mounted) return;
+      setState(() {
+        _categories = cats;
+        _categoryId = id;
+        _typeName = null;
+      });
+      await _loadTypes(id);
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+    }
+  }
+
+  Future<void> _addType() async {
+    if (_categoryId == null) {
+      setState(() => _error = 'ابتدا دسته را انتخاب کنید.');
+      return;
+    }
+    final name = await _askName('نام نوع جدید');
+    if (name == null || !mounted) return;
+    try {
+      await AppDb.I.addType(_categoryId!, name);
+      await _loadTypes(_categoryId!, keep: name);
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+    }
+  }
+
   void _resetForm() {
     setState(() {
       _uid = null;
       _doneCode = null;
+      _status = 'draft';
+      _rejectReason = null;
       _error = null;
       _readOnly = false;
       _gross.clear();
@@ -213,7 +273,7 @@ class _IntakeFormScreenState extends State<IntakeFormScreen> {
       'large_sacks': int.tryParse(toEnDigits(_large.text.trim())) ?? 0,
       'gram': parseIntakeNum(_gram.text),
       'ounce': parseIntakeNum(_ounce.text),
-      'owner_name': _isSample ? null : owner,
+      'owner_name': owner,
       'is_sample': _isSample,
       'note': _note.text.trim(),
     };
@@ -255,6 +315,7 @@ class _IntakeFormScreenState extends State<IntakeFormScreen> {
       large: int.tryParse(toEnDigits(_large.text.trim())) ?? 0,
       isSample: _isSample,
       owner: _owner.text,
+      note: _note.text,
       pcts: [
         for (final r in _pcts) (defKey: r.defKey, pct: parseIntakeNum(r.pctCtrl.text), kernel: parseIntakeNum(r.kernelCtrl.text)),
       ],
@@ -348,14 +409,14 @@ class _IntakeFormScreenState extends State<IntakeFormScreen> {
 
   Widget _section(String title, List<Widget> children) {
     return Card(
-      margin: const EdgeInsets.only(bottom: 12),
+      margin: const EdgeInsets.only(bottom: 8),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-            const SizedBox(height: 12),
+            Text(title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
+            const SizedBox(height: 8),
             ...children,
           ],
         ),
@@ -425,153 +486,158 @@ class _IntakeFormScreenState extends State<IntakeFormScreen> {
   @override
   Widget build(BuildContext context) {
     final String title = _uid == null ? 'پذیرش جدید' : (_readOnly ? 'مشاهدهٔ پذیرش' : 'ویرایش پیش‌نویس');
-    return Scaffold(
-      appBar: AppBar(title: Text(title)),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : CallbackShortcuts(
-              bindings: <ShortcutActivator, VoidCallback>{
-                const SingleActivator(LogicalKeyboardKey.keyS, control: true): _submit,
-                const SingleActivator(LogicalKeyboardKey.keyD, control: true): _saveDraft,
-              },
-              child: FocusTraversalGroup(
-                policy: OrderedTraversalPolicy(),
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 820),
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          if (_doneCode != null) _doneCard(),
-                          if (_readOnly && _doneCode == null)
-                            const Padding(
-                              padding: EdgeInsets.only(bottom: 12),
-                              child: Text('این پذیرش دیگر قابل ویرایش نیست.',
-                                  style: TextStyle(color: Colors.orange)),
-                            ),
-                          AbsorbPointer(
-                            absorbing: _readOnly,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                _section('مشخصات محموله', [
-                                  Wrap(
-                                    spacing: 12,
-                                    runSpacing: 12,
-                                    children: [
-                                      SizedBox(
-                                        width: 220,
-                                        child: DropdownButtonFormField<int>(
-                                          value: _categories.any((c) => c['id'] == _categoryId) ? _categoryId : null,
-                                          decoration: _dec('دسته'),
-                                          items: [
-                                            for (final c in _categories)
-                                              DropdownMenuItem<int>(
-                                                value: c['id'] as int,
-                                                child: Text(c['name'] as String),
-                                              ),
-                                          ],
-                                          onChanged: (v) {
-                                            setState(() {
-                                              _categoryId = v;
-                                              _typeName = null;
-                                            });
-                                            if (v != null) _loadTypes(v);
-                                          },
-                                        ),
-                                      ),
-                                      SizedBox(
-                                        width: 220,
-                                        child: DropdownButtonFormField<String>(
-                                          value: _typeName,
-                                          decoration: _dec('نوع'),
-                                          items: [
-                                            for (final t in _types)
-                                              DropdownMenuItem<String>(
-                                                value: t['name'] as String,
-                                                child: Text(t['name'] as String),
-                                              ),
-                                          ],
-                                          onChanged: (v) => setState(() => _typeName = v),
-                                        ),
-                                      ),
-                                      _num(_gross, 'وزن کل', suffix: 'کیلو'),
-                                      _num(_small, 'گونی کوچک', integer: true, width: 150),
-                                      _num(_large, 'گونی بزرگ', integer: true, width: 150),
-                                    ],
-                                  ),
-                                ]),
-                                _section('صاحب پسته', [
-                                  CheckboxListTile(
-                                    contentPadding: EdgeInsets.zero,
-                                    value: _isSample,
-                                    title: const Text('نمونه است (بدون صاحب)'),
-                                    controlAffinity: ListTileControlAffinity.leading,
-                                    onChanged: (v) => setState(() => _isSample = v ?? false),
-                                  ),
-                                  if (!_isSample)
-                                    TextField(
-                                      controller: _owner,
-                                      textInputAction: TextInputAction.next,
-                                      onSubmitted: (_) => FocusScope.of(context).nextFocus(),
-                                      decoration: _dec('نام صاحب پسته'),
-                                    ),
-                                ]),
-                                _section('وزن‌های تکمیلی (اختیاری)', [
-                                  Wrap(spacing: 12, runSpacing: 12, children: [
-                                    _num(_gram, 'گرم', width: 170),
-                                    _num(_ounce, 'انس', width: 170),
-                                  ]),
-                                ]),
-                                _pctSection(),
-                                _section('یادداشت', [
-                                  TextField(
-                                    controller: _note,
-                                    maxLines: 2,
-                                    maxLength: 500,
-                                    decoration: _dec('یادداشت'),
-                                  ),
-                                ]),
-                              ],
-                            ),
-                          ),
-                          if (_error != null)
-                            Padding(
-                              padding: const EdgeInsets.only(bottom: 8),
-                              child: Text(_error!, style: const TextStyle(color: Colors.red)),
-                            ),
-                          if (!_readOnly)
-                            Row(
-                              children: [
-                                OutlinedButton(
-                                  onPressed: _busy ? null : _saveDraft,
-                                  child: const Text('ذخیرهٔ پیش‌نویس'),
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: FilledButton.icon(
-                                    onPressed: _busy ? null : _submit,
-                                    icon: _busy
-                                        ? const SizedBox(
-                                            width: 16,
-                                            height: 16,
-                                            child: CircularProgressIndicator(strokeWidth: 2),
-                                          )
-                                        : const Icon(Icons.check),
-                                    label: const Text('ثبت نهایی (Ctrl+S)'),
-                                  ),
-                                ),
-                              ],
-                            ),
-                        ],
-                      ),
+    if (_loading) {
+      return Scaffold(appBar: AppBar(title: Text(title)), body: const Center(child: CircularProgressIndicator()));
+    }
+    final bool wide = kWideForm(context);
+    final List<Widget> colA = <Widget>[
+      _section('مشخصات محموله', [
+        Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          children: [
+            SizedBox(
+              width: 220,
+              child: DropdownButtonFormField<int>(
+                value: _categories.any((c) => c['id'] == _categoryId) ? _categoryId : null,
+                decoration: _dec('دسته'),
+                items: [
+                  for (final c in _categories)
+                    DropdownMenuItem<int>(
+                      value: c['id'] as int,
+                      child: Text(c['name'] as String),
                     ),
-                  ),
-                ),
+                ],
+                onChanged: (v) {
+                  setState(() {
+                    _categoryId = v;
+                    _typeName = null;
+                  });
+                  if (v != null) _loadTypes(v);
+                },
               ),
             ),
+            TextButton.icon(onPressed: _addCategory, icon: const Icon(Icons.add), label: const Text('دستهٔ جدید')),
+            SizedBox(
+              width: 220,
+              child: DropdownButtonFormField<String>(
+                value: _typeName,
+                decoration: _dec('نوع'),
+                items: [
+                  for (final t in _types)
+                    DropdownMenuItem<String>(
+                      value: t['name'] as String,
+                      child: Text(t['name'] as String),
+                    ),
+                ],
+                onChanged: (v) => setState(() => _typeName = v),
+              ),
+            ),
+            TextButton.icon(onPressed: _addType, icon: const Icon(Icons.add), label: const Text('نوع جدید')),
+            _num(_gross, 'وزن کل', suffix: 'کیلو'),
+            _num(_small, 'گونی کوچک', integer: true, width: 150),
+            _num(_large, 'گونی بزرگ', integer: true, width: 150),
+          ],
+        ),
+      ]),
+      _section('صاحب پسته', [
+        CheckboxListTile(
+          contentPadding: EdgeInsets.zero,
+          dense: true,
+          value: _isSample,
+          title: const Text('نمونه است (نام صاحب و توضیح الزامی)'),
+          controlAffinity: ListTileControlAffinity.leading,
+          onChanged: (v) => setState(() => _isSample = v ?? false),
+        ),
+        TextField(
+          controller: _owner,
+          textInputAction: TextInputAction.next,
+          onSubmitted: (_) => FocusScope.of(context).nextFocus(),
+          decoration: _dec('نام صاحب پسته (الزامی)'),
+        ),
+      ]),
+    ];
+    final List<Widget> colB = <Widget>[
+      _section('وزن‌های تکمیلی (اختیاری)', [
+        Wrap(spacing: 12, runSpacing: 8, children: [
+          _num(_gram, 'گرم', width: 170),
+          _num(_ounce, 'انس', width: 170),
+        ]),
+      ]),
+      _pctSection(),
+      _section(_isSample ? 'توضیح نمونه (الزامی)' : 'یادداشت', [
+        TextField(
+          controller: _note,
+          maxLines: 2,
+          maxLength: 500,
+          decoration: _dec(_isSample ? 'این نمونه برای چیست/کیست؟' : 'یادداشت'),
+        ),
+      ]),
+    ];
+    return CallbackShortcuts(
+      bindings: <ShortcutActivator, VoidCallback>{
+        const SingleActivator(LogicalKeyboardKey.keyS, control: true): _submit,
+        const SingleActivator(LogicalKeyboardKey.keyD, control: true): _saveDraft,
+      },
+      child: FocusTraversalGroup(
+        policy: OrderedTraversalPolicy(),
+        child: FormPage(
+          title: title,
+          actions: _readOnly
+              ? const <Widget>[]
+              : <Widget>[
+                  Row(mainAxisSize: MainAxisSize.min, children: [
+                    OutlinedButton(
+                      onPressed: _busy ? null : _saveDraft,
+                      child: const Text('ذخیرهٔ پیش‌نویس'),
+                    ),
+                    const SizedBox(width: 12),
+                    FilledButton.icon(
+                      onPressed: _busy ? null : _submit,
+                      icon: _busy
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.check),
+                      label: const Text('ثبت نهایی (Ctrl+S)'),
+                    ),
+                  ]),
+                ],
+          children: [
+            if (_doneCode != null) _doneCard(),
+            if (_status == 'returned' && !_readOnly)
+              Card(
+                color: Colors.orange.shade50,
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text('برگشت‌خورده برای اصلاح: ${_rejectReason ?? ''}\nاصلاح کنید و دوباره «ثبت نهایی» بزنید؛ کد پسته تغییر نمی‌کند.'),
+                ),
+              ),
+            if (_readOnly && _doneCode == null)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 8),
+                child: Text('این پذیرش دیگر قابل ویرایش نیست.', style: TextStyle(color: Colors.orange)),
+              ),
+            AbsorbPointer(
+              absorbing: _readOnly,
+              child: wide
+                  ? Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: colA)),
+                      const SizedBox(width: 12),
+                      Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: colB)),
+                    ])
+                  : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [...colA, ...colB]),
+            ),
+            if (_error != null)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text(_error!, style: const TextStyle(color: Colors.red)),
+              ),
+          ],
+        ),
+      ),
     );
   }
 

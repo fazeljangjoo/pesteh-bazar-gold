@@ -6,6 +6,7 @@ import 'ledger.dart';
 import 'notify_service.dart';
 import 'pdf_output.dart';
 import 'pdf_service.dart';
+import 'fmt.dart' show Fmt, MoneyField;
 import 'utils.dart';
 import 'widgets.dart';
 
@@ -120,13 +121,13 @@ class _CashFlowCardState extends State<CashFlowCard> {
                   BarSeries('واریزی', kGainColor),
                   BarSeries('برداشت', Color(0xFFD9822B)),
                 ],
-                format: (v) => '${faCompact(v)} ریال',
+                format: (v) => '${faCompactMoney(v)} ${Fmt.unitLabel()}',
               ),
               const SizedBox(height: 12),
               Row(children: [
-                MiniStat(label: 'جمع واریزی', value: faCompact(totalIn), color: kGainColor),
-                MiniStat(label: 'جمع برداشت', value: faCompact(totalOut), color: const Color(0xFFD9822B)),
-                MiniStat(label: 'خالص', value: faCompact(net), color: net >= 0 ? kGainColor : kLossColor),
+                MiniStat(label: 'جمع واریزی', value: faCompactMoney(totalIn), color: kGainColor),
+                MiniStat(label: 'جمع برداشت', value: faCompactMoney(totalOut), color: const Color(0xFFD9822B)),
+                MiniStat(label: 'خالص', value: faCompactMoney(net), color: net >= 0 ? kGainColor : kLossColor),
               ]),
             ]);
           },
@@ -209,12 +210,12 @@ class _LoanSheetState extends State<_LoanSheet> with EditGuard<_LoanSheet> {
         _ => 'پولی که شما به ${widget.party} پس می‌دهید',
       };
 
-  double get _dueSum => _dues.fold<double>(0, (a, d) => a + (parseNum(d.amount.text) ?? 0));
+  double get _dueSum => _dues.fold<double>(0, (a, d) => a + (MoneyField.stored(d.amount) ?? 0));
 
   double get _repayMax => _kind == 'repay_in' ? widget.maxIn : widget.maxOut;
 
   Future<void> _save() async {
-    final amt = parseNum(_amount.text) ?? 0;
+    final amt = (MoneyField.stored(_amount) ?? 0).toDouble();
     if (amt <= 0) {
       snack(context, 'مبلغ را وارد کنید');
       return;
@@ -224,26 +225,26 @@ class _LoanSheetState extends State<_LoanSheet> with EditGuard<_LoanSheet> {
       return;
     }
     if (_isRepay && amt > _repayMax + 0.5) {
-      snack(context, 'مبلغ بازپرداخت از مانده (${faNum(_repayMax, dec: 0)} ریال) بیشتر است');
+      snack(context, 'مبلغ بازپرداخت از مانده (${Fmt.money(_repayMax)}) بیشتر است');
       return;
     }
     final dueList = <Map<String, dynamic>>[];
     if (!_isRepay) {
       // یک سررسید با مبلغ خالی = کل مبلغ قرض
-      if (_dues.length == 1 && (parseNum(_dues.first.amount.text) ?? 0) <= 0) {
+      if (_dues.length == 1 && (MoneyField.stored(_dues.first.amount) ?? 0) <= 0) {
         _dues.first.amount.text = _amount.text;
       }
       for (var i = 0; i < _dues.length; i++) {
-        final a = parseNum(_dues[i].amount.text) ?? 0;
+        final a = (MoneyField.stored(_dues[i].amount) ?? 0).toDouble();
         if (a <= 0) {
-          snack(context, 'مبلغ سررسید ${faNum(i + 1, dec: 0)} را وارد کنید');
+          snack(context, 'مبلغ سررسید ${Fmt.money(i + 1, label: false)} را وارد کنید');
           return;
         }
         final n = _dues[i].note.text.trim();
         dueList.add({'amount': a, 'due_date': _dues[i].date.toIso8601String(), 'note': n.isEmpty ? null : n});
       }
       if ((_dueSum - amt).abs() > 0.5) {
-        snack(context, 'جمع مبلغ سررسیدها (${faNum(_dueSum, dec: 0)}) باید برابر مبلغ قرض (${faNum(amt, dec: 0)}) باشد');
+        snack(context, 'جمع مبلغ سررسیدها (${Fmt.money(_dueSum, label: false)}) باید برابر مبلغ قرض (${Fmt.money(amt, label: false)}) باشد');
         return;
       }
     }
@@ -277,7 +278,7 @@ class _LoanSheetState extends State<_LoanSheet> with EditGuard<_LoanSheet> {
         padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Row(children: [
-            Expanded(child: Text('سررسید ${faNum(i + 1, dec: 0)}', style: const TextStyle(fontWeight: FontWeight.w700))),
+            Expanded(child: Text('سررسید ${Fmt.money(i + 1, label: false)}', style: const TextStyle(fontWeight: FontWeight.w700))),
             if (_dues.length > 1)
               IconButton(
                 tooltip: 'حذف این سررسید',
@@ -287,7 +288,7 @@ class _LoanSheetState extends State<_LoanSheet> with EditGuard<_LoanSheet> {
                 }),
               ),
           ]),
-          numField(d.amount, 'مبلغ سررسید (ریال)', required: true, thousands: true, onChanged: () => setState(() {})),
+          MoneyField(controller: d.amount, label: 'مبلغ سررسید', required: true, onChanged: () => setState(() {})),
           dateField(context, 'تاریخ سررسید', d.date, (v) => setState(() => d.date = v)),
           textField(d.note, 'جزئیات (اختیاری)'),
         ]),
@@ -297,7 +298,7 @@ class _LoanSheetState extends State<_LoanSheet> with EditGuard<_LoanSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final amt = parseNum(_amount.text) ?? 0;
+    final amt = (MoneyField.stored(_amount) ?? 0).toDouble();
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: SafeArea(
@@ -321,11 +322,11 @@ class _LoanSheetState extends State<_LoanSheet> with EditGuard<_LoanSheet> {
                 onSelectionChanged: (v) => setState(() => _kind = v.first),
               ),
               const SizedBox(height: 6),
-              Text('مانده قابل بازپرداخت: ${faNum(_repayMax, dec: 0)} ریال',
+              Text('مانده قابل بازپرداخت: ${Fmt.money(_repayMax)}',
                   style: const TextStyle(fontSize: 12.5, color: Colors.black54)),
               const SizedBox(height: 10),
             ],
-            numField(_amount, 'مبلغ (ریال)', required: true, thousands: true, hint: _hint, onChanged: () => setState(() {})),
+            MoneyField(controller: _amount, label: 'مبلغ', required: true, hint: _hint, onChanged: () => setState(() {})),
             dateField(context, _isRepay ? 'تاریخ بازپرداخت' : (_kind == 'given' ? 'تاریخ اعطای قرض' : 'تاریخ دریافت قرض'), _date,
                 (d) => setState(() => _date = d)),
             textField(_note, 'توضیحات (اختیاری)'),
@@ -340,7 +341,7 @@ class _LoanSheetState extends State<_LoanSheet> with EditGuard<_LoanSheet> {
               Row(children: [
                 Expanded(
                   child: Text(
-                    'جمع سررسیدها: ${faNum(_dueSum, dec: 0)} از ${faNum(amt, dec: 0)} ریال',
+                    'جمع سررسیدها: ${Fmt.money(_dueSum, label: false)} از ${Fmt.money(amt)}',
                     style: TextStyle(
                         fontSize: 12.5,
                         color: (_dueSum - amt).abs() <= 0.5 ? Colors.green.shade800 : Colors.deepOrange.shade800),
@@ -397,7 +398,7 @@ Future<void> exportLoanPdf(BuildContext context, {PartyAccount? party, List<Part
         entries.add([
           if (!single) a.name,
           l.label,
-          faNum(l.amount, dec: 0),
+          Fmt.money(l.amount, label: false),
           jalaliDateFromDt(l.date),
           l.note ?? '',
         ]);
@@ -413,7 +414,7 @@ Future<void> exportLoanPdf(BuildContext context, {PartyAccount? party, List<Part
       dueRows.add([
         if (!single) partyKey(r['party'] as String?),
         given ? 'قرض اعطایی' : 'قرض دریافتی',
-        faNum((r['amount'] as num).toDouble(), dec: 0),
+        Fmt.money((r['amount'] as num).toDouble(), label: false),
         jalaliDateFromDt(DateTime.parse(r['due_date'] as String)),
         paid ? (given ? 'دریافت شد' : 'پرداخت شد') : 'در انتظار',
         (r['note'] as String?) ?? '',
@@ -423,8 +424,8 @@ Future<void> exportLoanPdf(BuildContext context, {PartyAccount? party, List<Part
       title: single ? 'دفتر قرض و وام — ${withLoans.first.name}' : 'دفتر قرض و وام — همهٔ طرف‌حساب‌ها',
       subtitle: '',
       summary: [
-        ('مانده طلب قرضی', '${faNum(recv, dec: 0)} ریال'),
-        ('مانده بدهی قرضی', '${faNum(pay, dec: 0)} ریال'),
+        ('مانده طلب قرضی', '${Fmt.money(recv)}'),
+        ('مانده بدهی قرضی', '${Fmt.money(pay)}'),
       ],
       sections: [
         (heading: 'تراکنش‌های قرض و بازپرداخت', rows: entries),

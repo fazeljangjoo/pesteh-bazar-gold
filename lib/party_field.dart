@@ -8,7 +8,8 @@ import 'ledger.dart';
 class PartyField extends StatefulWidget {
   final TextEditingController controller;
   final String label;
-  const PartyField({super.key, required this.controller, required this.label});
+  final double gap;
+  const PartyField({super.key, required this.controller, required this.label, this.gap = 12});
 
   @override
   State<PartyField> createState() => _PartyFieldState();
@@ -35,7 +36,7 @@ class _PartyFieldState extends State<PartyField> {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: EdgeInsets.only(bottom: widget.gap),
       child: RawAutocomplete<String>(
         textEditingController: widget.controller,
         focusNode: _focus,

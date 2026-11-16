@@ -121,6 +121,10 @@ class _StockCountEditScreenState extends State<StockCountEditScreen> {
   int? _id;
   late String _uid;
   bool _approved = false;
+  String _status = 'draft'; // S31.T31.8b: draft | submitted | approved
+  Map<String, dynamic>? _summary; // server summary (short/over kg+value, needs_owner_approval)
+  bool get _submitted => _status == 'submitted';
+  bool get _ro => _approved || _submitted; // lines frozen
   DateTime _date = DateTime.now();
   String? _wh;
   List<WhOption> _whs = <WhOption>[];
@@ -201,6 +205,8 @@ class _StockCountEditScreenState extends State<StockCountEditScreen> {
           saved = await StockApi.call('stock_count.get', <String, dynamic>{'id': _id});
           _uid = '${saved['uid'] ?? _uid}';
           _approved = saved['status'] == 'approved';
+          _status = '${saved['status'] ?? 'draft'}';
+          _summary = saved['summary'] is Map ? Map<String, dynamic>.from(saved['summary'] as Map) : null;
           _date = DateTime.tryParse('${saved['date']}') ?? _date;
           _wh = saved['warehouse_uid'] as String?;
           _note.text = '${saved['note'] ?? ''}';
@@ -352,7 +358,7 @@ class _StockCountEditScreenState extends State<StockCountEditScreen> {
       ),
     );
     if (ok != true) return;
-    if (!await _save(needOnline: true)) return;
+    if (!_submitted && !await _save(needOnline: true)) return;
     setState(() => _busy = true);
     try {
       await StockApi.call('stock_count.approve', <String, dynamic>{'id': _id});
@@ -369,12 +375,59 @@ class _StockCountEditScreenState extends State<StockCountEditScreen> {
     }
   }
 
+  /// S31.T31.8b — submit (draft -> submitted, lines frozen) / reopen (submitted -> draft). Online only.
+  Future<void> _setState(String action, String okMsg) async {
+    if (action == 'stock_count.submit' && !await _save(needOnline: true)) return;
+    if (_id == null) return;
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await StockApi.call(action, <String, dynamic>{'id': _id});
+      final Map<String, dynamic> r = await StockApi.call('stock_count.get', <String, dynamic>{'id': _id});
+      if (!mounted) return;
+      setState(() {
+        _status = '${r['status'] ?? 'draft'}';
+        _summary = r['summary'] is Map ? Map<String, dynamic>.from(r['summary'] as Map) : null;
+        _busy = false;
+      });
+      snack(context, okMsg);
+    } on StockApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.message; // 403 for staff above the approval limit arrives here as a Persian message
+        _busy = false;
+      });
+    }
+  }
+
+  Widget _summaryCard() {
+    final Map<String, dynamic>? s = _summary;
+    if (s == null) return const SizedBox.shrink();
+    final bool owner = s['needs_owner_approval'] == true;
+    String m(dynamic v, {int dec = 3}) => v is num ? faNum(v, dec: dec) : '—';
+    return Card(
+      margin: const EdgeInsets.fromLTRB(8, 4, 8, 4),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+          Text('خلاصهٔ اختلاف (${_submitted ? 'ارسال‌شده' : 'پیش‌نویس'})', style: const TextStyle(fontWeight: FontWeight.bold)),
+          Text('کسری: ${m(s['short_kg'])} کیلو · ${m(s['short_value'], dec: 0)} ریال', style: const TextStyle(color: Colors.red, fontSize: 13)),
+          Text('اضافه: ${m(s['over_kg'])} کیلو · ${m(s['over_value'], dec: 0)} ریال', style: const TextStyle(color: Colors.green, fontSize: 13)),
+          Text('اقلام دارای اختلاف: ${m(s['lines_with_diff'], dec: 0)}', style: const TextStyle(fontSize: 12)),
+          if (owner) const Text('اختلاف بالاتر از سقف تأیید است؛ فقط مالک می‌تواند تأیید کند.', style: TextStyle(color: Colors.orange, fontSize: 12)),
+        ]),
+      ),
+    );
+  }
+
   Widget _numBox(TextEditingController c, String label, {FocusNode? node, double width = 100}) => SizedBox(
         width: width,
         child: TextField(
           controller: c,
           focusNode: node,
-          enabled: !_approved,
+          enabled: !_ro,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
           decoration: InputDecoration(labelText: label, isDense: true),
         ),
@@ -391,8 +444,10 @@ class _StockCountEditScreenState extends State<StockCountEditScreen> {
           title: Text(_approved ? 'انبارگردانی تأییدشده' : 'برگه انبارگردانی', style: const TextStyle(fontSize: 16)),
           actions: <Widget>[
             if (_offline) const Padding(padding: EdgeInsets.symmetric(horizontal: 6), child: Icon(Icons.cloud_off, size: 20)),
-            if (!_approved) IconButton(tooltip: 'اسکن بارکد', onPressed: _busy || _loading ? null : _scan, icon: const Icon(Icons.qr_code_scanner)),
-            if (!_approved) IconButton(tooltip: 'ذخیره پیش‌نویس', onPressed: _busy || _loading ? null : () async { if (await _save() && mounted && !_offline) snack(context, 'ذخیره شد'); }, icon: const Icon(Icons.save_outlined)),
+            if (!_ro) IconButton(tooltip: 'اسکن بارکد', onPressed: _busy || _loading ? null : _scan, icon: const Icon(Icons.qr_code_scanner)),
+            if (!_ro) IconButton(tooltip: 'ذخیره پیش‌نویس', onPressed: _busy || _loading ? null : () async { if (await _save() && mounted && !_offline) snack(context, 'ذخیره شد'); }, icon: const Icon(Icons.save_outlined)),
+            if (!_ro && _id != null) IconButton(tooltip: 'ارسال برای تأیید', onPressed: _busy || _loading ? null : () => _setState('stock_count.submit', 'برای تأیید ارسال شد'), icon: const Icon(Icons.send_outlined)),
+            if (_submitted) IconButton(tooltip: 'بازگشایی', onPressed: _busy || _loading ? null : () => _setState('stock_count.reopen', 'به پیش‌نویس بازگشت'), icon: const Icon(Icons.lock_open_outlined)),
             if (!_approved) IconButton(tooltip: 'تأیید نهایی (آنلاین)', onPressed: _busy || _loading ? null : _approve, icon: const Icon(Icons.done_all)),
           ],
         ),
@@ -400,12 +455,13 @@ class _StockCountEditScreenState extends State<StockCountEditScreen> {
             ? const Center(child: CircularProgressIndicator())
             : Column(children: <Widget>[
                 if (_busy) const LinearProgressIndicator(),
+                _summaryCard(),
                 if (_error != null) Padding(padding: const EdgeInsets.all(8), child: Text(_error!, style: const TextStyle(color: Colors.red))),
                 Padding(
                   padding: const EdgeInsets.all(8),
                   child: Wrap(spacing: 8, runSpacing: 4, crossAxisAlignment: WrapCrossAlignment.center, children: <Widget>[
                     OutlinedButton(
-                      onPressed: _approved ? null : () async {
+                      onPressed: _ro ? null : () async {
                         final DateTime? d = await pickDate(context, initial: _date);
                         if (d != null) setState(() => _date = d);
                       },
@@ -418,7 +474,7 @@ class _StockCountEditScreenState extends State<StockCountEditScreen> {
                         const DropdownMenuItem<String?>(value: null, child: Text('همه انبارها')),
                         for (final WhOption w in _whs) DropdownMenuItem<String?>(value: w.uid, child: Text(w.name)),
                       ],
-                      onChanged: _approved ? null : (String? v) async {
+                      onChanged: _ro ? null : (String? v) async {
                         setState(() {
                           _wh = v;
                           _loading = true;
@@ -432,7 +488,7 @@ class _StockCountEditScreenState extends State<StockCountEditScreen> {
                         if (mounted) setState(() => _loading = false);
                       },
                     ),
-                    SizedBox(width: 180, child: TextField(controller: _note, enabled: !_approved, decoration: const InputDecoration(labelText: 'یادداشت', isDense: true))),
+                    SizedBox(width: 180, child: TextField(controller: _note, enabled: !_ro, decoration: const InputDecoration(labelText: 'یادداشت', isDense: true))),
                     SizedBox(width: 160, child: TextField(controller: _search, onChanged: (_) => setState(() {}), decoration: const InputDecoration(labelText: 'جست‌وجوی قلم / کد', isDense: true, prefixIcon: Icon(Icons.search)))),
                   ]),
                 ),

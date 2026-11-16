@@ -5,6 +5,7 @@ import 'package:image_picker/image_picker.dart';
 
 import 'company_profile.dart';
 import 'entity_store.dart';
+import 'form_layout.dart';
 import 'invoice_templates_pdf.dart';
 import 'pdf_output.dart';
 import 'widgets.dart';
@@ -200,6 +201,9 @@ class _CompanySettingsScreenState extends State<CompanySettingsScreen> {
     return 'تنظیم نشده';
   }
 
+  Widget _wideWrap(BuildContext context, Widget child) =>
+      kWideForm(context) ? Center(child: ConstrainedBox(constraints: const BoxConstraints(maxWidth: 1180), child: child)) : child;
+
   @override
   Widget build(BuildContext context) {
     return Directionality(
@@ -208,7 +212,7 @@ class _CompanySettingsScreenState extends State<CompanySettingsScreen> {
         appBar: AppBar(title: const Text('مشخصات شرکت و قالب فاکتور')),
         body: _loading
             ? const Center(child: CircularProgressIndicator())
-            : ListView(padding: const EdgeInsets.all(16), children: <Widget>[
+            : _wideWrap(context, ListView(padding: const EdgeInsets.all(16), children: <Widget>[
                 const Text('مشخصات شرکت', style: TextStyle(fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
                 Row(children: <Widget>[
@@ -226,7 +230,9 @@ class _CompanySettingsScreenState extends State<CompanySettingsScreen> {
                     TextButton(onPressed: () => setState(() => _logo = ''), child: const Text('حذف لوگو')),
                 ]),
                 const SizedBox(height: 12),
-                for (final MapEntry<String, TextEditingController> e in _c.entries) textField(e.value, _labels[e.key] ?? e.key),
+                FormGrid(gap: 12, minColWidth: 300, children: <Widget>[
+                  for (final MapEntry<String, TextEditingController> e in _c.entries) textField(e.value, _labels[e.key] ?? e.key),
+                ]),
                 FilledButton(onPressed: _saveProfile, child: const Text('ذخیرهٔ مشخصات')),
                 const Divider(height: 32),
                 const Text('قالب چاپ فاکتور', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -248,7 +254,7 @@ class _CompanySettingsScreenState extends State<CompanySettingsScreen> {
                     trailing: const Icon(Icons.edit_outlined),
                     onTap: () => _editSeq(e.key),
                   ),
-              ]),
+              ])),
       ),
     );
   }

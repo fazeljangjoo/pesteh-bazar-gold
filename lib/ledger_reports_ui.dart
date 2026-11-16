@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'fmt.dart' show Fmt;
 
 import 'excel_io.dart';
 import 'pdf_output.dart';
@@ -22,7 +23,7 @@ const Map<String, String> kLrSourceTypes = <String, String>{'manual': 'دستی'
 const int kLrPage = 100;
 const int kLrExportMax = 20000;
 
-String _m(dynamic v) => faNum(((v is num) ? v : num.tryParse('${v ?? 0}') ?? 0).toDouble(), dec: 0);
+String _m(dynamic v) => Fmt.money(((v is num) ? v : num.tryParse('${v ?? 0}') ?? 0).toDouble(), label: false);
 int _i(dynamic v) => (v is num) ? v.toInt() : (int.tryParse('${v ?? 0}') ?? 0);
 String _jd(dynamic iso) => (iso == null || '$iso'.isEmpty) ? '-' : jalaliDate('$iso');
 String _iso(DateTime d) => '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';

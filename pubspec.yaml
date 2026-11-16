@@ -41,3 +41,9 @@ flutter:
   assets:
     - assets/fonts/
     - assets/images/
+  fonts:
+    - family: Vazirmatn
+      fonts:
+        - asset: assets/fonts/Vazirmatn-Regular.ttf
+        - asset: assets/fonts/Vazirmatn-Bold.ttf
+          weight: 700

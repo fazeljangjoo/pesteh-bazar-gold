@@ -4,6 +4,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'fmt.dart' show Fmt;
 import 'package:sqflite/sqflite.dart';
 
 import 'db.dart';
@@ -96,7 +97,7 @@ class PriceSuggestionHint extends StatelessWidget {
           padding: const EdgeInsets.only(bottom: 12),
           child: Row(children: <Widget>[
             Expanded(
-              child: Text('قیمت پیشنهادی روز: ${faNum(price.toDouble(), dec: 0)} (${jalaliDate('${s['price_date']}')})',
+              child: Text('قیمت پیشنهادی روز: ${Fmt.money(price.toDouble(), label: false)} (${jalaliDate('${s['price_date']}')})',
                   style: const TextStyle(fontSize: 12, color: Colors.black54)),
             ),
             TextButton(onPressed: () => onAccept(price), child: const Text('استفاده')),
@@ -174,7 +175,7 @@ class _PriceTableScreenState extends State<PriceTableScreen> {
                 ],
                 onChanged: (String? v) => set(() => grade = v),
               ),
-              TextField(controller: price, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'قیمت هر کیلو')),
+              TextField(controller: price, keyboardType: TextInputType.number, inputFormatters: [ThousandsInputFormatter()], decoration: const InputDecoration(labelText: 'قیمت هر کیلو')),
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 title: Text('تاریخ: ${jalaliDateFromDt(day)}'),
@@ -239,7 +240,7 @@ class _PriceTableScreenState extends State<PriceTableScreen> {
                   for (final Map<String, dynamic> r in _rows)
                     ListTile(
                       title: Text('${r['type_name']}${r['grade_key'] == null ? '' : ' - ${_gradeLabel['${r['grade_key']}'] ?? r['grade_key']}'}'),
-                      subtitle: Text('${jalaliDate('${r['price_date']}')} · ${faNum((r['price_per_kg'] as num).toDouble(), dec: 0)}'),
+                      subtitle: Text('${jalaliDate('${r['price_date']}')} · ${Fmt.money((r['price_per_kg'] as num).toDouble(), label: false)}'),
                       trailing: _offline ? null : IconButton(icon: const Icon(Icons.delete_outline), onPressed: () => _delete(r)),
                     ),
                 ]),

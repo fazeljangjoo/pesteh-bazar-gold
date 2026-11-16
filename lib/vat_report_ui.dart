@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'fmt.dart' show Fmt;
 
 import 'excel_io.dart';
 import 'pdf_output.dart';
@@ -41,7 +42,7 @@ const Map<String, String> kVatStatuses = <String, String>{
 };
 
 double _d(dynamic v) => ReturnsHelp.d(v);
-String _m(dynamic v) => faNum(_d(v), dec: 0);
+String _m(dynamic v) => Fmt.money(_d(v), label: false);
 String _jd(dynamic iso) => (iso == null || '$iso'.isEmpty) ? '-' : jalaliDate('$iso');
 String _iso(DateTime d) => '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
@@ -66,24 +67,24 @@ class VatReportData {
     final Map<String, dynamic> s = _summary;
     final int net = netPayable;
     return <List<String>>[
-      <String>['فروش مشمول مالیات (ریال)', _m(s['taxable_sales'])],
-      <String>['فروش معاف (ریال)', _m(s['exempt_sales'])],
-      <String>['فروش نرخ صفر (ریال)', _m(s['zero_rated_sales'])],
-      <String>['فروش بدون وضعیت مالیاتی (ریال)', _m(s['unspecified_sales'])],
-      <String>['مالیات فروش — ستانده (ریال)', _m(s['output_vat']), 'b'],
-      <String>['خرید مشمول مالیات (ریال)', _m(s['taxable_purchases'])],
-      <String>['خرید معاف (ریال)', _m(s['exempt_purchases'])],
-      <String>['خرید نرخ صفر (ریال)', _m(s['zero_rated_purchases'])],
-      <String>['خرید بدون وضعیت مالیاتی (ریال)', _m(s['unspecified_purchases'])],
-      <String>['مالیات خرید — قابل اعتبار (ریال)', _m(s['input_vat']), 'b'],
-      <String>[net >= 0 ? 'مالیات قابل پرداخت (ریال)' : 'مالیات قابل استرداد (ریال)', _m(net.abs()), 'b'],
-      <String>['تسویه‌شده تاکنون: فروش / خرید (ریال)', '${_m(s['settled_output'])} / ${_m(s['settled_input'])}'],
+      <String>['فروش مشمول مالیات (${Fmt.unitLabel()})', _m(s['taxable_sales'])],
+      <String>['فروش معاف (${Fmt.unitLabel()})', _m(s['exempt_sales'])],
+      <String>['فروش نرخ صفر (${Fmt.unitLabel()})', _m(s['zero_rated_sales'])],
+      <String>['فروش بدون وضعیت مالیاتی (${Fmt.unitLabel()})', _m(s['unspecified_sales'])],
+      <String>['مالیات فروش — ستانده (${Fmt.unitLabel()})', _m(s['output_vat']), 'b'],
+      <String>['خرید مشمول مالیات (${Fmt.unitLabel()})', _m(s['taxable_purchases'])],
+      <String>['خرید معاف (${Fmt.unitLabel()})', _m(s['exempt_purchases'])],
+      <String>['خرید نرخ صفر (${Fmt.unitLabel()})', _m(s['zero_rated_purchases'])],
+      <String>['خرید بدون وضعیت مالیاتی (${Fmt.unitLabel()})', _m(s['unspecified_purchases'])],
+      <String>['مالیات خرید — قابل اعتبار (${Fmt.unitLabel()})', _m(s['input_vat']), 'b'],
+      <String>[net >= 0 ? 'مالیات قابل پرداخت (${Fmt.unitLabel()})' : 'مالیات قابل استرداد (${Fmt.unitLabel()})', _m(net.abs()), 'b'],
+      <String>['تسویه‌شده تاکنون: فروش / خرید (${Fmt.unitLabel()})', '${_m(s['settled_output'])} / ${_m(s['settled_input'])}'],
     ];
   }
 
   (List<String>, List<List<String>>) docsTable() {
     return (
-      <String>['تاریخ', 'نوع', 'طرف حساب', 'وضعیت مالیاتی', 'مبلغ پایه (ریال)', 'مالیات (ریال)'],
+      <String>['تاریخ', 'نوع', 'طرف حساب', 'وضعیت مالیاتی', 'مبلغ پایه (${Fmt.unitLabel()})', 'مالیات (${Fmt.unitLabel()})'],
       ReturnsHelp.maps(raw['documents'])
           .map((Map<String, dynamic> r) => <String>[
                 _jd(r['date']),
@@ -99,7 +100,7 @@ class VatReportData {
 
   (List<String>, List<List<String>>) linesTable() {
     return (
-      <String>['تاریخ', 'شمارهٔ سند', 'سمت', 'منبع', 'شرح', 'مبلغ (ریال)'],
+      <String>['تاریخ', 'شمارهٔ سند', 'سمت', 'منبع', 'شرح', 'مبلغ (${Fmt.unitLabel()})'],
       ReturnsHelp.maps(raw['lines'])
           .map((Map<String, dynamic> r) => <String>[
                 _jd(r['date']),
@@ -228,7 +229,7 @@ class _VatReportScreenState extends State<VatReportScreen> {
     try {
       final Map<String, dynamic> r = await StockApi.call('vat.settle', p);
       if (!mounted) return;
-      snack(context, 'سند تسویه ثبت شد — مبلغ ${faNum(_d(r['amount']), dec: 0)} ریال');
+      snack(context, 'سند تسویه ثبت شد — مبلغ ${Fmt.money(_d(r['amount']))}');
       _load();
     } on StockApiException catch (e) {
       if (mounted) snack(context, e.message);

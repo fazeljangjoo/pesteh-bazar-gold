@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'fmt.dart' show Fmt;
 import 'utils.dart';
 
 // ============================================================================
@@ -31,6 +32,9 @@ String faCompact(double v) {
   if (a >= 1e3) return '$sign${faNum(a / 1e3, dec: 0)} هزار';
   return '$sign${faNum(a, dec: 0)}';
 }
+
+/// S35.T35.11b: مبلغ ذخیره‌شده -> واحد نمایش (ریال/تومان) و سپس کوتاه‌شده. فقط برای نمودار مبلغ؛ وزن با faCompact.
+String faCompactMoney(double stored) => faCompact(Fmt.toDisplay(stored).toDouble());
 
 // ----------------------------------------------------------------------------
 // قالب مشترک کارت نمودار

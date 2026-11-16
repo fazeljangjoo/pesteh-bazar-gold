@@ -10,5 +10,8 @@
  {"name":"negative q","in":{"base_price":1,"weight_kg":1,"items":[{"pct":10,"q":-1}]},"error":"bad_q"},
  {"name":"gram out of range","in":{"base_price":1,"weight_kg":1,"items":[{"pct":10,"q":1,"gram_mode":true,"g":120}]},"error":"bad_gram"},
  {"name":"gram mode without g","in":{"base_price":1,"weight_kg":1,"items":[{"pct":10,"q":1,"gram_mode":true}]},"error":"bad_gram"},
- {"name":"bad weight","in":{"base_price":1,"weight_kg":-5,"items":[]},"error":"bad_weight_kg"}
+ {"name":"bad weight","in":{"base_price":1,"weight_kg":-5,"items":[]},"error":"bad_weight_kg"},
+ {"name":"base gram: P=30M,R=50,g=46 -> eff 27.6M","in":{"base_price":30000000,"weight_kg":100,"base_gram_mode":true,"base_g":46,"items":[]},"avg_per_kg":27600000,"total":2760000000},
+ {"name":"user example: 8% dombest gram 27M/46, 13% 21M, 2% none, P=30M","in":{"base_price":30000000,"weight_kg":100,"items":[{"pct":8,"q":27000000,"gram_mode":true,"g":46},{"pct":13,"q":21000000},{"pct":2,"q":null}]},"avg_per_kg":28417200,"total":2841720000},
+ {"name":"base gram out of range","in":{"base_price":1,"weight_kg":1,"base_gram_mode":true,"base_g":0,"items":[]},"error":"bad_base_gram"}
 ]

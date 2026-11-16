@@ -1,8 +1,12 @@
 import 'broker_ui.dart';
 import 'package:flutter/material.dart';
+import 'fmt.dart' show Fmt;
 
 import 'barcode_utils.dart';
 import 'db.dart';
+import 'correction_ui.dart' show showCorrectionDialog;
+import 'doc_drafts.dart' show DraftsScreen;
+import 'form_settings.dart' show FormSettingsLocal;
 import 'vouchers_links.dart';
 import 'live_query.dart';
 import 'invoice_service.dart';
@@ -10,10 +14,15 @@ import 'license_service.dart';
 import 'receipt_screen.dart';
 import 'returns_ui.dart';
 import 'sale_form.dart';
+import 'sale_export_ui.dart'; // S31.T31.10b/11b
 import 'notify_service.dart';
 import 'perms.dart';
 import 'utils.dart';
+import 'form_layout.dart' show CompactInfo;
 import 'widgets.dart';
+import 'pdf_output.dart';
+import 'weigh_docs_pdf.dart';
+import 'weigh_print_menu.dart' show weighPrintMenu;
 
 /// یکسان‌سازی «ي/ك» عربی و «ی/ک» فارسی برای جستجو
 String _norm(String s) => toEnDigits(s.replaceAll('ي', 'ی').replaceAll('ك', 'ک')).trim().toLowerCase();
@@ -45,7 +54,21 @@ class _SalesScreenState extends State<SalesScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('فروش')),
+      appBar: AppBar(
+        title: const Text('فروش'),
+        actions: <Widget>[
+          FutureBuilder<bool>(
+            future: FormSettingsLocal.isOn('draft'), // S35.T35.9b
+            builder: (BuildContext c, AsyncSnapshot<bool> s) => s.data == true
+                ? IconButton(
+                    tooltip: 'پیش‌نویس‌ها',
+                    icon: const Icon(Icons.edit_note),
+                    onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const DraftsScreen(docType: 'sale'))),
+                  )
+                : const SizedBox.shrink(),
+          ),
+        ],
+      ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () =>
             Navigator.push(context, MaterialPageRoute(builder: (_) => const SaleForm())),
@@ -110,20 +133,24 @@ class _SalesScreenState extends State<SalesScreen> {
                       children: [
                         Row(children: [
                           Expanded(
-                            child: Text(
-                              '${jalaliDate(sale['date'] as String)}'
-                              '${sale['buyer'] != null ? '  •  ${sale['buyer']}' : ''}',
-                              style: Theme.of(context).textTheme.titleSmall,
-                            ),
+                            child: Text.rich(TextSpan(children: [
+                              TextSpan(
+                                  text: 'خریدار: ${(sale['buyer'] ?? '').toString().trim().isEmpty ? '—' : sale['buyer'].toString().trim()}',
+                                  style: const TextStyle(fontWeight: FontWeight.bold)),
+                              TextSpan(text: '  •  ${jalaliDate(sale['date'] as String)}'),
+                            ]), style: Theme.of(context).textTheme.titleSmall),
                           ),
                           PopupMenuButton<String>(
                             onSelected: (v) async {
                               if (v == 'edit') {
                                 Navigator.push(context,
                                     MaterialPageRoute(builder: (_) => SaleForm(editSaleId: id)));
+                              } else if (v == 'corr') {
+                                await showCorrectionDialog(context, docType: 'sale', id: id, price: (sale['price'] as num?) ?? 0, netWeight: (sale['net_weight'] as num?) ?? 0); // S35.T35.9c
                               } else if (v == 'del') {
-                                if (await confirm(context,
-                                    'این فروش حذف شود؟ وزن و گونی‌ها به انبار برمی‌گردند.')) {
+                                final String? delReason = await askDeleteReason(context,
+                                    'این فروش حذف شود؟ وزن و گونی‌ها به انبار برمی‌گردند.'); // S35.T35.9a
+                                if (delReason != null) {
                                   final rec = await AppDb.I.receiptOf(id);
                                   var creditIds = <int>[], chequeIds = <int>[];
                                   if (rec != null) {
@@ -135,7 +162,7 @@ class _SalesScreenState extends State<SalesScreen> {
                                         .map((r) => r['id'] as int)
                                         .toList();
                                   }
-                                  await AppDb.I.deleteSale(id);
+                                  await AppDb.I.deleteSale(id, reason: delReason);
                                   for (final cid in creditIds) {
                                     await NotifyService.I.cancelReceiptCreditRow(cid);
                                   }
@@ -148,6 +175,8 @@ class _SalesScreenState extends State<SalesScreen> {
                             itemBuilder: (_) => <PopupMenuEntry<String>>[
                               if (StaffPerms.I.can('sales.update'))
                                 const PopupMenuItem<String>(value: 'edit', child: Text('ویرایش')),
+                              if (StaffPerms.I.can('sales.update'))
+                                const PopupMenuItem<String>(value: 'corr', child: Text('سند اصلاحی (فی/وزن)')),
                               if (StaffPerms.I.can('sales.delete'))
                                 const PopupMenuItem<String>(value: 'del', child: Text('حذف')),
                             ],
@@ -157,22 +186,24 @@ class _SalesScreenState extends State<SalesScreen> {
                         infoRow('کد پسته', _codeOf(sale)),
                         for (final c in printableCodesIn(_codeOf(sale))) BarcodeBox(c, height: 44),
                         const SizedBox(height: 8),
+                        CompactInfo(children: [
                         infoRow('وزن کل (ناخالص - با گونی)', '${faNum(total)} کیلو'),
                         infoRow('وزن گونی‌ها', '${faNum(tare)} کیلو'),
                         if (small + large > 0) ...[
                           infoRow('گونی کوچک', faNum(small)),
                           infoRow('گونی بزرگ', faNum(large)),
                         ],
-                        if (sale['labor_cost'] != null) infoRow('هزینه کارگر', '${faNum(sale['labor_cost'] as num, dec: 0)} ریال'),
-                        if (sale['transport_cost'] != null) infoRow('هزینه حمل‌ونقل / باسکول', '${faNum(sale['transport_cost'] as num, dec: 0)} ریال'),
+                        if (sale['labor_cost'] != null) infoRow('هزینه کارگر', '${Fmt.money(sale['labor_cost'] as num)}'),
+                        if (sale['transport_cost'] != null) infoRow('هزینه حمل‌ونقل / باسکول', '${Fmt.money(sale['transport_cost'] as num)}'),
                         infoRow('وزن پسته (خالص)', '${faNum(net)} کیلو'),
-                        infoRow('فی فروش', '${faNum(price, dec: 0)} ریال'),
-                        infoRow('مبلغ فروش', '${faNum(revenue, dec: 0)} ریال'),
+                        infoRow('فی فروش', '${Fmt.money(price)}'),
+                        infoRow('مبلغ فروش', '${Fmt.money(revenue)}'),
                         if (fx) ...[
                           if (rate != null) infoRow('قیمت دلار روز فروش', '${faNum(rate, dec: 0)} ریال'),
                           if (rate != null) infoRow('فی فروش به دلار', faUsd(price / rate, dec: 4)),
                           if (usd != null) infoRow('مبلغ فروش به دلار', faUsd(usd.revenue)),
                         ],
+                        ]),
                         LocalDocVoucherLinks(mapKind: 'sale', localId: id, sourceType: 'sale'),
                         const SizedBox(height: 8),
                         Wrap(spacing: 8, runSpacing: 8, children: [
@@ -187,12 +218,37 @@ class _SalesScreenState extends State<SalesScreen> {
                               icon: const Icon(Icons.handshake_outlined),
                               label: const Text('دلال / کمیسیون'),
                             ),
+                          if (LicenseService.I.isFx.value && StaffPerms.I.can('sales.view'))
+                            OutlinedButton.icon(
+                              onPressed: () async {
+                                final int? sid = await AppDb.I.serverIdOf('sale', id);
+                                if (!context.mounted) return;
+                                if (sid == null) {
+                                  snack(context, 'ابتدا همگام‌سازی شود');
+                                  return;
+                                }
+                                Navigator.push(context, MaterialPageRoute<void>(builder: (_) => SaleExportScreen(saleId: sid)));
+                              },
+                              icon: const Icon(Icons.local_shipping_outlined),
+                              label: const Text('اطلاعات صادراتی'),
+                            ),
                           if (StaffPerms.I.can('sales.return'))
                             OutlinedButton.icon(
                               onPressed: () => openSaleReturn(context, sale),
                               icon: const Icon(Icons.assignment_return_outlined),
                               label: const Text('برگشت از فروش'),
                             ),
+                          // S35.T35.13d: رسید باسکول و بارنامه (قالب A4/A5/رول ۸۰)
+                          weighPrintMenu(context, 'رسید باسکول', (WeighPaper w) async {
+                            final f = await WeighDocs.buildSlip(sale, paper: w);
+                            if (context.mounted) await PdfOutput.show(context, f);
+                          }),
+                          weighPrintMenu(context, 'بارنامه', (WeighPaper w) async {
+                            final f = await WeighDocs.buildWaybill(sale, paper: w, items: <Map<String, dynamic>>[
+                              <String, dynamic>{'type_name': sale['type_name'], 'code': sale['code'], 'weight': sale['net_weight'] ?? sale['weight'], 'sacks': '${sale['small_sack_count'] ?? 0} / ${sale['large_sack_count'] ?? 0}'},
+                            ]);
+                            if (context.mounted) await PdfOutput.show(context, f);
+                          }),
                           FilledButton.tonalIcon(
                             onPressed: () => Navigator.push(
                               context,

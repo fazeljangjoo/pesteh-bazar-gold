@@ -5,6 +5,8 @@ import 'offline_docs.dart';
 import 'pdf_output.dart';
 import 'pdf_service.dart';
 import 'perms.dart';
+import 'fmt.dart' show Fmt, MoneyField;
+import 'form_layout.dart';
 import 'utils.dart';
 import 'warehouse_ui.dart' show StockApiException;
 import 'widgets.dart';
@@ -21,7 +23,9 @@ class ReturnsHelp {
 
   /// Server id of a local row; throws a Persian message when it has not reached the server yet.
   static Future<int> serverId(String kind, int localId) async {
-    final int? sid = await AppDb.I.serverIdOf(kind, localId) ?? await AppDb.I.aliasOf(kind, localId);
+    // sync_idmap و alias برای خرید با نوع 'pur' ذخیره می‌شوند، نه 'purchase' (sync_service/db.dart)
+    final String mapKind = kind == 'purchase' ? 'pur' : kind;
+    final int? sid = await AppDb.I.serverIdOf(mapKind, localId) ?? await AppDb.I.aliasOf(mapKind, localId);
     if (sid == null || sid <= 0) {
       throw StockApiException('این سند هنوز به سرور نرسیده؛ ابتدا همگام‌سازی کنید و دوباره تلاش کنید.');
     }
@@ -92,7 +96,7 @@ class _ReturnFormState extends State<_ReturnForm> {
     super.initState();
     _mode = widget.isSale ? 'reduce_receivable' : 'reduce_payable';
     _kg.text = faNum(widget.maxKg, dec: 3);
-    _price.text = faNum(widget.defaultPrice, dec: 0);
+    MoneyField.setStored(_price, widget.defaultPrice);
   }
 
   @override
@@ -110,7 +114,7 @@ class _ReturnFormState extends State<_ReturnForm> {
   Future<void> _save() async {
     if (!(_form.currentState?.validate() ?? false)) return;
     final double kg = parseNum(_kg.text) ?? 0;
-    final double price = parseNum(_price.text) ?? 0;
+    final double price = (MoneyField.stored(_price) ?? 0).toDouble();
     if (kg <= 0) {
       snack(context, 'وزن برگشت باید بزرگ‌تر از صفر باشد');
       return;
@@ -122,7 +126,7 @@ class _ReturnFormState extends State<_ReturnForm> {
       'refund_mode': _mode,
       'kg': kg,
       'unit_price': price,
-      if (_hasRefund && _refund.text.trim().isNotEmpty) 'refund_amount': parseNum(_refund.text) ?? 0,
+      if (_hasRefund && _refund.text.trim().isNotEmpty) 'refund_amount': MoneyField.stored(_refund) ?? 0,
       if (_mode == 'cheque_given' || _mode == 'cheque_back') 'cheque_no': _cheque.text.trim(),
     };
     setState(() {
@@ -146,42 +150,70 @@ class _ReturnFormState extends State<_ReturnForm> {
   @override
   Widget build(BuildContext context) {
     final Map<String, String> modes = widget.isSale ? ReturnsHelp.saleModes : ReturnsHelp.purchaseModes;
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.title)),
-      body: Form(
-        key: _form,
-        child: ListView(padding: const EdgeInsets.all(16), children: <Widget>[
-          infoRow(widget.isSale ? 'خریدار' : 'فروشنده', widget.party.isEmpty ? '-' : widget.party),
-          infoRow('سند اصلی', widget.subtitle),
-          infoRow(widget.isSale ? 'حداکثر قابل برگشت' : 'حداکثر قابل برگشت (موجودی)', '${faNum(widget.maxKg, dec: 3)} کیلو'),
+    final bool wide = kWideForm(context);
+    final double g = kFormGap;
+    final List<Widget> info = <Widget>[
+      infoRow(widget.isSale ? 'خریدار' : 'فروشنده', widget.party.isEmpty ? '-' : widget.party),
+      infoRow('سند اصلی', widget.subtitle),
+      infoRow(widget.isSale ? 'حداکثر قابل برگشت' : 'حداکثر قابل برگشت (موجودی)', '${faNum(widget.maxKg, dec: 3)} کیلو'),
+    ];
+    final Widget modeField = DropdownButtonFormField<String>(
+      value: _mode,
+      decoration: const InputDecoration(labelText: 'نحوهٔ تسویه', border: OutlineInputBorder()),
+      items: <DropdownMenuItem<String>>[
+        for (final MapEntry<String, String> e in modes.entries)
+          DropdownMenuItem<String>(value: e.key, child: Text(e.value)),
+      ],
+      onChanged: (String? v) => setState(() => _mode = v ?? _mode),
+    );
+    final Widget saveBtn = FilledButton.icon(
+      onPressed: _busy ? null : _save,
+      icon: _busy
+          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+          : const Icon(Icons.assignment_return_outlined),
+      label: const Text('ثبت برگشت'),
+    );
+    final Widget? err = _err == null ? null : Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(_err!, style: const TextStyle(color: Colors.red)));
+
+    if (!wide) {
+      return FormPage(
+        title: widget.title,
+        formKey: _form,
+        actions: <Widget>[saveBtn],
+        children: <Widget>[
+          ...info,
           const SizedBox(height: 12),
           dateField(context, 'تاریخ برگشت', _date, (DateTime d) => setState(() => _date = d)),
           numField(_kg, 'وزن برگشت', required: true, suffix: 'کیلو', max: widget.maxKg),
-          numField(_price, widget.isSale ? 'فی برگشت (پیش‌فرض: فی فروش)' : 'فی برگشت (پیش‌فرض: فی خرید)',
-              required: true, suffix: 'ریال', thousands: true),
-          DropdownButtonFormField<String>(
-            value: _mode,
-            decoration: const InputDecoration(labelText: 'نحوهٔ تسویه', border: OutlineInputBorder()),
-            items: <DropdownMenuItem<String>>[
-              for (final MapEntry<String, String> e in modes.entries)
-                DropdownMenuItem<String>(value: e.key, child: Text(e.value)),
-            ],
-            onChanged: (String? v) => setState(() => _mode = v ?? _mode),
-          ),
+          MoneyField(controller: _price, label: widget.isSale ? 'فی برگشت (پیش‌فرض: فی فروش)' : 'فی برگشت (پیش‌فرض: فی خرید)', required: true),
+          modeField,
           const SizedBox(height: 12),
-          if (_hasRefund) numField(_refund, 'مبلغ بازپرداخت (خالی = کل ارزش برگشت)', suffix: 'ریال', thousands: true),
+          if (_hasRefund) MoneyField(controller: _refund, label: 'مبلغ بازپرداخت (خالی = کل ارزش برگشت)'),
           if (_mode == 'cheque_given' || _mode == 'cheque_back') textField(_cheque, 'شمارهٔ چک'),
           textField(_note, 'یادداشت', lines: 2),
-          if (_err != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(_err!, style: const TextStyle(color: Colors.red))),
-          FilledButton.icon(
-            onPressed: _busy ? null : _save,
-            icon: _busy
-                ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.assignment_return_outlined),
-            label: const Text('ثبت برگشت'),
-          ),
+          if (err != null) err,
+        ],
+      );
+    }
+    return FormPage(
+      title: widget.title,
+      formKey: _form,
+      actions: <Widget>[saveBtn],
+      children: <Widget>[
+        FormSection(title: 'سند اصلی', children: <Widget>[CompactInfo(children: info), SizedBox(height: g)]),
+        FormSection(title: 'مشخصات برگشت', children: <Widget>[
+          FormGrid(gap: 12, minColWidth: 260, children: <Widget>[
+            dateField(context, 'تاریخ برگشت', _date, (DateTime d) => setState(() => _date = d)),
+            numField(_kg, 'وزن برگشت', required: true, suffix: 'کیلو', max: widget.maxKg, gap: g),
+            MoneyField(controller: _price, label: widget.isSale ? 'فی برگشت (پیش‌فرض: فی فروش)' : 'فی برگشت (پیش‌فرض: فی خرید)', required: true, gap: g),
+            Padding(padding: EdgeInsets.only(bottom: g), child: modeField),
+            if (_hasRefund) MoneyField(controller: _refund, label: 'مبلغ بازپرداخت (خالی = کل ارزش برگشت)', gap: g),
+            if (_mode == 'cheque_given' || _mode == 'cheque_back') textField(_cheque, 'شمارهٔ چک', gap: g),
+            FormSpan(child: textField(_note, 'یادداشت', lines: 1, gap: g)),
+          ]),
         ]),
-      ),
+        if (err != null) err,
+      ],
     );
   }
 }
@@ -329,9 +361,9 @@ class _ReturnsTabState extends State<_ReturnsTab> {
               infoRow('تاریخ', jalaliDate('${r['date']}')),
               for (final Map<String, dynamic> i in its)
                 infoRow('${i['type_name'] ?? i['code'] ?? ''}',
-                    '${faNum(ReturnsHelp.d(i['kg']), dec: 3)} کیلو × ${faNum(ReturnsHelp.d(i['unit_price']), dec: 0)}'),
-              infoRow('ارزش برگشت', '${faNum(ReturnsHelp.d(r['total']), dec: 0)} ریال'),
-              infoRow('بازپرداخت', '${faNum(ReturnsHelp.d(r['refund_amount']), dec: 0)} ریال'),
+                    '${faNum(ReturnsHelp.d(i['kg']), dec: 3)} کیلو × ${Fmt.money(ReturnsHelp.d(i['unit_price']), label: false)}'),
+              infoRow('ارزش برگشت', '${Fmt.money(ReturnsHelp.d(r['total']))}'),
+              infoRow('بازپرداخت', '${Fmt.money(ReturnsHelp.d(r['refund_amount']))}'),
               const SizedBox(height: 8),
               Wrap(spacing: 8, children: <Widget>[
                 OutlinedButton.icon(
@@ -344,19 +376,19 @@ class _ReturnsTabState extends State<_ReturnsTab> {
                         <String>['تاریخ', jalaliDate('${r['date']}')],
                         <String>[widget.isSale ? 'خریدار' : 'فروشنده', '${r['party']}'],
                       ],
-                      columns: <String>['ردیف', 'کالا', 'کد', 'وزن (کیلو)', 'فی (ریال)', 'مبلغ (ریال)'],
+                      columns: <String>['ردیف', 'کالا', 'کد', 'وزن (کیلو)', 'فی (${Fmt.unitLabel()})', 'مبلغ (${Fmt.unitLabel()})'],
                       rows: <List<String>>[
                         for (int k = 0; k < its.length; k++)
                           <String>[
-                            faNum(k + 1, dec: 0), '${its[k]['type_name'] ?? ''}', '${its[k]['code'] ?? '-'}',
-                            faNum(ReturnsHelp.d(its[k]['kg']), dec: 3), faNum(ReturnsHelp.d(its[k]['unit_price']), dec: 0),
-                            faNum(ReturnsHelp.d(its[k]['amount']), dec: 0),
+                            Fmt.money(k + 1, label: false), '${its[k]['type_name'] ?? ''}', '${its[k]['code'] ?? '-'}',
+                            faNum(ReturnsHelp.d(its[k]['kg']), dec: 3), Fmt.money(ReturnsHelp.d(its[k]['unit_price']), label: false),
+                            Fmt.money(ReturnsHelp.d(its[k]['amount']), label: false),
                           ],
                       ],
                       totals: <List<String>>[
-                        <String>['ارزش برگشت (ریال)', faNum(ReturnsHelp.d(r['total']), dec: 0)],
-                        <String>['بازپرداخت (ریال)', faNum(ReturnsHelp.d(r['refund_amount']), dec: 0)],
-                        <String>['اثر بر حساب (ریال)', faNum(ReturnsHelp.d(r['net_effect']), dec: 0)],
+                        <String>['ارزش برگشت (${Fmt.unitLabel()})', Fmt.money(ReturnsHelp.d(r['total']), label: false)],
+                        <String>['بازپرداخت (${Fmt.unitLabel()})', Fmt.money(ReturnsHelp.d(r['refund_amount']), label: false)],
+                        <String>['اثر بر حساب (${Fmt.unitLabel()})', Fmt.money(ReturnsHelp.d(r['net_effect']), label: false)],
                       ],
                       note: r['note'] as String?,
                     );
@@ -402,7 +434,7 @@ class _ReturnsTabState extends State<_ReturnsTab> {
           ListTile(
             title: Text('${r['party']} — شمارهٔ ${faNum(ReturnsHelp.d(r['number']), dec: 0)}'),
             subtitle: Text(jalaliDate('${r['date']}')),
-            trailing: Text('${faNum(ReturnsHelp.d(r['total']), dec: 0)} ریال'),
+            trailing: Text('${Fmt.money(ReturnsHelp.d(r['total']))}'),
             onTap: () => _open(r),
           ),
       ]),
@@ -467,10 +499,10 @@ class _ReturnsProfitCardState extends State<ReturnsProfitCard> {
         child: Column(children: <Widget>[
           sectionTitle(context, 'برگشت از فروش در این بازه'),
           infoRow('تعداد برگشت', faNum(ReturnsHelp.d(s['count']), dec: 0)),
-          infoRow('فروش برگشتی (کسر از فروش)', '${faNum(rev, dec: 0)} ریال'),
-          infoRow('بهای کالای برگشتی (کسر از بها)', '${faNum(cogs, dec: 0)} ریال'),
-          infoRow('سود برگشتی', '${faNum(prof, dec: 0)} ریال'),
-          infoRow(net >= 0 ? 'سود خالص پس از برگشت' : 'زیان خالص پس از برگشت', '${faNum(net.abs(), dec: 0)} ریال'),
+          infoRow('فروش برگشتی (کسر از فروش)', Fmt.money(rev)),
+          infoRow('بهای کالای برگشتی (کسر از بها)', Fmt.money(cogs)),
+          infoRow('سود برگشتی', Fmt.money(prof)),
+          infoRow(net >= 0 ? 'سود خالص پس از برگشت' : 'زیان خالص پس از برگشت', Fmt.money(net.abs())),
           const Text('برگشت‌ها بر اساس تاریخ برگشت حساب می‌شوند؛ هزینهٔ کارگر و حمل فروش اصلی تغییر نمی‌کند.',
               style: TextStyle(fontSize: 11, color: Colors.black54)),
         ]),

@@ -35,6 +35,8 @@ class ExcelIo {
     final bool neg = t.startsWith('-');
     final String digits = neg ? t.substring(1) : t;
     if (digits.length > 15) return null;
+    // شناسه‌های ۱۲ رقمی و بیشتر (کد اقتصادی، شناسهٔ پیگیری …) بدون جداکنندهٔ هزارگان عدد نیستند؛ عددی شوند اکسل آن‌ها را علمی (1.2E+11) نشان می‌دهد
+    if (digits.length > 11 && !t.contains('.') && !s.contains('٬') && !s.contains(',')) return null;
     if (digits.length > 1 && digits.startsWith('0') && !digits.startsWith('0.')) return null; // codes like 00123
     return t.contains('.') ? double.parse(t) : int.parse(t);
   }

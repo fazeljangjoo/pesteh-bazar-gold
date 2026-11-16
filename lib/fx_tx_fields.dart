@@ -6,6 +6,7 @@
 import 'package:flutter/material.dart';
 
 import 'fx_doc_field.dart';
+import 'fmt.dart' show MoneyField;
 import 'fx_local.dart';
 import 'utils.dart';
 import 'widgets.dart';
@@ -55,7 +56,7 @@ class FxTxController {
     final double? r = parseNum(rate.text);
     if (!active || ca == null || r == null || ca <= 0 || r <= 0) return;
     final double v = (ca * r / kFxRialPerStoredUnit * 100).roundToDouble() / 100;
-    amount.text = plain(v);
+    MoneyField.setStored(amount, v);
   }
 
   String? validate() {
@@ -117,7 +118,7 @@ class FxTxFields extends StatelessWidget {
       ),
     ];
     if (c.active) {
-      w.add(numField(c.ccyAmount, 'مبلغ ارزی', required: true, onChanged: () {
+      w.add(numField(c.ccyAmount, 'مبلغ ارزی', required: true, thousands: true, onChanged: () {
         c.recompute();
         onChanged();
       }));

@@ -11,8 +11,10 @@ import 'pdf_output.dart';
 import 'pdf_service.dart';
 import 'returns_ui.dart' show ReturnsHelp;
 import 'sync_service.dart';
+import 'fmt.dart' show Fmt;
 import 'utils.dart';
 import 'warehouse_ui.dart' show StockApi, StockApiException;
+import 'form_layout.dart';
 import 'widgets.dart';
 
 /// S07.T07.3 — multi-output separation (جداسازی چندخروجی) + lineage (ردیابی).
@@ -61,8 +63,58 @@ class SeparationStore {
 
   static bool isNetworkError(String m) => m.contains('اتصال به سرور') || m.contains('خطای سرور');
 
-  /// Replays queued jobs in order. Stops at the first network failure. Returns the messages of jobs the server rejected
-  /// (those are dropped from the queue so they cannot block the following ones).
+  static const String _kFailed = 'sep_failed_v1';
+
+  static Future<List<Map<String, dynamic>>> failedOps() async {
+    final SharedPreferences sp = await SharedPreferences.getInstance();
+    final String? raw = sp.getString(_kFailed);
+    if (raw == null) return <Map<String, dynamic>>[];
+    try {
+      return ReturnsHelp.maps(jsonDecode(raw));
+    } catch (_) {
+      return <Map<String, dynamic>>[];
+    }
+  }
+
+  static Future<void> _saveFailed(List<Map<String, dynamic>> f) async {
+    final SharedPreferences sp = await SharedPreferences.getInstance();
+    await sp.setString(_kFailed, jsonEncode(f));
+  }
+
+  /// دوباره در انتهای صف می‌گذارد (بعد از رفع علت رد شدن).
+  static Future<void> retryFailed(int i) async {
+    final List<Map<String, dynamic>> failed = await failedOps();
+    if (i < 0 || i >= failed.length) return;
+    final Map<String, dynamic> op = Map<String, dynamic>.from(failed.removeAt(i))
+      ..remove('error')
+      ..remove('tries');
+    await _saveFailed(failed);
+    await enqueue(op);
+  }
+
+  static Future<void> dismissFailed(int i) async {
+    final List<Map<String, dynamic>> failed = await failedOps();
+    if (i < 0 || i >= failed.length) return;
+    failed.removeAt(i);
+    await _saveFailed(failed);
+  }
+
+  /// فرم باز است و کاربر همان لحظه پیام رد شدن را دیده؛ نسخهٔ ناموفقِ همین ثبت نباید در فهرست بماند.
+  static Future<void> dismissFailedByUid(String uid) async {
+    final List<Map<String, dynamic>> failed = await failedOps();
+    failed.removeWhere((Map<String, dynamic> o) => '${o['uid']}' == uid);
+    await _saveFailed(failed);
+  }
+
+  /// ۴۰۱ = نشست نامعتبر/منقضی (رد عملیات نیست): صف دست‌نخورده می‌ماند تا کاربر دوباره وارد شود.
+  static bool _keepQueue(StockApiException e) =>
+      e.network || e.code == 401 || e.message.contains('ورود مجدد') || e.message.contains('دوباره وارد شوید');
+
+  /// پاسخ بدون پیام JSON (۵۰۲/صفحهٔ خطای هاست …): چند بار دوباره، بعد «ناموفق» تا صف برای همیشه قفل نشود.
+  static bool _serverFault(StockApiException e) => e.message.startsWith('خطای سرور');
+
+  /// Replays queued jobs in order. Stops at the first network/session failure. A definite server rejection is moved to the
+  /// «ناموفق» list (with the server message) so it cannot block the following jobs and is never lost silently.
   static Future<List<String>> flush() async {
     final List<String> errors = <String>[];
     List<Map<String, dynamic>> ops = await pendingOps();
@@ -74,8 +126,19 @@ class SeparationStore {
         await StockApi.call('separations.create', payload is Map ? Map<String, dynamic>.from(payload) : <String, dynamic>{});
         sentAny = true;
       } on StockApiException catch (e) {
-        if (isNetworkError(e.message) || e.message.contains('ورود مجدد')) break;
+        if (_keepQueue(e)) break;
+        if (_serverFault(e)) {
+          final int tries = ((op['tries'] as num?) ?? 0).toInt() + 1;
+          if (tries < 5) {
+            ops[0] = <String, dynamic>{...op, 'tries': tries};
+            await _saveOps(ops);
+            break;
+          }
+        }
         errors.add('جداسازی ${op['label'] ?? ''}: ${e.message}');
+        final List<Map<String, dynamic>> failed = await failedOps();
+        failed.add(<String, dynamic>{...op, 'error': e.message});
+        await _saveFailed(failed);
       }
       ops = ops.sublist(1);
       await _saveOps(ops);
@@ -398,6 +461,8 @@ class _SeparationFormState extends State<SeparationForm> with EditGuard<Separati
       final bool stillQueued = (await SeparationStore.pendingOps()).any((Map<String, dynamic> o) => '${o['uid']}' == uid);
       if (!mounted) return;
       if (errs.isNotEmpty) {
+        await SeparationStore.dismissFailedByUid(uid); // فرم باز و دادهٔ کاربر سالم است؛ بعد از اصلاح دوباره ثبت می‌کند
+        if (!mounted) return;
         snack(context, errs.first);
         setState(() => _saving = false);
         return;
@@ -411,11 +476,12 @@ class _SeparationFormState extends State<SeparationForm> with EditGuard<Separati
     }
   }
 
-  Widget _num(TextEditingController c, String label, {String? suffix, bool wide = false}) => Padding(
+  Widget _num(TextEditingController c, String label, {String? suffix, bool wide = false, bool money = false}) => Padding(
         padding: const EdgeInsets.only(bottom: 8),
         child: TextField(
           controller: c,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: money ? [ThousandsInputFormatter()] : null,
           decoration: InputDecoration(labelText: label, suffixText: suffix, border: const OutlineInputBorder(), isDense: true),
           onChanged: (_) => setState(() {}),
         ),
@@ -432,7 +498,7 @@ class _SeparationFormState extends State<SeparationForm> with EditGuard<Separati
           value: on,
           onChanged: (bool? v) => setState(() => _sel[id] = v ?? false),
           title: Text('${e['category_name']} - ${e['type_name']}'),
-          subtitle: Text('کد ${e['code'] ?? '-'}  •  موجود ${faNum(_avail(e))} کیلو  •  فی ${faNum(_d(e['price']), dec: 0)}'
+          subtitle: Text('کد ${e['code'] ?? '-'}  •  موجود ${faNum(_avail(e))} کیلو  •  فی ${Fmt.money(_d(e['price']), label: false)}'
               '  •  گونی ${faNum(_availSmall(e))}/${faNum(_availLarge(e))}'),
         ),
         if (on)
@@ -486,12 +552,12 @@ class _SeparationFormState extends State<SeparationForm> with EditGuard<Separati
             Expanded(child: _num(o.ounce, 'انس (اختیاری)')),
             if (_alloc == 'by_value') ...<Widget>[
               const SizedBox(width: 6),
-              Expanded(child: _num(o.price, 'فی مبنا (برای تسهیم)')),
+              Expanded(child: _num(o.price, 'فی مبنا (برای تسهیم)', money: true)),
             ],
           ]),
           if (i < c.outCost.length && (parseNum(o.kg.text) ?? 0) > 0)
             Text(
-              'هزینهٔ تقریبی: ${faNum(c.outCost[i], dec: 0)}  •  فی هر کیلو: ${faNum(c.outCost[i] / (parseNum(o.kg.text) ?? 1), dec: 0)}',
+              'هزینهٔ تقریبی: ${Fmt.money(c.outCost[i])}  •  فی هر کیلو: ${Fmt.money(c.outCost[i] / (parseNum(o.kg.text) ?? 1))}',
               style: const TextStyle(color: Colors.black54, fontSize: 12),
             ),
         ]),
@@ -513,10 +579,10 @@ class _SeparationFormState extends State<SeparationForm> with EditGuard<Separati
           infoRow('اختلاف (ورودی − خروجی − ضایعات)', '${faNum(c.diff, dec: 3)} کیلو',
               valueColor: balanced ? Colors.green.shade700 : scheme.error),
           const Divider(),
-          infoRow('ارزش ورودی‌ها (تقریبی)', faNum(c.inCost, dec: 0)),
-          infoRow('هزینه‌های سرشکن‌شده (دستمزد + حمل)', faNum(c.labor + c.transport, dec: 0)),
-          if (c.abCost > 0) infoRow('ضایعات غیرعادی (هزینهٔ دوره، سرشکن نمی‌شود)', faNum(c.abCost, dec: 0)),
-          infoRow('قابل تسهیم روی خروجی‌ها', faNum(c.distributable, dec: 0)),
+          infoRow('ارزش ورودی‌ها (تقریبی)', Fmt.money(c.inCost)),
+          infoRow('هزینه‌های سرشکن‌شده (دستمزد + حمل)', Fmt.money(c.labor + c.transport)),
+          if (c.abCost > 0) infoRow('ضایعات غیرعادی (هزینهٔ دوره، سرشکن نمی‌شود)', Fmt.money(c.abCost)),
+          infoRow('قابل تسهیم روی خروجی‌ها', Fmt.money(c.distributable)),
           const SizedBox(height: 4),
           Text(
             problem == null ? '✓ وزن‌ها برابرند؛ آمادهٔ ثبت' : problem,
@@ -532,6 +598,9 @@ class _SeparationFormState extends State<SeparationForm> with EditGuard<Separati
 
   @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return Scaffold(appBar: AppBar(title: const Text('جداسازی چندخروجی')), body: const Center(child: CircularProgressIndicator()));
+    }
     final _Calc c = _calc();
     final String? problem = _problem(c);
     final String q = _query.trim();
@@ -541,64 +610,85 @@ class _SeparationFormState extends State<SeparationForm> with EditGuard<Separati
       if (_avail(e) <= 0.0005) return false;
       return q.isEmpty || '${e['code']} ${e['category_name']} ${e['type_name']}'.contains(q);
     }).toList();
-    return Scaffold(
-      appBar: AppBar(title: const Text('جداسازی چندخروجی')),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(padding: const EdgeInsets.all(12), children: <Widget>[
-              sectionTitle(context, '۱) ورودی‌ها (از انبار)'),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: TextField(
-                  decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'جستجوی کد یا نوع', border: OutlineInputBorder(), isDense: true),
-                  onChanged: (String v) => setState(() => _query = v),
-                ),
-              ),
-              if (shown.isEmpty) const Padding(padding: EdgeInsets.all(12), child: Text('بار موجودی برای انتخاب نیست (بارهایی که هنوز همگام نشده‌اند در این فرم دیده نمی‌شوند).')),
-              for (final Map<String, dynamic> e in shown) _inputCard(e),
-              sectionTitle(context, '۲) خروجی‌ها'),
-              for (int i = 0; i < _outs.length; i++) _outputCard(i, c),
-              OutlinedButton.icon(
-                onPressed: _outs.length >= 100 ? null : () => setState(() => _outs.add(_OutRow())),
-                icon: const Icon(Icons.add),
-                label: const Text('افزودن خروجی'),
-              ),
-              sectionTitle(context, '۳) ضایعات و هزینه‌ها'),
-              _num(_waste, 'ضایعات/خاک', suffix: 'کیلو'),
-              Row(children: <Widget>[
-                Expanded(child: _num(_labor, 'دستمزد')),
-                const SizedBox(width: 6),
-                Expanded(child: _num(_transport, 'حمل')),
-              ]),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: DropdownButtonFormField<String>(
-                  value: _alloc,
-                  decoration: const InputDecoration(labelText: 'روش تسهیم هزینه بین خروجی‌ها', border: OutlineInputBorder(), isDense: true),
-                  items: const <DropdownMenuItem<String>>[
-                    DropdownMenuItem<String>(value: 'by_weight', child: Text('بر اساس وزن')),
-                    DropdownMenuItem<String>(value: 'by_value', child: Text('بر اساس ارزش (فی مبنا)')),
-                  ],
-                  onChanged: (String? v) => setState(() => _alloc = v ?? 'by_weight'),
-                ),
-              ),
-              dateField(context, 'تاریخ', _date, (DateTime d) => setState(() => _date = d)),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: TextField(controller: _note, maxLines: 2, decoration: const InputDecoration(labelText: 'توضیحات', border: OutlineInputBorder(), isDense: true)),
-              ),
-              sectionTitle(context, 'بالانس جرم و هزینه'),
-              _balanceCard(c, problem),
-              const SizedBox(height: 8),
-              FilledButton.icon(
-                onPressed: (problem == null && !_saving) ? _save : null,
-                icon: _saving
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.check),
-                label: const Text('ثبت جداسازی'),
-              ),
-              const SizedBox(height: 32),
-            ]),
+    final double g = kFormGap;
+    final bool wide = kWideForm(context);
+
+    final Widget inputs = FormSection(title: '۱) ورودی‌ها (از انبار)', children: <Widget>[
+      Padding(
+        padding: const EdgeInsets.only(bottom: 8),
+        child: TextField(
+          decoration: const InputDecoration(prefixIcon: Icon(Icons.search), hintText: 'جستجوی کد یا نوع', border: OutlineInputBorder(), isDense: true),
+          onChanged: (String v) => setState(() => _query = v),
+        ),
+      ),
+      if (shown.isEmpty) const Padding(padding: EdgeInsets.all(12), child: Text('بار موجودی برای انتخاب نیست (بارهایی که هنوز همگام نشده‌اند در این فرم دیده نمی‌شوند).')),
+      for (final Map<String, dynamic> e in shown) _inputCard(e),
+    ]);
+    final Widget outputs = FormSection(title: '۲) خروجی‌ها', children: <Widget>[
+      for (int i = 0; i < _outs.length; i++) _outputCard(i, c),
+      Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: OutlinedButton.icon(
+          onPressed: _outs.length >= 100 ? null : () => setState(() => _outs.add(_OutRow())),
+          icon: const Icon(Icons.add),
+          label: const Text('افزودن خروجی'),
+        ),
+      ),
+    ]);
+    final Widget costs = FormSection(title: '۳) ضایعات و هزینه‌ها', children: <Widget>[
+      FormGrid(gap: 12, minColWidth: 240, children: <Widget>[
+        _num(_waste, 'ضایعات/خاک', suffix: 'کیلو'),
+        _num(_labor, 'دستمزد'),
+        _num(_transport, 'حمل'),
+        Padding(
+          padding: EdgeInsets.only(bottom: g),
+          child: DropdownButtonFormField<String>(
+            value: _alloc,
+            decoration: const InputDecoration(labelText: 'روش تسهیم هزینه بین خروجی‌ها', border: OutlineInputBorder(), isDense: true),
+            items: const <DropdownMenuItem<String>>[
+              DropdownMenuItem<String>(value: 'by_weight', child: Text('بر اساس وزن')),
+              DropdownMenuItem<String>(value: 'by_value', child: Text('بر اساس ارزش (فی مبنا)')),
+            ],
+            onChanged: (String? v) => setState(() => _alloc = v ?? 'by_weight'),
+          ),
+        ),
+        dateField(context, 'تاریخ', _date, (DateTime d) => setState(() => _date = d)),
+        FormSpan(
+          span: 2,
+          child: Padding(
+            padding: EdgeInsets.only(bottom: g),
+            child: TextField(controller: _note, maxLines: wide ? 1 : 2, decoration: const InputDecoration(labelText: 'توضیحات', border: OutlineInputBorder(), isDense: true)),
+          ),
+        ),
+      ]),
+      Padding(
+        padding: const EdgeInsetsDirectional.only(top: 2, bottom: 4),
+        child: Text('بالانس جرم و هزینه', style: Theme.of(context).textTheme.labelLarge?.copyWith(color: Theme.of(context).colorScheme.primary)),
+      ),
+      _balanceCard(c, problem),
+    ]);
+
+    return FormPage(
+      title: 'جداسازی چندخروجی',
+      actions: <Widget>[
+        FilledButton.icon(
+          onPressed: (problem == null && !_saving) ? _save : null,
+          icon: _saving
+              ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+              : const Icon(Icons.check),
+          label: const Text('ثبت جداسازی'),
+        ),
+      ],
+      children: <Widget>[
+        if (wide)
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+            Expanded(child: inputs),
+            const SizedBox(width: 12),
+            Expanded(child: outputs),
+          ])
+        else ...<Widget>[inputs, outputs],
+        costs,
+      ],
     );
   }
 }
@@ -615,6 +705,7 @@ class SeparationsScreen extends StatefulWidget {
 class _SeparationsScreenState extends State<SeparationsScreen> {
   List<Map<String, dynamic>> _items = <Map<String, dynamic>>[];
   List<Map<String, dynamic>> _pending = <Map<String, dynamic>>[];
+  List<Map<String, dynamic>> _failed = <Map<String, dynamic>>[];
   bool _loading = true;
   String? _note;
 
@@ -638,6 +729,7 @@ class _SeparationsScreenState extends State<SeparationsScreen> {
       _note = SeparationStore.isNetworkError(e.message) ? 'آفلاین: فهرست ذخیره‌شدهٔ قبلی نمایش داده می‌شود' : e.message;
     }
     _pending = await SeparationStore.pendingOps();
+    _failed = await SeparationStore.failedOps();
     if (mounted) setState(() {});
   }
 
@@ -667,6 +759,35 @@ class _SeparationsScreenState extends State<SeparationsScreen> {
               onRefresh: _refresh,
               child: ListView(padding: const EdgeInsets.all(12), children: <Widget>[
                 if (_note != null) Padding(padding: const EdgeInsets.only(bottom: 8), child: Text(_note!, style: const TextStyle(color: Colors.black54))),
+                for (int i = 0; i < _failed.length; i++)
+                  Card(
+                    color: Theme.of(context).colorScheme.errorContainer,
+                    child: ListTile(
+                      leading: const Icon(Icons.error_outline),
+                      title: Text('رد شد: ${_failed[i]['label'] ?? ''}'),
+                      subtitle: Text('${_failed[i]['error'] ?? ''}'),
+                      isThreeLine: true,
+                      trailing: Row(mainAxisSize: MainAxisSize.min, children: <Widget>[
+                        IconButton(
+                          tooltip: 'تلاش دوباره',
+                          icon: const Icon(Icons.refresh),
+                          onPressed: () async {
+                            await SeparationStore.retryFailed(i);
+                            await _refresh();
+                          },
+                        ),
+                        IconButton(
+                          tooltip: 'حذف',
+                          icon: const Icon(Icons.delete_outline),
+                          onPressed: () async {
+                            if (!await confirm(context, 'این مورد ناموفق حذف شود؟ اطلاعاتش از بین می‌رود.')) return;
+                            await SeparationStore.dismissFailed(i);
+                            await _refresh();
+                          },
+                        ),
+                      ]),
+                    ),
+                  ),
                 for (final Map<String, dynamic> op in _pending)
                   Card(
                     color: Colors.amber.shade50,
@@ -769,9 +890,9 @@ class _SeparationDetailScreenState extends State<SeparationDetailScreen> {
               infoRow('تاریخ', jalaliDate('${s['date']}')),
               infoRow('جمع ورودی', '${faNum(_d(s['input_kg']), dec: 3)} کیلو'),
               infoRow('ضایعات', '${faNum(_d(s['waste_kg']), dec: 3)} کیلو'),
-              infoRow('دستمزد', faNum(_d(s['labor_cost']), dec: 0)),
-              infoRow('حمل', faNum(_d(s['transport_cost']), dec: 0)),
-              if (_d(s['abnormal_cost']) > 0) infoRow('ضایعات غیرعادی (هزینهٔ دوره)', faNum(_d(s['abnormal_cost']), dec: 0)),
+              infoRow('دستمزد', Fmt.money(_d(s['labor_cost']))),
+              infoRow('حمل', Fmt.money(_d(s['transport_cost']))),
+              if (_d(s['abnormal_cost']) > 0) infoRow('ضایعات غیرعادی (هزینهٔ دوره)', Fmt.money(_d(s['abnormal_cost']))),
               if ('${s['note'] ?? ''}'.isNotEmpty) infoRow('توضیحات', '${s['note']}'),
               sectionTitle(context, 'ورودی‌ها'),
               for (final Map<String, dynamic> i in ReturnsHelp.maps(s['inputs']))
@@ -779,7 +900,7 @@ class _SeparationDetailScreenState extends State<SeparationDetailScreen> {
                   child: ListTile(
                     dense: true,
                     title: Text('${i['type_name'] ?? ''}  •  ${i['code'] ?? ''}'),
-                    subtitle: Text('${faNum(_d(i['kg']), dec: 3)} کیلو  •  ارزش ${faNum(_d(i['cost']), dec: 0)}'),
+                    subtitle: Text('${faNum(_d(i['kg']), dec: 3)} کیلو  •  ارزش ${Fmt.money(_d(i['cost']))}'),
                     onTap: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => LotLineageScreen(lotId: _d(i['lot_id']).toInt()))),
                   ),
                 ),
@@ -791,7 +912,7 @@ class _SeparationDetailScreenState extends State<SeparationDetailScreen> {
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
                       Text('${o['type_name'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.bold)),
                       Text('کد ردیابی: ${o['code'] ?? '-'}'),
-                      Text('${faNum(_d(o['kg']), dec: 3)} کیلو  •  هزینه ${faNum(_d(o['cost']), dec: 0)}  •  فی ${faNum(_d(o['unit_cost']), dec: 0)}'),
+                      Text('${faNum(_d(o['kg']), dec: 3)} کیلو  •  هزینه ${Fmt.money(_d(o['cost']))}  •  فی ${Fmt.money(_d(o['unit_cost']), label: false)}'),
                       if (isPrintableCode(o['code'] as String?)) BarcodeBox('${o['code']}', height: 48),
                       Row(children: <Widget>[
                         TextButton.icon(
@@ -807,7 +928,7 @@ class _SeparationDetailScreenState extends State<SeparationDetailScreen> {
               if (s['check'] is Map) ...<Widget>[
                 sectionTitle(context, 'کنترل تطبیق'),
                 infoRow('اختلاف جرم', '${faNum(_d((s['check'] as Map)['mass_diff_kg']), dec: 3)} کیلو'),
-                infoRow('اختلاف هزینه', faNum(_d((s['check'] as Map)['cost_diff']), dec: 2)),
+                infoRow('اختلاف هزینه', Fmt.money(_d((s['check'] as Map)['cost_diff']))),
               ],
               const SizedBox(height: 8),
               if (s['editable'] == true)
@@ -913,7 +1034,7 @@ class _LotLineageScreenState extends State<LotLineageScreen> {
             child: TextField(
               controller: _code,
               textDirection: TextDirection.ltr,
-              decoration: const InputDecoration(labelText: 'کد پسته (KH… / MX… / K-…)', border: OutlineInputBorder(), isDense: true),
+              decoration: const InputDecoration(labelText: 'کد پسته (مثلاً KH… / D… / M… / S-…)', border: OutlineInputBorder(), isDense: true),
               onSubmitted: (_) => _lookup(),
             ),
           ),

@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'fmt.dart' show Fmt;
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'cheque_report_ui.dart';
@@ -91,9 +92,19 @@ class ChequeStore {
     while (ops.isNotEmpty) {
       final Map<String, dynamic> op = ops.first;
       try {
-        await StockApi.call('cheques.transition', Map<String, dynamic>.from(op));
+        await StockApi.call('cheques.transition', Map<String, dynamic>.from(op)..remove('tries'));
       } on StockApiException catch (e) {
-        if (isNetworkError(e.message) || e.message.contains('ورود مجدد')) break; // keep the queue, retry later
+        // ۴۰۱ = نشست نامعتبر/منقضی (رد عملیات نیست): صف می‌ماند. پیام ۴۰۱ سرور «دوباره وارد شوید» است و قبلاً فقط «ورود مجدد» را می‌شناختیم
+        if (e.network || e.code == 401 || e.message.contains('ورود مجدد') || e.message.contains('دوباره وارد شوید')) break; // keep the queue, retry later
+        if (e.message.startsWith('خطای سرور')) {
+          // پاسخ بدون پیام JSON (۵۰۲/صفحهٔ خطای هاست …): چند بار دوباره، بعد گزارش شود تا صف برای همیشه قفل نشود
+          final int tries = ((op['tries'] as num?) ?? 0).toInt() + 1;
+          if (tries < 5) {
+            ops[0] = <String, dynamic>{...op, 'tries': tries};
+            await _saveOps(ops);
+            break;
+          }
+        }
         errors.add('چک ${op['label'] ?? op['id']}: ${e.message}'); // server rejected (illegal transition etc.)
       }
       ops = ops.sublist(1);
@@ -135,7 +146,7 @@ Future<bool> runChequeTransition(BuildContext context, Map<String, dynamic> cheq
       child: AlertDialog(
         title: Text(kChequeActionLabels[to] ?? to),
         content: Column(mainAxisSize: MainAxisSize.min, children: <Widget>[
-          Text('چک ${cheque['number'] ?? ''} — ${faNum(_d(cheque['amount']), dec: 0)} ریال'),
+          Text('چک ${cheque['number'] ?? ''} — ${Fmt.money(_d(cheque['amount']))}'),
           const SizedBox(height: 8),
           if (to == 'endorsed') textField(partyC, 'خرج به چه کسی؟ (نام طرف حساب)', required: true),
           textField(noteC, 'توضیح (اختیاری)'),
@@ -275,7 +286,7 @@ class _ChequeListScreenState extends State<ChequeListScreen> with SingleTickerPr
           await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => ChequeDetailScreen(cheque: c)));
           _load();
         },
-        title: Text('${c['party'] ?? '—'} · ${faNum(_d(c['amount']), dec: 0)} ریال${(c['ccy'] ?? '').toString().isEmpty ? '' : ' (${faNum(_d(c['ccy_amount']), dec: 2)} ${c['ccy']})'}'),
+        title: Text('${c['party'] ?? '—'} · ${Fmt.money(_d(c['amount']))}${(c['ccy'] ?? '').toString().isEmpty ? '' : ' (${faNum(_d(c['ccy_amount']), dec: 2)} ${c['ccy']})'}'),
         subtitle: Text('چک ${c['number'] ?? '—'} · ${c['bank'] ?? '—'}\nسررسید: ${jalaliDate('${c['due_date']}')}'
             '${(c['endorsed_to'] ?? '') != '' ? '\nخرج به: ${c['endorsed_to']}' : ''}'),
         isThreeLine: true,
@@ -304,7 +315,7 @@ class _ChequeListScreenState extends State<ChequeListScreen> with SingleTickerPr
       final DateTime? dt = DateTime.tryParse(d);
       out.add(Padding(
         padding: const EdgeInsets.fromLTRB(8, 12, 8, 4),
-        child: Text('${jalaliDate(d)}${dt == null ? '' : ' · ${_when(dt)}'} — جمع ${faNum(sum, dec: 0)} ریال',
+        child: Text('${jalaliDate(d)}${dt == null ? '' : ' · ${_when(dt)}'} — جمع ${Fmt.money(sum)}',
             style: const TextStyle(fontWeight: FontWeight.bold)),
       ));
       out.addAll(byDay[d]!.map(_tile));
@@ -395,14 +406,14 @@ class _ChequeListScreenState extends State<ChequeListScreen> with SingleTickerPr
                 Padding(
                   padding: const EdgeInsets.fromLTRB(8, 6, 8, 0),
                   child: Row(children: <Widget>[
-                    Expanded(child: TextField(controller: _minAmt, keyboardType: TextInputType.number, decoration: const InputDecoration(hintText: 'حداقل مبلغ', isDense: true), onChanged: (_) => setState(() {}))),
+                    Expanded(child: TextField(controller: _minAmt, keyboardType: TextInputType.number, inputFormatters: [ThousandsInputFormatter()], decoration: const InputDecoration(hintText: 'حداقل مبلغ', isDense: true), onChanged: (_) => setState(() {}))),
                     const SizedBox(width: 6),
-                    Expanded(child: TextField(controller: _maxAmt, keyboardType: TextInputType.number, decoration: const InputDecoration(hintText: 'حداکثر مبلغ', isDense: true), onChanged: (_) => setState(() {}))),
+                    Expanded(child: TextField(controller: _maxAmt, keyboardType: TextInputType.number, inputFormatters: [ThousandsInputFormatter()], decoration: const InputDecoration(hintText: 'حداکثر مبلغ', isDense: true), onChanged: (_) => setState(() {}))),
                   ]),
                 ),
                 Padding(
                   padding: const EdgeInsets.all(8),
-                  child: Text('${faNum(rows.length, dec: 0)} چک · جمع ${faNum(total, dec: 0)} ریال', style: const TextStyle(fontWeight: FontWeight.bold)),
+                  child: Text('${faNum(rows.length, dec: 0)} چک · جمع ${Fmt.money(total)}', style: const TextStyle(fontWeight: FontWeight.bold)),
                 ),
                 Expanded(child: RefreshIndicator(onRefresh: _load, child: _body(rows))),
               ]),
@@ -461,8 +472,8 @@ class _ChequeDetailScreenState extends State<ChequeDetailScreen> {
               child: Column(children: <Widget>[
                 infoRow('نوع', _c['direction'] == 'received' ? 'دریافتی' : 'پرداختی'),
                 infoRow('طرف حساب', '${_c['party'] ?? '—'}'),
-                infoRow('مبلغ', '${faNum(_d(_c['amount']), dec: 0)} ریال'),
-                if ((_c['ccy'] ?? '').toString().isNotEmpty) infoRow('مبلغ ارزی / نرخ', '${faNum(_d(_c['ccy_amount']), dec: 2)} ${_c['ccy']} × ${faNum(_d(_c['fx_rate']), dec: 0)} ریال'),
+                infoRow('مبلغ', '${Fmt.money(_d(_c['amount']))}'),
+                if ((_c['ccy'] ?? '').toString().isNotEmpty) infoRow('مبلغ ارزی / نرخ', '${faNum(_d(_c['ccy_amount']), dec: 2)} ${_c['ccy']} × ${Fmt.money(_d(_c['fx_rate']))}'),
                 infoRow('بانک', '${_c['bank'] ?? '—'}'),
                 infoRow('سررسید', jalaliDate('${_c['due_date']}')),
                 infoRow('وضعیت', kChequeLabels['${_c['status']}'] ?? '${_c['status_label'] ?? _c['status']}', valueColor: _kStatusColors['${_c['status']}']),

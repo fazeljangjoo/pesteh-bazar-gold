@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'db.dart';
 import 'entity_store.dart';
 import 'fmt.dart';
+import 'form_layout.dart';
 import 'intake_form.dart' show parseIntakeNum;
 import 'intake_list_screen.dart' show kIntakeStatusLabels;
 import 'license_service.dart';
@@ -100,6 +101,8 @@ class IntakeConfirmScreen extends StatefulWidget {
 
 class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
   final TextEditingController _base = TextEditingController();
+  bool _baseGram = false; // «خرید گرمی» برای پسته اصلی
+  final TextEditingController _baseG = TextEditingController(); // پیش‌فرض: «گرم» ثبت‌شدهٔ اتاق انس
   final List<_PctRow> _rows = <_PctRow>[];
   Map<String, dynamic>? _intake;
   bool _loading = true;
@@ -126,6 +129,7 @@ class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
   void dispose() {
     _debounce?.cancel();
     _base.dispose();
+    _baseG.dispose();
     for (final r in _rows) {
       r.dispose();
     }
@@ -146,16 +150,21 @@ class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
         label: (d?['label'] ?? key).toString(),
         pct: (p['pct'] as num?)?.toDouble() ?? 0,
         kernelG: (p['kernel_g'] as num?)?.toDouble(),
-        allowed: d != null && d['pricing_allowed'] == true,
+        allowed: true,
       ));
+      if (_rows.last.kernelG != null) _rows.last.g.text = _plainNum(_rows.last.kernelG!);
     }
     if (!mounted) return;
+    final ig = (intake?['gram'] as num?)?.toDouble();
+    if (ig != null) _baseG.text = _plainNum(ig);
     setState(() {
       _intake = intake;
       _submitPending = pending;
       _loading = false;
     });
   }
+
+  static String _plainNum(double v) => v == v.roundToDouble() ? v.toInt().toString() : v.toString();
 
   bool get _editable => _intake != null && _intake!['status'] == 'submitted' && !_submitPending && _allowed;
 
@@ -190,7 +199,17 @@ class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
       }
       items.add(it);
     }
-    return <String, dynamic>{'uid': widget.uid, 'base_price': base, 'items': items};
+    final out = <String, dynamic>{'uid': widget.uid, 'base_price': base, 'items': items};
+    if (_baseGram) {
+      final bg = parseIntakeNum(_baseG.text) ?? (_intake?['gram'] as num?)?.toDouble();
+      if (bg == null || bg <= 0 || bg > 100) {
+        _formErr = '«گرم مغز در ۱۰۰ گرم» پسته اصلی را (۰ تا ۱۰۰) وارد کنید';
+        return null;
+      }
+      out['base_gram_mode'] = true;
+      out['base_g'] = bg;
+    }
+    return out;
   }
 
   double? get _srvWeight => (_srv?['weight_kg'] as num?)?.toDouble();
@@ -216,7 +235,13 @@ class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
         });
       }
     }
-    return priceBlend(<String, dynamic>{'base_price': payload['base_price'], 'weight_kg': w, 'ref_gram': ref, 'items': items});
+    return priceBlend(<String, dynamic>{
+      'base_price': payload['base_price'],
+      'weight_kg': w,
+      'ref_gram': ref,
+      'items': items,
+      if (payload['base_gram_mode'] == true) ...<String, dynamic>{'base_gram_mode': true, 'base_g': payload['base_g']},
+    });
   }
 
   void _changed() {
@@ -291,37 +316,50 @@ class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
   Future<void> _reject() async {
     if (_busy) return;
     final c = TextEditingController();
-    final reason = await showDialog<String>(
+    // نتیجه: (دلیل، قطعی؟) — «برگشت برای اصلاح»: اتاق انس ویرایش و دوباره ثبت می‌کند؛ «رد قطعی»: بسته می‌شود
+    final res = await showDialog<(String, bool)>(
       context: context,
       builder: (ctx) => AlertDialog(
-        title: const Text('رد پذیرش'),
+        title: const Text('رد / برگشت پذیرش'),
         content: TextField(
           controller: c,
           autofocus: true,
           maxLength: 250,
           maxLines: 3,
-          decoration: const InputDecoration(labelText: 'دلیل رد (اجباری)', border: OutlineInputBorder()),
+          decoration: const InputDecoration(labelText: 'دلیل (اجباری)', border: OutlineInputBorder()),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('انصراف')),
+          OutlinedButton(
+            onPressed: () {
+              final t = c.text.trim();
+              if (t.isEmpty) return;
+              Navigator.pop(ctx, (t, true));
+            },
+            child: const Text('رد قطعی'),
+          ),
           FilledButton(
             onPressed: () {
               final t = c.text.trim();
               if (t.isEmpty) return;
-              Navigator.pop(ctx, t);
+              Navigator.pop(ctx, (t, false));
             },
-            child: const Text('رد کردن'),
+            child: const Text('برگشت برای اصلاح'),
           ),
         ],
       ),
     );
     c.dispose();
-    if (reason == null || !mounted) return;
+    if (res == null || !mounted) return;
+    final reason = res.$1;
+    final isFinal = res.$2;
+    if (isFinal && !await confirm(context, 'رد قطعی: پذیرش بسته می‌شود و دیگر قابل ویرایش نیست. مطمئنید؟')) return;
+    if (!mounted) return;
     setState(() => _busy = true);
-    final r = await IntakeApi.call('intake.reject', <String, dynamic>{'uid': widget.uid, 'reason': reason}, idem: _idem('reject'));
+    final r = await IntakeApi.call('intake.reject', <String, dynamic>{'uid': widget.uid, 'reason': reason, 'final': isFinal}, idem: _idem('reject'));
     if (!mounted) return;
     if (r.ok) {
-      await _finish(r, 'پذیرش رد شد.');
+      await _finish(r, isFinal ? 'پذیرش رد قطعی شد.' : 'پذیرش برای اصلاح به اتاق انس برگشت.');
       return;
     }
     setState(() => _busy = false);
@@ -330,10 +368,39 @@ class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
 
   Future<void> _markSample() async {
     if (_busy) return;
-    final ok = await confirm(context, 'این پذیرش «نمونه» شود؟ خرید و موجودی ساخته نمی‌شود و دیگر قابل قطعی‌سازی نیست.');
-    if (!ok || !mounted) return;
+    final nc = TextEditingController();
+    final note = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('نمونه‌کردن پذیرش'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('خرید و موجودی ساخته نمی‌شود و دیگر قابل قطعی‌سازی نیست.'),
+          const SizedBox(height: 12),
+          TextField(
+            controller: nc,
+            autofocus: true,
+            maxLength: 400,
+            maxLines: 3,
+            decoration: const InputDecoration(labelText: 'توضیح نمونه (الزامی): برای چیست/کیست؟', border: OutlineInputBorder()),
+          ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('انصراف')),
+          FilledButton(
+            onPressed: () {
+              final t = nc.text.trim();
+              if (t.isEmpty) return;
+              Navigator.pop(ctx, t);
+            },
+            child: const Text('ثبت نمونه'),
+          ),
+        ],
+      ),
+    );
+    nc.dispose();
+    if (note == null || !mounted) return;
     setState(() => _busy = true);
-    final r = await IntakeApi.call('intake.mark_sample', <String, dynamic>{'uid': widget.uid}, idem: _idem('sample'));
+    final r = await IntakeApi.call('intake.mark_sample', <String, dynamic>{'uid': widget.uid, 'note': note}, idem: _idem('sample'));
     if (!mounted) return;
     if (r.ok) {
       await _finish(r, 'پذیرش به‌عنوان نمونه ثبت شد.');
@@ -417,6 +484,11 @@ class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
               onChanged: (v) {
                 r.separate = v == true;
                 if (!r.separate) r.gram = false;
+                // گرمِ ثبت‌شده در اتاق انس خودکار اعمال می‌شود؛ نیازی به ورود دوباره نیست
+                if (r.separate && r.kernelG != null) {
+                  r.gram = true;
+                  if (r.g.text.trim().isEmpty) r.g.text = _plainNum(r.kernelG!);
+                }
                 _changed();
               },
             ),
@@ -523,52 +595,93 @@ class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
     final mismatch = fresh && local != null && local.ok && (local.avgPerKg != (_srv!['avg_per_kg'] as num).toInt() || local.total != (_srv!['total'] as num).toInt());
     final canConfirm = _editable && fresh && !mismatch && !_busy && !_previewing;
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('قطعی‌سازی پذیرش')),
-      body: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 900),
-          child: ListView(
-            padding: const EdgeInsets.all(16),
-            children: [
-              _specCard(),
-              if (!_editable)
-                Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: Text(
-                    _submitPending ? 'این پذیرش هنوز در صف ارسال است؛ پس از ارسال می‌توانید قطعی کنید.' : 'فقط پذیرشِ «ثبت‌شده» قابل قطعی‌سازی است.',
-                    style: TextStyle(color: Theme.of(context).colorScheme.error),
-                  ),
-                )
-              else ...[
-                const SizedBox(height: 12),
-                MoneyField(controller: _base, label: 'قیمت پایه (هر کیلو)', onChanged: _changed),
-                for (final r in _rows) _pctCard(r, local),
-                _summary(payload, local),
-                const SizedBox(height: 12),
-                Wrap(spacing: 8, runSpacing: 8, children: [
-                  FilledButton.icon(
-                    onPressed: canConfirm ? _confirmIntake : null,
-                    icon: const Icon(Icons.check_circle_outline),
-                    label: const Text('قطعی‌سازی و افزودن به موجودی'),
-                  ),
-                  OutlinedButton.icon(
-                    onPressed: _busy ? null : _reject,
-                    icon: const Icon(Icons.block),
-                    label: const Text('رد'),
-                  ),
-                  TextButton.icon(
-                    onPressed: _busy ? null : _markSample,
-                    icon: const Icon(Icons.science_outlined),
-                    label: const Text('نمونه'),
-                  ),
-                ]),
-                if (_busy) const Padding(padding: EdgeInsets.only(top: 12), child: LinearProgressIndicator()),
-              ],
-            ],
+    final bool wide = kWideForm(context);
+    final Widget baseFields = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      MoneyField(controller: _base, label: 'قیمت پایه (هر کیلو)', gap: kFormGap, onChanged: _changed),
+      CheckboxListTile(
+        contentPadding: EdgeInsets.zero,
+        dense: true,
+        controlAffinity: ListTileControlAffinity.leading,
+        title: const Text('خرید گرمی (پسته اصلی)'),
+        value: _baseGram,
+        onChanged: (v) {
+          _baseGram = v == true;
+          _changed();
+        },
+      ),
+      if (_baseGram)
+        Padding(
+          padding: const EdgeInsets.only(bottom: 8),
+          child: TextField(
+            controller: _baseG,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            decoration: InputDecoration(
+              labelText: 'گرم مغز پسته اصلی در ۱۰۰ گرم',
+              helperText: (_intake?['gram'] != null) ? 'ثبت اتاق انس: ${Fmt.number((_intake!['gram'] as num).toDouble(), dec: 3)}' : null,
+              border: const OutlineInputBorder(),
+            ),
+            onChanged: (_) => _changed(),
           ),
         ),
-      ),
+    ]);
+    final Widget pcts = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      for (final r in _rows) _pctCard(r, local),
+      _summary(payload, local),
+    ]);
+
+    return FormPage(
+      title: 'قطعی‌سازی پذیرش',
+      actions: !_editable
+          ? const <Widget>[]
+          : <Widget>[
+              Wrap(spacing: 8, runSpacing: 8, crossAxisAlignment: WrapCrossAlignment.center, children: [
+                FilledButton.icon(
+                  onPressed: canConfirm ? _confirmIntake : null,
+                  icon: const Icon(Icons.check_circle_outline),
+                  label: const Text('قطعی‌سازی و افزودن به موجودی'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: _busy ? null : _reject,
+                  icon: const Icon(Icons.block),
+                  label: const Text('رد / برگشت'),
+                ),
+                TextButton.icon(
+                  onPressed: _busy ? null : _markSample,
+                  icon: const Icon(Icons.science_outlined),
+                  label: const Text('نمونه'),
+                ),
+              ]),
+            ],
+      children: [
+        if (!_editable) ...[
+          _specCard(),
+          Padding(
+            padding: const EdgeInsets.only(top: 12),
+            child: Text(
+              _submitPending ? 'این پذیرش هنوز در صف ارسال است؛ پس از ارسال می‌توانید قطعی کنید.' : 'فقط پذیرشِ «ثبت‌شده» قابل قطعی‌سازی است.',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ),
+        ] else if (wide)
+          Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                _specCard(),
+                const SizedBox(height: 8),
+                baseFields,
+              ]),
+            ),
+            const SizedBox(width: 12),
+            Expanded(child: pcts),
+          ])
+        else ...[
+          _specCard(),
+          const SizedBox(height: 12),
+          baseFields,
+          pcts,
+        ],
+        if (_editable && _busy) const Padding(padding: EdgeInsets.only(top: 8), child: LinearProgressIndicator()),
+      ],
     );
   }
 }

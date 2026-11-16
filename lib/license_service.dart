@@ -130,7 +130,7 @@ class LicenseResult {
 /// برنامه نام را می‌پرسد و همان کد را همراه نام دوباره می‌فرستد؛ حساب جدید با
 /// اشتراک آزمایشی ساخته می‌شود.
 ///
-/// بعد از ورود موفق، سرور یک «توکن» طولانی‌مدت می‌سازد که روی گوشی ذخیره می‌شود؛
+/// بعد از ورود موفق، سرور یک «توکن» طولانی‌مدت می‌سازد که روی سیستم ذخیره می‌شود؛
 /// دفعات بعد همان توکن برای بررسی اعتبار اشتراک استفاده می‌شود.
 class LicenseService {
   LicenseService._();
@@ -144,7 +144,7 @@ class LicenseService {
   static const _kPlanKey = 'license_plan';
 
   /// آیا اشتراک این کاربر «پلن ارزی» است؟ (فقط وقتی true است قیمت دلار، سود دلاری و فاکتور ارزی دیده می‌شود)
-  /// مرجع تصمیم سرور است؛ آخرین مقدار روی گوشی ذخیره می‌شود تا آفلاین هم کار کند.
+  /// مرجع تصمیم سرور است؛ آخرین مقدار روی سیستم ذخیره می‌شود تا آفلاین هم کار کند.
   final ValueNotifier<bool> isFx = ValueNotifier<bool>(false);
 
   Future<void> _setPlan(dynamic raw) async {
@@ -308,7 +308,7 @@ class LicenseService {
     final daysLeft = (r.data['days_left'] is num) ? (r.data['days_left'] as num).toInt() : 0;
     if (isNew) {
       _pendingWelcome =
-          'خوش آمدید! ${faNum(daysLeft > 0 ? daysLeft : 20, dec: 0)} روز اشتراک آزمایشی رایگان برای شما فعال شد';
+          'خوش آمدید! ${faNum(daysLeft > 0 ? daysLeft : 10, dec: 0)} روز اشتراک آزمایشی رایگان برای شما فعال شد';
     }
     return OtpVerifyResult(isNew: isNew, daysLeft: daysLeft);
   }
@@ -468,7 +468,7 @@ class LicenseService {
     _signedInCache = false;
     expiry.value = null;
     if (kStrictLicense) await LicenseGuard.I.clear();
-    // دیتابیس هر حساب جداست و روی گوشی می‌ماند؛ فقط بسته می‌شود. اگر عملیات ارسال‌نشده
+    // دیتابیس هر حساب جداست و روی سیستم می‌ماند؛ فقط بسته می‌شود. اگر عملیات ارسال‌نشده
     // داشته باشد، با ورود دوباره به همان حساب ارسال می‌شود.
     SyncService.I.stop();
     await AppDb.I.closeAccount();
@@ -524,6 +524,18 @@ class LicenseService {
     } catch (_) {}
   }
 
+  /// کارکن (پرسنل) با توکن مخصوص خودش وارد می‌شود؛ ممکن است check.php (که برای مالک نوشته شده)
+  /// آن توکن را نشناسد و ۴۰۱ بدهد، در حالی که app.php همان توکن را می‌پذیرد (همان مسیری که وب استفاده می‌کند).
+  /// پس برای نشست کارکن، قبل از خروج، با account.status دوباره می‌سنجیم؛ فقط اگر آنجا هم ۴۰۱ بود خارج می‌شود.
+  Future<bool> _staffSessionAlive(String phone, String token) async {
+    if (!StaffPerms.I.isStaff) return false;
+    final r = await _post('app.php', {'phone': phone, 'token': token, 'action': 'account.status', 'payload': {}});
+    if (r.netError != null || r.status != 200) return false;
+    final item = r.data['item'];
+    if (item is Map) await StaffPerms.I.apply(item['staff'] ?? StaffPerms.I.current.value);
+    return StaffPerms.I.isStaff;
+  }
+
   Future<LicenseResult> _checkStrict(String phone, String token) async {
     final device = await LicenseGuard.I.deviceId();
     try {
@@ -537,6 +549,7 @@ class LicenseService {
 
       if (resp.statusCode == 401) {
         if (!_tokenChanging) {
+          if (await _staffSessionAlive(phone, token)) return _strictFromGuard(phone);
           await signOut();
           return LicenseResult(LicenseState.loggedOut);
         }
@@ -617,7 +630,7 @@ class LicenseService {
   }
 
   /// وضعیت اشتراک را برمی‌گرداند. اول تلاش می‌کند از سرور (آنلاین) بخواند؛
-  /// اگر اینترنت نبود، بر اساس آخرین وضعیتِ تاییدشده‌ای که روی گوشی ذخیره شده
+  /// اگر اینترنت نبود، بر اساس آخرین وضعیتِ تاییدشده‌ای که روی سیستم ذخیره شده
   /// تصمیم می‌گیرد (چون تاریخ انقضا ثابت است، با آفلاین‌ماندن قابل دور زدن نیست).
   Future<LicenseResult> check() async {
     await _restoreSignedInFlag();
@@ -642,6 +655,16 @@ class LicenseService {
           final (active, expiry) = await _loadCache();
           final valid = active && expiry != null && DateTime.now().isBefore(DateTime(expiry.year, expiry.month, expiry.day, 23, 59, 59));
           return LicenseResult(valid ? LicenseState.valid : LicenseState.blocked, phone: phone, name: await savedName(), expiry: expiry);
+        }
+        if (await _staffSessionAlive(phone, token)) {
+          // نشست کارکن معتبر است؛ وضعیت اشتراک مالک از آخرین ورود ذخیره شده است
+          final (active, expiry) = await _loadCache();
+          final valid = active &&
+              expiry != null &&
+              DateTime.now().isBefore(DateTime(expiry.year, expiry.month, expiry.day, 23, 59, 59));
+          this.expiry.value = valid ? expiry : null;
+          return LicenseResult(valid ? LicenseState.valid : LicenseState.blocked,
+              phone: phone, name: await savedName(), expiry: expiry);
         }
         // توکن دیگر معتبر نیست (مثلاً رمز از دستگاه دیگر عوض شده)؛ کاربر باید دوباره وارد شود.
         await signOut();

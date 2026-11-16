@@ -12,6 +12,7 @@ import 'company_profile.dart';
 import 'excel_io.dart';
 import 'invoice_templates_pdf.dart';
 import 'fx_doc_field.dart' show kFxRialPerStoredUnit;
+import 'fmt.dart' show Fmt;
 import 'utils.dart';
 
 /// برچسب‌های جهت تراکنش که در جدول PDF نشان داده می‌شود
@@ -229,27 +230,27 @@ class PdfService {
     List<List<String>> rows = [];
     if (payType == 'lump') {
       rows = [
-        ['وضعیت', 'تاریخ', directionLabels.toName, directionLabels.fromName, 'مبلغ (ریال)'],
+        ['وضعیت', 'تاریخ', directionLabels.toName, directionLabels.fromName, 'مبلغ (${Fmt.unitLabel()})'],
         for (final r in lump)
           [
             (r['paid'] as int? ?? 1) == 1 ? 'تسویه شده' : 'ثبت‌شده',
             jalaliDate(r['date'] as String),
             '${r['seller_name'] ?? r['receiver_name'] ?? '-'}',
             '${r['payer_name'] ?? '-'}',
-            faNum(r['amount'] as num, dec: 0),
+            Fmt.money(r['amount'] as num, label: false),
           ],
       ];
     } else if (payType == 'mixed') {
       // ترکیبی: یک جدول واحد با ستون «نوع» برای هر سطر
       rows = [
-        ['نوع', 'وضعیت', 'تاریخ / سررسید', 'جزئیات', 'مبلغ (ریال)'],
+        ['نوع', 'وضعیت', 'تاریخ / سررسید', 'جزئیات', 'مبلغ (${Fmt.unitLabel()})'],
         for (final r in lump)
           [
             'نقد',
             (r['paid'] as int? ?? 1) == 1 ? 'تسویه شده' : 'ثبت‌شده',
             jalaliDate(r['date'] as String),
             '${r['bank_name'] ?? '-'}',
-            faNum(r['amount'] as num, dec: 0),
+            Fmt.money(r['amount'] as num, label: false),
           ],
         for (final r in credit)
           [
@@ -257,7 +258,7 @@ class PdfService {
             (r['paid'] as int) == 1 ? 'تسویه شده' : 'باقیمانده',
             jalaliDate(r['due_date'] as String),
             '-',
-            faNum(r['amount'] as num, dec: 0),
+            Fmt.money(r['amount'] as num, label: false),
           ],
         for (final r in cheque)
           [
@@ -265,31 +266,31 @@ class PdfService {
             (r['paid'] as int) == 1 ? 'تسویه شده' : 'باقیمانده',
             jalaliDate(r['due_date'] as String),
             '${r['bank_name'] ?? '-'} — ${r['cheque_no'] ?? '-'}',
-            faNum(r['amount'] as num, dec: 0),
+            Fmt.money(r['amount'] as num, label: false),
           ],
       ];
     } else if (payType == 'staged' && stagedType == 'credit') {
       rows = [
-        ['وضعیت', 'سررسید', directionLabels.toName, directionLabels.fromName, 'مبلغ (ریال)'],
+        ['وضعیت', 'سررسید', directionLabels.toName, directionLabels.fromName, 'مبلغ (${Fmt.unitLabel()})'],
         for (final r in credit)
           [
             (r['paid'] as int) == 1 ? 'تسویه شده' : 'باقیمانده',
             jalaliDate(r['due_date'] as String),
             '${r['seller_name'] ?? r['receiver_name'] ?? '-'}',
             '${r['payer_name'] ?? '-'}',
-            faNum(r['amount'] as num, dec: 0),
+            Fmt.money(r['amount'] as num, label: false),
           ],
       ];
     } else if (payType == 'staged' && stagedType == 'cheque') {
       rows = [
-        ['وضعیت', 'بانک', 'شماره چک', 'سررسید', 'مبلغ (ریال)'],
+        ['وضعیت', 'بانک', 'شماره چک', 'سررسید', 'مبلغ (${Fmt.unitLabel()})'],
         for (final r in cheque)
           [
             (r['paid'] as int) == 1 ? 'تسویه شده' : 'باقیمانده',
             '${r['bank_name'] ?? '-'}',
             '${r['cheque_no'] ?? '-'}',
             jalaliDate(r['due_date'] as String),
-            faNum(r['amount'] as num, dec: 0),
+            Fmt.money(r['amount'] as num, label: false),
           ],
       ];
     }
@@ -310,9 +311,9 @@ class PdfService {
             decoration: pw.BoxDecoration(border: pw.Border.all(width: 0.5), borderRadius: pw.BorderRadius.circular(6)),
             child: pw.Column(children: [
               _kv('کد پسته', pesteCode.isEmpty ? '-' : pesteCode, bold: true),
-              _kv(totalLabel, '${faNum(total, dec: 0)} ریال', bold: true),
-              _kv('تسویه شده', '${faNum(settled, dec: 0)} ریال'),
-              _kv(remaining >= 0 ? 'باقیمانده' : 'اضافه‌پرداخت', '${faNum(remaining.abs(), dec: 0)} ریال'),
+              _kv(totalLabel, Fmt.money(total), bold: true),
+              _kv('تسویه شده', Fmt.money(settled)),
+              _kv(remaining >= 0 ? 'باقیمانده' : 'اضافه‌پرداخت', Fmt.money(remaining.abs())),
             ]),
           ),
           pw.SizedBox(height: 16),
@@ -453,7 +454,7 @@ class PdfService {
         ]),
         footer: (ctx) => _brandFooter(),
         build: (ctx) => [
-          _kv('جمع کل', '${faNum(grandTotal, dec: 0)} ریال', bold: true),
+          _kv('جمع کل', Fmt.money(grandTotal), bold: true),
           pw.SizedBox(height: 12),
           if (tableRows.length > 1)
             pw.Table.fromTextArray(
@@ -557,7 +558,7 @@ class PdfService {
     // S27c: برای سند ارزی، نرخ سند (fxRate) و کد ارز؛ فی ذخیره‌شده در واحد ذخیرهٔ محلی است (kFxRialPerStoredUnit)
     final bool isCcy = ccy != null && ccy.isNotEmpty;
     final String cl = isCcy ? ((ccySymbol ?? '').isEmpty ? ccy : ccySymbol!) : 'دلار';
-    final String rateLabel = isCcy ? 'نرخ سند (ریال)' : 'نرخ دلار (ریال)';
+    final String rateLabel = isCcy ? 'نرخ سند (${Fmt.unitLabel()})' : 'نرخ دلار (${Fmt.unitLabel()})';
     final double? rateVal = isCcy ? fxRate : usdRate;
     String fmtFx(double v) => isCcy ? faCcy(cl, v, dec: ccyDec) : faUsd(v);
     final unitUsd = !withUsd
@@ -581,15 +582,15 @@ class PdfService {
           <String>['تاریخ', dateLabel],
           <String>['فروشنده', sellerName.isEmpty ? '-' : sellerName],
           <String>['خریدار', buyerName.isEmpty ? '-' : buyerName],
-          if (withUsd && rateVal != null) <String>[rateLabel, faNum(rateVal, dec: 0)],
+          if (withUsd && rateVal != null) <String>[rateLabel, Fmt.money(rateVal, label: false)],
         ],
         columns: <String>[
-          'ردیف', 'دسته', 'نوع', 'کد پسته', 'وزن (خالص) کیلو', 'فی (ریال)', 'مبلغ (ریال)',
+          'ردیف', 'دسته', 'نوع', 'کد پسته', 'وزن (خالص) کیلو', 'فی (${Fmt.unitLabel()})', 'مبلغ (${Fmt.unitLabel()})',
           if (withUsd) ...<String>['فی ($cl)', 'مبلغ ($cl)'],
         ],
         rows: <List<String>>[
           <String>[
-            faNum(1, dec: 0), category, type, code, faNum(netWeight), faNum(unitPrice, dec: 0), faNum(amount, dec: 0),
+            faNum(1, dec: 0), category, type, code, faNum(netWeight), Fmt.money(unitPrice, label: false), Fmt.money(amount, label: false),
             if (withUsd) ...<String>[
               unitUsd == null ? '-' : faNum(unitUsd, dec: isCcy ? ccyDec : 4),
               amountUsd == null ? '-' : faNum(amountUsd),
@@ -605,23 +606,24 @@ class PdfService {
           for (final List<String> sp in specs) <String>[sp[0], sp[1]],
         ],
         totals: <List<String>>[
-          <String>['جمع کل (ریال)', '${faNum(amount, dec: 0)} ریال'],
+          <String>['جمع کل (${Fmt.unitLabel()})', Fmt.money(amount)],
           if (withUsd) <String>['جمع کل ($cl)', amountUsd == null ? '-' : fmtFx(amountUsd)],
-          if (paidAmount != null) <String>['مبلغ پرداخت‌شده (ریال)', '${faNum(paidAmount, dec: 0)} ریال'],
-          if (paidAmount != null) <String>['مانده حساب (ریال)', '${faNum(amount - paidAmount, dec: 0)} ریال'],
+          if (paidAmount != null) <String>['مبلغ پرداخت‌شده (${Fmt.unitLabel()})', Fmt.money(paidAmount)],
+          if (paidAmount != null) <String>['مانده حساب (${Fmt.unitLabel()})', Fmt.money(amount - paidAmount)],
         ],
         barcodes: printableCodesIn(code),
+        qrData: printableCodesIn(code).isEmpty ? null : lotQrPayload(printableCodesIn(code).first), // S31.T31.9
         note: note,
         signLabels: <String>['امضای فروشنده', 'امضای خریدار'],
       );
       return InvoiceTemplatesPdf.render(d, tpl, prof);
     }
     final headers = <String>[
-      'ردیف', 'دسته', 'نوع', 'کد پسته', 'وزن (خالص) کیلو', 'فی (ریال)', 'مبلغ (ریال)',
+      'ردیف', 'دسته', 'نوع', 'کد پسته', 'وزن (خالص) کیلو', 'فی (${Fmt.unitLabel()})', 'مبلغ (${Fmt.unitLabel()})',
       if (withUsd) ...['فی ($cl)', 'مبلغ ($cl)'],
     ];
     final row = <String>[
-      faNum(1, dec: 0), category, type, code, faNum(netWeight), faNum(unitPrice, dec: 0), faNum(amount, dec: 0),
+      faNum(1, dec: 0), category, type, code, faNum(netWeight), Fmt.money(unitPrice, label: false), Fmt.money(amount, label: false),
       if (withUsd) ...[unitUsd == null ? '-' : faNum(unitUsd, dec: isCcy ? ccyDec : 4), amountUsd == null ? '-' : faNum(amountUsd)],
     ];
 
@@ -657,7 +659,7 @@ class PdfService {
               _kv('تاریخ', dateLabel),
               _kv('فروشنده', sellerName.isEmpty ? '-' : sellerName),
               _kv('خریدار', buyerName.isEmpty ? '-' : buyerName),
-              if (withUsd && rateVal != null) _kv(rateLabel, faNum(rateVal, dec: 0)),
+              if (withUsd && rateVal != null) _kv(rateLabel, Fmt.money(rateVal, label: false)),
             ]),
           ),
           pw.SizedBox(height: 14),
@@ -711,12 +713,12 @@ class PdfService {
             decoration: pw.BoxDecoration(
                 border: pw.Border.all(width: 1), borderRadius: pw.BorderRadius.circular(6)),
             child: pw.Column(children: [
-              _kv('جمع کل (ریال)', '${faNum(amount, dec: 0)} ریال', bold: true),
+              _kv('جمع کل (${Fmt.unitLabel()})', Fmt.money(amount), bold: true),
               if (withUsd) _kv('جمع کل ($cl)', amountUsd == null ? '-' : fmtFx(amountUsd), bold: true),
               if (paidAmount != null) ...[
                 pw.Divider(),
-                _kv('مبلغ پرداخت‌شده (ریال)', '${faNum(paidAmount, dec: 0)} ریال'),
-                _kv('مانده حساب (ریال)', '${faNum(amount - paidAmount, dec: 0)} ریال', bold: true),
+                _kv('مبلغ پرداخت‌شده (${Fmt.unitLabel()})', Fmt.money(paidAmount)),
+                _kv('مانده حساب (${Fmt.unitLabel()})', Fmt.money(amount - paidAmount), bold: true),
               ],
             ]),
           ),

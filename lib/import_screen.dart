@@ -130,7 +130,7 @@ class _ImportScreenState extends State<ImportScreen> {
             decoration: const InputDecoration(labelText: 'نوع اطلاعات', border: OutlineInputBorder()),
             items: <DropdownMenuItem<ImpKind>>[
               for (final ImpKind k in kImportKinds)
-                if (k.id != 'accounts' || EditionService.I.edition.isGold) DropdownMenuItem<ImpKind>(value: k, child: Text(k.label)),
+                if ((k.id != 'accounts' || EditionService.I.edition.isGold) && (k.id != 'fx_rates' || EditionService.I.edition.isFx)) DropdownMenuItem<ImpKind>(value: k, child: Text(k.label)),
             ],
             onChanged: (ImpKind? k) {
               if (k == null) return;

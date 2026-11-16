@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'fmt.dart' show Fmt;
 
 import 'cheque_ui.dart' show kChequeLabels;
 import 'pdf_output.dart';
@@ -21,7 +22,7 @@ const List<List<String>> kChequeReportKinds = <List<String>>[
 ];
 
 double _d(dynamic v) => ReturnsHelp.d(v);
-String _m(dynamic v) => faNum(_d(v), dec: 0);
+String _m(dynamic v) => Fmt.money(_d(v));
 String _dirLabel(dynamic d) => '$d' == 'received' ? 'دریافتی' : 'پرداختی';
 String _jd(dynamic iso) => (iso == null || '$iso'.isEmpty) ? '-' : jalaliDate('$iso');
 String _iso(DateTime d) => '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
@@ -46,14 +47,14 @@ class ChequeReportData {
   List<List<String>> get kv {
     final List<List<String>> out = <List<String>>[
       <String>['تعداد چک', faNum(_d(raw['count']), dec: 0)],
-      <String>['جمع مبلغ (ریال)', _m(raw['total']), 'b'],
+      <String>['جمع مبلغ (${Fmt.unitLabel()})', _m(raw['total']), 'b'],
     ];
     if (kind == 'summary') {
       final Map<String, dynamic> r = Map<String, dynamic>.from(raw['received'] as Map? ?? <String, dynamic>{});
       final Map<String, dynamic> i = Map<String, dynamic>.from(raw['issued'] as Map? ?? <String, dynamic>{});
-      out.add(<String>['دریافتی باز (در انتظار نتیجه)', '${_m(r['open_amount'])} ریال — ${faNum(_d(r['open_count']), dec: 0)} چک']);
-      out.add(<String>['پرداختی باز (در انتظار نتیجه)', '${_m(i['open_amount'])} ریال — ${faNum(_d(i['open_count']), dec: 0)} چک']);
-      out.add(<String>['خالص باز (دریافتی منهای پرداختی)', '${_m(raw['net_open'])} ریال', 'b']);
+      out.add(<String>['دریافتی باز (در انتظار نتیجه)', '${_m(r['open_amount'])} — ${faNum(_d(r['open_count']), dec: 0)} چک']);
+      out.add(<String>['پرداختی باز (در انتظار نتیجه)', '${_m(i['open_amount'])} — ${faNum(_d(i['open_count']), dec: 0)} چک']);
+      out.add(<String>['خالص باز (دریافتی منهای پرداختی)', '${_m(raw['net_open'])}', 'b']);
     }
     return out;
   }

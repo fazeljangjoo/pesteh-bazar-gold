@@ -339,10 +339,11 @@ const Map<String, EntitySpec> kEntityRegistry = <String, EntitySpec>{
       EntityField('owner_name', 'نام صاحب پسته', 'string', max: 150),
       EntityField('is_sample', 'نمونه', 'bool', defaultValue: false),
       EntityField('status', 'وضعیت', 'enum',
-          values: <String>['draft', 'submitted', 'confirmed', 'rejected', 'sample_only'],
+          values: <String>['draft', 'submitted', 'returned', 'confirmed', 'rejected', 'sample_only'],
           valueLabels: <String, String>{
             'draft': 'پیش‌نویس',
             'submitted': 'ثبت‌شده',
+            'returned': 'برگشتی برای اصلاح',
             'confirmed': 'قطعی‌شده',
             'rejected': 'ردشده',
             'sample_only': 'نمونه'
