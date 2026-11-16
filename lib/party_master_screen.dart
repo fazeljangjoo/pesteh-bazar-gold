@@ -252,6 +252,7 @@ class _PartyMasterScreenState extends State<PartyMasterScreen> {
           child: SafeArea(
             top: false,
             child: Center(
+              heightFactor: 1,
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 1180),
                 child: Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8), child: Row(children: <Widget>[saveBtn])),
