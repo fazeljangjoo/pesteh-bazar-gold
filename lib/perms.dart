@@ -44,6 +44,19 @@ class StaffPerms {
     return p.every((e) => kWorkshopOperatorPerms.contains(e));
   }
 
+  /// نقش «کارتکس»: کارکنی که فقط مجوز مشاهدهٔ کارتکس لات را دارد (cartex.view الزامی؛ هر مجوز دیگر ⇒ false) ⇒ فقط صفحهٔ کارتکس.
+  bool get isCartexOnly {
+    final s = current.value;
+    if (s == null) return false;
+    final p = s['perms'];
+    if (p is! List || p.isEmpty) return false;
+    if (!p.contains('cartex.view')) return false;
+    return p.every((e) => kCartexPerms.contains(e));
+  }
+
+  /// نمایش کارتکس لات: مجوز تازهٔ cartex.view، یا stock.view (دستگاهی که هنوز مجوزهای جدید را از سرور نگرفته؛ سرور خودش را چک می‌کند).
+  bool get canCartex => can('cartex.view') || can('stock.view');
+
   /// raw = Map کارکن از سرور، یا null برای مالک. روی دستگاه هم ذخیره می‌شود تا آفلاین همان بماند.
   Future<void> apply(dynamic raw) async {
     final Map<String, dynamic>? next = raw is Map ? Map<String, dynamic>.from(raw) : null;
@@ -78,6 +91,9 @@ class StaffPerms {
 /// S5.T4: مجوزهای نقش «اتاق انس» (همان نقش سیستمی سرور در permissions.php).
 const Set<String> kOunceRoomPerms = <String>{'ounce.intake', 'ounce.view_own', 'ounce.edit_own', 'ounces.view'};
 
+/// نقش سیستمی «کارتکس» (permissions.php: PB_ROLE_CARTEX): فقط مشاهدهٔ کارتکس لات.
+const Set<String> kCartexPerms = <String>{'cartex.view'};
+
 /// کارگاه (مرحلهٔ ۱): مجوزهای نقش سیستمی «اپراتور کارگاه» (permissions.php: PB_ROLE_WORKSHOP_OPERATOR) — بدون price.view. شِل اپراتور = مرحلهٔ ۳.
 const Set<String> kWorkshopOperatorPerms = <String>{'workshop.operate', 'workshop.view', 'workshop.crack', 'workshop.feed'};
 
@@ -107,6 +123,7 @@ const Map<String, String> kPermLabels = <String, String>{
   'loans.due_paid': 'ثبت بازپرداخت وام',
   'catalog.manage': 'مدیریت دسته و نوع پسته',
   'stock.view': 'مشاهدهٔ موجودی و انبار',
+  'cartex.view': 'مشاهدهٔ کارتکس لات',
   'stock.transfer': 'انتقال بین انبارها',
   'warehouses.view': 'مشاهدهٔ انبارها',
   'warehouses.manage': 'مدیریت انبارها',
@@ -116,6 +133,8 @@ const Map<String, String> kPermLabels = <String, String>{
   'profit.view': 'مشاهدهٔ سود و زیان',
   'accounting.view': 'مشاهدهٔ حسابداری',
   'accounting.post': 'ثبت سند حسابداری',
+  'accounting.fx_reval.apply': 'اعمال تسعیر ارز',
+  'accounting.fx_reval.reverse': 'ابطال تسعیر ارز',
   'accounting.edit': 'ویرایش سند حسابداری',
   'accounting.close': 'بستن سال مالی و اسناد',
   'fy.manage': 'مدیریت سال‌های مالی',
@@ -165,6 +184,7 @@ const Map<String, String> kModuleLabels = <String, String>{
   'loans': 'وام و قرض',
   'catalog': 'کالا',
   'stock': 'انبار و موجودی',
+  'cartex': 'کارتکس',
   'warehouses': 'انبارها',
   'ounces': 'درجه‌بندی اونس',
   'reports': 'گزارش‌ها',

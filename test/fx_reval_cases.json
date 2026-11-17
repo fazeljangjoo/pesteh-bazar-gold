@@ -1,0 +1,2042 @@
+{
+ "_doc": "کیس‌های pb_fxr_build (fx_reval.php). نرخ‌ها ریال به‌ازای هر واحد. fingerprint جدا در selftest تست می‌شود.",
+ "cases": [
+  {
+   "name": "بدون فاکتور",
+   "docs": [],
+   "paid": {},
+   "rates": {},
+   "expect": {
+    "items": [],
+    "docs": [],
+    "parties": [],
+    "ar_up": 0,
+    "ar_down": 0,
+    "ap_up": 0,
+    "ap_down": 0,
+    "doc_count": 0,
+    "net_delta": 0
+   }
+  },
+  {
+   "name": "سود طلب",
+   "docs": [
+    {
+     "side": "ar",
+     "id": 1,
+     "ref": "#1",
+     "party": "الف",
+     "ccy": "USD",
+     "fx_rate": 500000,
+     "amt": 1000,
+     "date": "2026-10-01"
+    }
+   ],
+   "paid": {},
+   "rates": {
+    "USD": 520000
+   },
+   "expect": {
+    "items": [
+     {
+      "side": "ar",
+      "ccy": "USD",
+      "rate": 520000,
+      "open_ccy": 1000,
+      "delta": 20000000
+     }
+    ],
+    "docs": [
+     {
+      "side": "ar",
+      "doc_id": 1,
+      "ref": "#1",
+      "party": "الف",
+      "ccy": "USD",
+      "booked_rate": 500000,
+      "total_ccy": 1000,
+      "paid_ccy": 0,
+      "rem_ccy": 1000,
+      "rate": 520000,
+      "delta": 20000000
+     }
+    ],
+    "parties": [
+     {
+      "party": "الف",
+      "side": "ar",
+      "no_party": false,
+      "up": 20000000,
+      "down": 0
+     }
+    ],
+    "ar_up": 20000000,
+    "ar_down": 0,
+    "ap_up": 0,
+    "ap_down": 0,
+    "doc_count": 1,
+    "net_delta": 20000000
+   }
+  },
+  {
+   "name": "زیان طلب",
+   "docs": [
+    {
+     "side": "ar",
+     "id": 1,
+     "ref": "#1",
+     "party": "الف",
+     "ccy": "USD",
+     "fx_rate": 520000,
+     "amt": 1000,
+     "date": "2026-10-01"
+    }
+   ],
+   "paid": {},
+   "rates": {
+    "USD": 500000
+   },
+   "expect": {
+    "items": [
+     {
+      "side": "ar",
+      "ccy": "USD",
+      "rate": 500000,
+      "open_ccy": 1000,
+      "delta": -20000000
+     }
+    ],
+    "docs": [
+     {
+      "side": "ar",
+      "doc_id": 1,
+      "ref": "#1",
+      "party": "الف",
+      "ccy": "USD",
+      "booked_rate": 520000,
+      "total_ccy": 1000,
+      "paid_ccy": 0,
+      "rem_ccy": 1000,
+      "rate": 500000,
+      "delta": -20000000
+     }
+    ],
+    "parties": [
+     {
+      "party": "الف",
+      "side": "ar",
+      "no_party": false,
+      "up": 0,
+      "down": 20000000
+     }
+    ],
+    "ar_up": 0,
+    "ar_down": 20000000,
+    "ap_up": 0,
+    "ap_down": 0,
+    "doc_count": 1,
+    "net_delta": -20000000
+   }
+  },
+  {
+   "name": "زیان بدهی",
+   "docs": [
+    {
+     "side": "ap",
+     "id": 1,
+     "ref": "#1",
+     "party": "ب",
+     "ccy": "USD",
+     "fx_rate": 500000,
+     "amt": 1000,
+     "date": "2026-10-01"
+    }
+   ],
+   "paid": {},
+   "rates": {
+    "USD": 520000
+   },
+   "expect": {
+    "items": [
+     {
+      "side": "ap",
+      "ccy": "USD",
+      "rate": 520000,
+      "open_ccy": 1000,
+      "delta": 20000000
+     }
+    ],
+    "docs": [
+     {
+      "side": "ap",
+      "doc_id": 1,
+      "ref": "#1",
+      "party": "ب",
+      "ccy": "USD",
+      "booked_rate": 500000,
+      "total_ccy": 1000,
+      "paid_ccy": 0,
+      "rem_ccy": 1000,
+      "rate": 520000,
+      "delta": 20000000
+     }
+    ],
+    "parties": [
+     {
+      "party": "ب",
+      "side": "ap",
+      "no_party": false,
+      "up": 20000000,
+      "down": 0
+     }
+    ],
+    "ar_up": 0,
+    "ar_down": 0,
+    "ap_up": 20000000,
+    "ap_down": 0,
+    "doc_count": 1,
+    "net_delta": -20000000
+   }
+  },
+  {
+   "name": "سود بدهی",
+   "docs": [
+    {
+     "side": "ap",
+     "id": 1,
+     "ref": "#1",
+     "party": "ب",
+     "ccy": "USD",
+     "fx_rate": 520000,
+     "amt": 1000,
+     "date": "2026-10-01"
+    }
+   ],
+   "paid": {},
+   "rates": {
+    "USD": 500000
+   },
+   "expect": {
+    "items": [
+     {
+      "side": "ap",
+      "ccy": "USD",
+      "rate": 500000,
+      "open_ccy": 1000,
+      "delta": -20000000
+     }
+    ],
+    "docs": [
+     {
+      "side": "ap",
+      "doc_id": 1,
+      "ref": "#1",
+      "party": "ب",
+      "ccy": "USD",
+      "booked_rate": 520000,
+      "total_ccy": 1000,
+      "paid_ccy": 0,
+      "rem_ccy": 1000,
+      "rate": 500000,
+      "delta": -20000000
+     }
+    ],
+    "parties": [
+     {
+      "party": "ب",
+      "side": "ap",
+      "no_party": false,
+      "up": 0,
+      "down": 20000000
+     }
+    ],
+    "ar_up": 0,
+    "ar_down": 0,
+    "ap_up": 0,
+    "ap_down": 20000000,
+    "doc_count": 1,
+    "net_delta": 20000000
+   }
+  },
+  {
+   "name": "پرداخت جزئی",
+   "docs": [
+    {
+     "side": "ar",
+     "id": 1,
+     "ref": "#1",
+     "party": "الف",
+     "ccy": "USD",
+     "fx_rate": 500000,
+     "amt": 1000,
+     "date": "2026-10-01"
+    }
+   ],
+   "paid": {
+    "ar:1": 400
+   },
+   "rates": {
+    "USD": 510000
+   },
+   "expect": {
+    "items": [
+     {
+      "side": "ar",
+      "ccy": "USD",
+      "rate": 510000,
+      "open_ccy": 600,
+      "delta": 6000000
+     }
+    ],
+    "docs": [
+     {
+      "side": "ar",
+      "doc_id": 1,
+      "ref": "#1",
+      "party": "الف",
+      "ccy": "USD",
+      "booked_rate": 500000,
+      "total_ccy": 1000,
+      "paid_ccy": 400,
+      "rem_ccy": 600,
+      "rate": 510000,
+      "delta": 6000000
+     }
+    ],
+    "parties": [
+     {
+      "party": "الف",
+      "side": "ar",
+      "no_party": false,
+      "up": 6000000,
+      "down": 0
+     }
+    ],
+    "ar_up": 6000000,
+    "ar_down": 0,
+    "ap_up": 0,
+    "ap_down": 0,
+    "doc_count": 1,
+    "net_delta": 6000000
+   }
+  },
+  {
+   "name": "پرداخت کامل و بیش‌پرداخت رد می‌شود",
+   "docs": [
+    {
+     "side": "ar",
+     "id": 1,
+     "ref": "#1",
+     "party": "الف",
+     "ccy": "USD",
+     "fx_rate": 500000,
+     "amt": 1000,
+     "date": "2026-10-01"
+    },
+    {
+     "side": "ap",
+     "id": 2,
+     "ref": "#2",
+     "party": "ب",
+     "ccy": "USD",
+     "fx_rate": 500000,
+     "amt": 300,
+     "date": "2026-10-01"
+    }
+   ],
+   "paid": {
+    "ar:1": 1000,
+    "ap:2": 350
+   },
+   "rates": {
+    "USD": 510000
+   },
+   "expect": {
+    "items": [],
+    "docs": [],
+    "parties": [],
+    "ar_up": 0,
+    "ar_down": 0,
+    "ap_up": 0,
+    "ap_down": 0,
+    "doc_count": 0,
+    "net_delta": 0
+   }
+  },
+  {
+   "name": "دو ارز یک طرف‌حساب",
+   "docs": [
+    {
+     "side": "ar",
+     "id": 1,
+     "ref": "#1",
+     "party": "الف",
+     "ccy": "USD",
+     "fx_rate": 500000,
+     "amt": 100,
+     "date": "2026-10-01"
+    },
+    {
+     "side": "ar",
+     "id": 2,
+     "ref": "#2",
+     "party": "الف",
+     "ccy": "EUR",
+     "fx_rate": 550000,
+     "amt": 50,
+     "date": "2026-10-01"
+    }
+   ],
+   "paid": {},
+   "rates": {
+    "USD": 510000,
+    "EUR": 540000
+   },
+   "expect": {
+    "items": [
+     {
+      "side": "ar",
+      "ccy": "USD",
+      "rate": 510000,
+      "open_ccy": 100,
+      "delta": 1000000
+     },
+     {
+      "side": "ar",
+      "ccy": "EUR",
+      "rate": 540000,
+      "open_ccy": 50,
+      "delta": -500000
+     }
+    ],
+    "docs": [
+     {
+      "side": "ar",
+      "doc_id": 1,
+      "ref": "#1",
+      "party": "الف",
+      "ccy": "USD",
+      "booked_rate": 500000,
+      "total_ccy": 100,
+      "paid_ccy": 0,
+      "rem_ccy": 100,
+      "rate": 510000,
+      "delta": 1000000
+     },
+     {
+      "side": "ar",
+      "doc_id": 2,
+      "ref": "#2",
+      "party": "الف",
+      "ccy": "EUR",
+      "booked_rate": 550000,
+      "total_ccy": 50,
+      "paid_ccy": 0,
+      "rem_ccy": 50,
+      "rate": 540000,
+      "delta": -500000
+     }
+    ],
+    "parties": [
+     {
+      "party": "الف",
+      "side": "ar",
+      "no_party": false,
+      "up": 500000,
+      "down": 0
+     }
+    ],
+    "ar_up": 500000,
+    "ar_down": 0,
+    "ap_up": 0,
+    "ap_down": 0,
+    "doc_count": 2,
+    "net_delta": 500000
+   }
+  },
+  {
+   "name": "دو طرف‌حساب با علامت مخالف و یک طرف‌حساب در دو طرف",
+   "docs": [
+    {
+     "side": "ar",
+     "id": 1,
+     "ref": "#1",
+     "party": "الف",
+     "ccy": "USD",
+     "fx_rate": 500000,
+     "amt": 100,
+     "date": "2026-10-01"
+    },
+    {
+     "side": "ar",
+     "id": 2,
+     "ref": "#2",
+     "party": "ب",
+     "ccy": "USD",
+     "fx_rate": 520000,
+     "amt": 200,
+     "date": "2026-10-01"
+    },
+    {
+     "side": "ap",
+     "id": 3,
+     "ref": "#3",
+     "party": "الف",
+     "ccy": "USD",
+     "fx_rate": 500000,
+     "amt": 10,
+     "date": "2026-10-01"
+    }
+   ],
+   "paid": {},
+   "rates": {
+    "USD": 510000
+   },
+   "expect": {
+    "items": [
+     {
+      "side": "ar",
+      "ccy": "USD",
+      "rate": 510000,
+      "open_ccy": 300,
+      "delta": -1000000
+     },
+     {
+      "side": "ap",
+      "ccy": "USD",
+      "rate": 510000,
+      "open_ccy": 10,
+      "delta": 100000
+     }
+    ],
+    "docs": [
+     {
+      "side": "ap",
+      "doc_id": 3,
+      "ref": "#3",
+      "party": "الف",
+      "ccy": "USD",
+      "booked_rate": 500000,
+      "total_ccy": 10,
+      "paid_ccy": 0,
+      "rem_ccy": 10,
+      "rate": 510000,
+      "delta": 100000
+     },
+     {
+      "side": "ar",
+      "doc_id": 1,
+      "ref": "#1",
+      "party": "الف",
+      "ccy": "USD",
+      "booked_rate": 500000,
+      "total_ccy": 100,
+      "paid_ccy": 0,
+      "rem_ccy": 100,
+      "rate": 510000,
+      "delta": 1000000
+     },
+     {
+      "side": "ar",
+      "doc_id": 2,
+      "ref": "#2",
+      "party": "ب",
+      "ccy": "USD",
+      "booked_rate": 520000,
+      "total_ccy": 200,
+      "paid_ccy": 0,
+      "rem_ccy": 200,
+      "rate": 510000,
+      "delta": -2000000
+     }
+    ],
+    "parties": [
+     {
+      "party": "الف",
+      "side": "ap",
+      "no_party": false,
+      "up": 100000,
+      "down": 0
+     },
+     {
+      "party": "الف",
+      "side": "ar",
+      "no_party": false,
+      "up": 1000000,
+      "down": 0
+     },
+     {
+      "party": "ب",
+      "side": "ar",
+      "no_party": false,
+      "up": 0,
+      "down": 2000000
+     }
+    ],
+    "ar_up": 1000000,
+    "ar_down": 2000000,
+    "ap_up": 100000,
+    "ap_down": 0,
+    "doc_count": 3,
+    "net_delta": -1100000
+   }
+  },
+  {
+   "name": "گرد کردن (نیم به سمت دور از صفر)",
+   "docs": [
+    {
+     "side": "ar",
+     "id": 1,
+     "ref": "#1",
+     "party": "ایکس",
+     "ccy": "USD",
+     "fx_rate": 1000,
+     "amt": 3.3333,
+     "date": "2026-10-01"
+    },
+    {
+     "side": "ar",
+     "id": 2,
+     "ref": "#2",
+     "party": "وای",
+     "ccy": "USD",
+     "fx_rate": 1000,
+     "amt": 0.5,
+     "date": "2026-10-01"
+    },
+    {
+     "side": "ar",
+     "id": 3,
+     "ref": "#3",
+     "party": "زد",
+     "ccy": "USD",
+     "fx_rate": 1002,
+     "amt": 1,
+     "date": "2026-10-01"
+    }
+   ],
+   "paid": {},
+   "rates": {
+    "USD": 1001.5
+   },
+   "expect": {
+    "items": [
+     {
+      "side": "ar",
+      "ccy": "USD",
+      "rate": 1001.5,
+      "open_ccy": 4.8333,
+      "delta": 5
+     }
+    ],
+    "docs": [
+     {
+      "side": "ar",
+      "doc_id": 1,
+      "ref": "#1",
+      "party": "ایکس",
+      "ccy": "USD",
+      "booked_rate": 1000,
+      "total_ccy": 3.3333,
+      "paid_ccy": 0,
+      "rem_ccy": 3.3333,
+      "rate": 1001.5,
+      "delta": 5
+     },
+     {
+      "side": "ar",
+      "doc_id": 2,
+      "ref": "#2",
+      "party": "وای",
+      "ccy": "USD",
+      "booked_rate": 1000,
+      "total_ccy": 0.5,
+      "paid_ccy": 0,
+      "rem_ccy": 0.5,
+      "rate": 1001.5,
+      "delta": 1
+     },
+     {
+      "side": "ar",
+      "doc_id": 3,
+      "ref": "#3",
+      "party": "زد",
+      "ccy": "USD",
+      "booked_rate": 1002,
+      "total_ccy": 1,
+      "paid_ccy": 0,
+      "rem_ccy": 1,
+      "rate": 1001.5,
+      "delta": -1
+     }
+    ],
+    "parties": [
+     {
+      "party": "ایکس",
+      "side": "ar",
+      "no_party": false,
+      "up": 5,
+      "down": 0
+     },
+     {
+      "party": "زد",
+      "side": "ar",
+      "no_party": false,
+      "up": 0,
+      "down": 1
+     },
+     {
+      "party": "وای",
+      "side": "ar",
+      "no_party": false,
+      "up": 1,
+      "down": 0
+     }
+    ],
+    "ar_up": 6,
+    "ar_down": 1,
+    "ap_up": 0,
+    "ap_down": 0,
+    "doc_count": 3,
+    "net_delta": 5
+   }
+  },
+  {
+   "name": "فاکتور بدون طرف‌حساب",
+   "docs": [
+    {
+     "side": "ar",
+     "id": 1,
+     "ref": "#1",
+     "party": null,
+     "ccy": "USD",
+     "fx_rate": 100,
+     "amt": 10,
+     "date": "2026-10-01"
+    },
+    {
+     "side": "ar",
+     "id": 2,
+     "ref": "#2",
+     "party": "   ",
+     "ccy": "USD",
+     "fx_rate": 100,
+     "amt": 5,
+     "date": "2026-10-01"
+    },
+    {
+     "side": "ar",
+     "id": 3,
+     "ref": "#3",
+     "party": "الف",
+     "ccy": "USD",
+     "fx_rate": 100,
+     "amt": 1,
+     "date": "2026-10-01"
+    }
+   ],
+   "paid": {},
+   "rates": {
+    "USD": 110
+   },
+   "expect": {
+    "items": [
+     {
+      "side": "ar",
+      "ccy": "USD",
+      "rate": 110,
+      "open_ccy": 16,
+      "delta": 160
+     }
+    ],
+    "docs": [
+     {
+      "side": "ar",
+      "doc_id": 1,
+      "ref": "#1",
+      "party": "بدون طرف‌حساب",
+      "ccy": "USD",
+      "booked_rate": 100,
+      "total_ccy": 10,
+      "paid_ccy": 0,
+      "rem_ccy": 10,
+      "rate": 110,
+      "delta": 100
+     },
+     {
+      "side": "ar",
+      "doc_id": 2,
+      "ref": "#2",
+      "party": "بدون طرف‌حساب",
+      "ccy": "USD",
+      "booked_rate": 100,
+      "total_ccy": 5,
+      "paid_ccy": 0,
+      "rem_ccy": 5,
+      "rate": 110,
+      "delta": 50
+     },
+     {
+      "side": "ar",
+      "doc_id": 3,
+      "ref": "#3",
+      "party": "الف",
+      "ccy": "USD",
+      "booked_rate": 100,
+      "total_ccy": 1,
+      "paid_ccy": 0,
+      "rem_ccy": 1,
+      "rate": 110,
+      "delta": 10
+     }
+    ],
+    "parties": [
+     {
+      "party": "الف",
+      "side": "ar",
+      "no_party": false,
+      "up": 10,
+      "down": 0
+     },
+     {
+      "party": "بدون طرف‌حساب",
+      "side": "ar",
+      "no_party": true,
+      "up": 150,
+      "down": 0
+     }
+    ],
+    "ar_up": 160,
+    "ar_down": 0,
+    "ap_up": 0,
+    "ap_down": 0,
+    "doc_count": 3,
+    "net_delta": 160
+   }
+  }
+ ],
+ "rev_plan_doc": "کیس‌های pb_fxr_rev_plan(as_of, fy, locked_through): fy = ردیف سال مالیِ شامل rev_date (null = وجود ندارد)، locked_through = آخرین قفل دوره.",
+ "rev_plan": [
+  {
+   "name": "وسط سال با سال باز ⇒ post",
+   "as_of": "2025-12-10",
+   "fy": {
+    "status": "open"
+   },
+   "locked_through": null,
+   "expect": {
+    "rev_date": "2025-12-11",
+    "action": "post",
+    "reason": "ok"
+   }
+  },
+  {
+   "name": "آخر سال مالی بدون سال بعدی ⇒ pending",
+   "as_of": "2026-03-20",
+   "fy": null,
+   "locked_through": null,
+   "expect": {
+    "rev_date": "2026-03-21",
+    "action": "pending",
+    "reason": "no_fiscal_year"
+   }
+  },
+  {
+   "name": "آخر سال مالی با سال بعدی باز ⇒ post",
+   "as_of": "2026-03-20",
+   "fy": {
+    "status": "open"
+   },
+   "locked_through": null,
+   "expect": {
+    "rev_date": "2026-03-21",
+    "action": "post",
+    "reason": "ok"
+   }
+  },
+  {
+   "name": "آخر سال مالی با سال بعدی بسته ⇒ pending",
+   "as_of": "2026-03-20",
+   "fy": {
+    "status": "closed"
+   },
+   "locked_through": null,
+   "expect": {
+    "rev_date": "2026-03-21",
+    "action": "pending",
+    "reason": "fy_not_open"
+   }
+  },
+  {
+   "name": "سال قفل‌شده ⇒ pending",
+   "as_of": "2025-12-10",
+   "fy": {
+    "status": "locked"
+   },
+   "locked_through": null,
+   "expect": {
+    "rev_date": "2025-12-11",
+    "action": "pending",
+    "reason": "fy_not_open"
+   }
+  },
+  {
+   "name": "rev_date برابر آخرین قفل دوره ⇒ pending",
+   "as_of": "2025-12-10",
+   "fy": {
+    "status": "open"
+   },
+   "locked_through": "2025-12-11",
+   "expect": {
+    "rev_date": "2025-12-11",
+    "action": "pending",
+    "reason": "period_locked"
+   }
+  },
+  {
+   "name": "rev_date قبل از قفل دوره ⇒ pending",
+   "as_of": "2025-11-01",
+   "fy": {
+    "status": "open"
+   },
+   "locked_through": "2025-12-29",
+   "expect": {
+    "rev_date": "2025-11-02",
+    "action": "pending",
+    "reason": "period_locked"
+   }
+  },
+  {
+   "name": "یک روز بعد از قفل ⇒ post",
+   "as_of": "2025-12-11",
+   "fy": {
+    "status": "open"
+   },
+   "locked_through": "2025-12-11",
+   "expect": {
+    "rev_date": "2025-12-12",
+    "action": "post",
+    "reason": "ok"
+   }
+  },
+  {
+   "name": "قفل خالی ⇒ نادیده",
+   "as_of": "2025-12-10",
+   "fy": {
+    "status": "open"
+   },
+   "locked_through": "",
+   "expect": {
+    "rev_date": "2025-12-11",
+    "action": "post",
+    "reason": "ok"
+   }
+  },
+  {
+   "name": "پایان ماه میلادی و سال کبیسه",
+   "as_of": "2024-02-28",
+   "fy": {
+    "status": "open"
+   },
+   "locked_through": null,
+   "expect": {
+    "rev_date": "2024-02-29",
+    "action": "post",
+    "reason": "ok"
+   }
+  },
+  {
+   "name": "پایان سال میلادی",
+   "as_of": "2025-12-31",
+   "fy": {
+    "status": "open"
+   },
+   "locked_through": null,
+   "expect": {
+    "rev_date": "2026-01-01",
+    "action": "post",
+    "reason": "ok"
+   }
+  }
+ ],
+ "stale_doc": "کیس‌های pb_fxr_is_stale(stored_fp, now_fp, status).",
+ "stale": [
+  {
+   "name": "active و fingerprint برابر ⇒ تازه",
+   "stored": "abc",
+   "now": "abc",
+   "status": "active",
+   "expect": false
+  },
+  {
+   "name": "active و fingerprint متفاوت ⇒ stale",
+   "stored": "abc",
+   "now": "abd",
+   "status": "active",
+   "expect": true
+  },
+  {
+   "name": "reversed حتی با تفاوت ⇒ false",
+   "stored": "abc",
+   "now": "abd",
+   "status": "reversed",
+   "expect": false
+  },
+  {
+   "name": "status ناشناخته ⇒ false",
+   "stored": "abc",
+   "now": "abd",
+   "status": "cancelled",
+   "expect": false
+  },
+  {
+   "name": "ردیف قدیمی بدون fingerprint ⇒ false",
+   "stored": "",
+   "now": "abd",
+   "status": "active",
+   "expect": false
+  },
+  {
+   "name": "هر دو خالی ⇒ false",
+   "stored": "",
+   "now": "",
+   "status": "active",
+   "expect": false
+  }
+ ],
+ "validate_doc": "کیس‌های pb_fxr_validate(in): expect.codes = کدهای problems به‌ترتیب؛ expect.ccys برای rate_missing.",
+ "validate": [
+  {
+   "name": "موفق",
+   "in": {
+    "as_of": "2025-12-10",
+    "today": "2026-01-05",
+    "fy": {
+     "ok": true,
+     "status": "open",
+     "start": "2025-03-21",
+     "end": "2026-03-20"
+    },
+    "lock_through": "",
+    "missing_ccys": [],
+    "has_active": false,
+    "doc_count": 3
+   },
+   "expect": {
+    "ok": true,
+    "codes": []
+   }
+  },
+  {
+   "name": "in_future",
+   "in": {
+    "as_of": "2026-02-01",
+    "today": "2026-01-05",
+    "fy": {
+     "ok": true,
+     "status": "open",
+     "start": "2025-03-21",
+     "end": "2026-03-20"
+    },
+    "lock_through": "",
+    "missing_ccys": [],
+    "has_active": false,
+    "doc_count": 3
+   },
+   "expect": {
+    "ok": false,
+    "codes": [
+     "in_future"
+    ]
+   }
+  },
+  {
+   "name": "no_fiscal_year (fy=null)",
+   "in": {
+    "as_of": "2025-12-10",
+    "today": "2026-01-05",
+    "fy": null,
+    "lock_through": "",
+    "missing_ccys": [],
+    "has_active": false,
+    "doc_count": 3
+   },
+   "expect": {
+    "ok": false,
+    "codes": [
+     "no_fiscal_year"
+    ]
+   }
+  },
+  {
+   "name": "no_fiscal_year (خارج از بازهٔ سال)",
+   "in": {
+    "as_of": "2026-03-21",
+    "today": "2026-06-01",
+    "fy": {
+     "ok": true,
+     "status": "open",
+     "start": "2025-03-21",
+     "end": "2026-03-20"
+    },
+    "lock_through": "",
+    "missing_ccys": [],
+    "has_active": false,
+    "doc_count": 3
+   },
+   "expect": {
+    "ok": false,
+    "codes": [
+     "no_fiscal_year"
+    ]
+   }
+  },
+  {
+   "name": "locked: سال بسته",
+   "in": {
+    "as_of": "2025-12-10",
+    "today": "2026-01-05",
+    "fy": {
+     "ok": true,
+     "status": "closed",
+     "start": "2025-03-21",
+     "end": "2026-03-20"
+    },
+    "lock_through": "",
+    "missing_ccys": [],
+    "has_active": false,
+    "doc_count": 3
+   },
+   "expect": {
+    "ok": false,
+    "codes": [
+     "locked"
+    ]
+   }
+  },
+  {
+   "name": "locked: سال قفل",
+   "in": {
+    "as_of": "2025-12-10",
+    "today": "2026-01-05",
+    "fy": {
+     "ok": true,
+     "status": "locked",
+     "start": "2025-03-21",
+     "end": "2026-03-20"
+    },
+    "lock_through": "",
+    "missing_ccys": [],
+    "has_active": false,
+    "doc_count": 3
+   },
+   "expect": {
+    "ok": false,
+    "codes": [
+     "locked"
+    ]
+   }
+  },
+  {
+   "name": "locked: بدون دسترسی کارکن",
+   "in": {
+    "as_of": "2025-12-10",
+    "today": "2026-01-05",
+    "fy": {
+     "ok": false,
+     "status": "open",
+     "start": "2025-03-21",
+     "end": "2026-03-20"
+    },
+    "lock_through": "",
+    "missing_ccys": [],
+    "has_active": false,
+    "doc_count": 3
+   },
+   "expect": {
+    "ok": false,
+    "codes": [
+     "locked"
+    ]
+   }
+  },
+  {
+   "name": "locked: as_of == قفل دوره",
+   "in": {
+    "as_of": "2025-12-10",
+    "today": "2026-01-05",
+    "fy": {
+     "ok": true,
+     "status": "open",
+     "start": "2025-03-21",
+     "end": "2026-03-20"
+    },
+    "lock_through": "2025-12-10",
+    "missing_ccys": [],
+    "has_active": false,
+    "doc_count": 3
+   },
+   "expect": {
+    "ok": false,
+    "codes": [
+     "locked"
+    ]
+   }
+  },
+  {
+   "name": "locked: as_of < قفل دوره",
+   "in": {
+    "as_of": "2025-12-10",
+    "today": "2026-01-05",
+    "fy": {
+     "ok": true,
+     "status": "open",
+     "start": "2025-03-21",
+     "end": "2026-03-20"
+    },
+    "lock_through": "2025-12-29",
+    "missing_ccys": [],
+    "has_active": false,
+    "doc_count": 3
+   },
+   "expect": {
+    "ok": false,
+    "codes": [
+     "locked"
+    ]
+   }
+  },
+  {
+   "name": "OK: as_of بعد از قفل دوره",
+   "in": {
+    "as_of": "2025-12-10",
+    "today": "2026-01-05",
+    "fy": {
+     "ok": true,
+     "status": "open",
+     "start": "2025-03-21",
+     "end": "2026-03-20"
+    },
+    "lock_through": "2025-12-09",
+    "missing_ccys": [],
+    "has_active": false,
+    "doc_count": 3
+   },
+   "expect": {
+    "ok": true,
+    "codes": []
+   }
+  },
+  {
+   "name": "سال بسته و قفل دوره ⇒ فقط یک locked",
+   "in": {
+    "as_of": "2025-12-10",
+    "today": "2026-01-05",
+    "fy": {
+     "ok": true,
+     "status": "closed",
+     "start": "2025-03-21",
+     "end": "2026-03-20"
+    },
+    "lock_through": "2025-12-29",
+    "missing_ccys": [],
+    "has_active": false,
+    "doc_count": 3
+   },
+   "expect": {
+    "ok": false,
+    "codes": [
+     "locked"
+    ]
+   }
+  },
+  {
+   "name": "rate_missing: همهٔ ارزها در پیام",
+   "in": {
+    "as_of": "2025-12-10",
+    "today": "2026-01-05",
+    "fy": {
+     "ok": true,
+     "status": "open",
+     "start": "2025-03-21",
+     "end": "2026-03-20"
+    },
+    "lock_through": "",
+    "missing_ccys": [
+     "EUR",
+     "AED"
+    ],
+    "has_active": false,
+    "doc_count": 3
+   },
+   "expect": {
+    "ok": false,
+    "codes": [
+     "rate_missing"
+    ],
+    "ccys": [
+     "EUR",
+     "AED"
+    ],
+    "message_has": [
+     "EUR",
+     "AED"
+    ]
+   }
+  },
+  {
+   "name": "duplicate",
+   "in": {
+    "as_of": "2025-12-10",
+    "today": "2026-01-05",
+    "fy": {
+     "ok": true,
+     "status": "open",
+     "start": "2025-03-21",
+     "end": "2026-03-20"
+    },
+    "lock_through": "",
+    "missing_ccys": [],
+    "has_active": true,
+    "doc_count": 3
+   },
+   "expect": {
+    "ok": false,
+    "codes": [
+     "duplicate"
+    ]
+   }
+  },
+  {
+   "name": "nothing_to_reval",
+   "in": {
+    "as_of": "2025-12-10",
+    "today": "2026-01-05",
+    "fy": {
+     "ok": true,
+     "status": "open",
+     "start": "2025-03-21",
+     "end": "2026-03-20"
+    },
+    "lock_through": "",
+    "missing_ccys": [],
+    "has_active": false,
+    "doc_count": 0
+   },
+   "expect": {
+    "ok": false,
+    "codes": [
+     "nothing_to_reval"
+    ]
+   }
+  },
+  {
+   "name": "چند خطا همزمان",
+   "in": {
+    "as_of": "2026-02-01",
+    "today": "2026-01-05",
+    "fy": {
+     "ok": true,
+     "status": "open",
+     "start": "2025-03-21",
+     "end": "2026-03-20"
+    },
+    "lock_through": "2026-03-01",
+    "missing_ccys": [
+     "USD"
+    ],
+    "has_active": true,
+    "doc_count": 0
+   },
+   "expect": {
+    "ok": false,
+    "codes": [
+     "in_future",
+     "locked",
+     "rate_missing",
+     "duplicate",
+     "nothing_to_reval"
+    ]
+   }
+  }
+ ],
+ "close_kind_doc": "کیس‌های pb_fxr_close_kind(has_active, stored_fp, now_fp, has_delta) برای هشدار بستن سال.",
+ "close_kind": [
+  {
+   "name": "فعال و تازه ⇒ null",
+   "has_active": true,
+   "stored": "a",
+   "now": "a",
+   "has_delta": true,
+   "expect": null
+  },
+  {
+   "name": "فعال و stale ⇒ stale",
+   "has_active": true,
+   "stored": "a",
+   "now": "b",
+   "has_delta": true,
+   "expect": "stale"
+  },
+  {
+   "name": "فعال و stale با دلتای صفر ⇒ stale",
+   "has_active": true,
+   "stored": "a",
+   "now": "b",
+   "has_delta": false,
+   "expect": "stale"
+  },
+  {
+   "name": "فعال قدیمی بدون fingerprint ⇒ null",
+   "has_active": true,
+   "stored": "",
+   "now": "b",
+   "has_delta": true,
+   "expect": null
+  },
+  {
+   "name": "بدون تسعیر و دلتا ⇒ missing",
+   "has_active": false,
+   "stored": "",
+   "now": "b",
+   "has_delta": true,
+   "expect": "missing"
+  },
+  {
+   "name": "بدون تسعیر و بدون دلتا ⇒ null",
+   "has_active": false,
+   "stored": "",
+   "now": "b",
+   "has_delta": false,
+   "expect": null
+  }
+ ],
+ "report_doc": "گزارش تسعیر (مرحلهٔ ۸): kind=rollup ⇒ pb_fxr_report_rollup(rows)؛ ccy_nets ⇒ pb_fxr_ccy_nets(detail)؛ alloc ⇒ pb_fxr_alloc_net(net,nets,rev)؛ reval_ccy ⇒ pb_fxr_reval_ccy_totals(revals)؛ export ⇒ pb_fxr_export_build(row,detail) (expect: title, as_of, rows, totals، docs_rows/parties_rows/items_rows = sheets.*.rows، header_counts). مقادیر مورد انتظار با آینهٔ پایتون محاسبه و با دست راستی‌آزمایی شد؛ PHP در محیط ساخت نبود.",
+ "report": [
+  {
+   "kind": "rollup",
+   "name": "تجمیع: تحقق‌یافته و تحقق‌نیافته جدا، نقش بیگانه نادیده",
+   "rows": [
+    {
+     "month": "2026-03",
+     "ccy": "USD",
+     "role": "fx_diff",
+     "debit": 0,
+     "credit": 100
+    },
+    {
+     "month": "2026-03",
+     "ccy": "USD",
+     "role": "fx_diff",
+     "debit": 30,
+     "credit": 0
+    },
+    {
+     "month": "2026-03",
+     "ccy": "USD",
+     "role": "fx_unrealized",
+     "debit": 0,
+     "credit": 500
+    },
+    {
+     "month": "2026-03",
+     "ccy": "USD",
+     "role": "fx_unrealized",
+     "debit": 200,
+     "credit": 0
+    },
+    {
+     "month": "2026-04",
+     "ccy": "EUR",
+     "role": "fx_unrealized",
+     "debit": 70,
+     "credit": 0
+    },
+    {
+     "month": "2026-03",
+     "ccy": "",
+     "role": "fx_diff",
+     "debit": 0,
+     "credit": 5
+    },
+    {
+     "month": "2026-03",
+     "ccy": "USD",
+     "role": "cash",
+     "debit": 999,
+     "credit": 999
+    }
+   ],
+   "expect": {
+    "rows": [
+     {
+      "month": "2026-03",
+      "ccy": "",
+      "gain": 5,
+      "loss": 0,
+      "count": 1,
+      "realized_gain": 5,
+      "realized_loss": 0,
+      "unrealized_gain": 0,
+      "unrealized_loss": 0,
+      "unrealized_count": 0,
+      "net": 5,
+      "realized": 5,
+      "unrealized": 0,
+      "total": 5
+     },
+     {
+      "month": "2026-03",
+      "ccy": "USD",
+      "gain": 100,
+      "loss": 30,
+      "count": 2,
+      "realized_gain": 100,
+      "realized_loss": 30,
+      "unrealized_gain": 500,
+      "unrealized_loss": 200,
+      "unrealized_count": 2,
+      "net": 70,
+      "realized": 70,
+      "unrealized": 300,
+      "total": 370
+     },
+     {
+      "month": "2026-04",
+      "ccy": "EUR",
+      "gain": 0,
+      "loss": 0,
+      "count": 0,
+      "realized_gain": 0,
+      "realized_loss": 0,
+      "unrealized_gain": 0,
+      "unrealized_loss": 70,
+      "unrealized_count": 1,
+      "net": 0,
+      "realized": 0,
+      "unrealized": -70,
+      "total": -70
+     }
+    ],
+    "total_gain": 105,
+    "total_loss": 30,
+    "net": 75,
+    "total_realized": 75,
+    "total_unrealized": 230,
+    "total_unrealized_gain": 500,
+    "total_unrealized_loss": 270,
+    "total_net": 305
+   }
+  },
+  {
+   "kind": "rollup",
+   "name": "تجمیع: ورودی خالی",
+   "rows": [],
+   "expect": {
+    "rows": [],
+    "total_gain": 0,
+    "total_loss": 0,
+    "net": 0,
+    "total_realized": 0,
+    "total_unrealized": 0,
+    "total_unrealized_gain": 0,
+    "total_unrealized_loss": 0,
+    "total_net": 0
+   }
+  },
+  {
+   "kind": "rollup",
+   "name": "تجمیع: فقط تحقق‌یافته ⇒ فیلدهای قبلی همان معنا، تحقق‌نیافته صفر",
+   "rows": [
+    {
+     "month": "2026-05",
+     "ccy": "USD",
+     "role": "fx_diff",
+     "debit": 10,
+     "credit": 0
+    },
+    {
+     "month": "2026-05",
+     "ccy": "USD",
+     "role": "fx_diff",
+     "debit": 0,
+     "credit": 40
+    }
+   ],
+   "expect": {
+    "rows": [
+     {
+      "month": "2026-05",
+      "ccy": "USD",
+      "gain": 40,
+      "loss": 10,
+      "count": 2,
+      "realized_gain": 40,
+      "realized_loss": 10,
+      "unrealized_gain": 0,
+      "unrealized_loss": 0,
+      "unrealized_count": 0,
+      "net": 30,
+      "realized": 30,
+      "unrealized": 0,
+      "total": 30
+     }
+    ],
+    "total_gain": 40,
+    "total_loss": 10,
+    "net": 30,
+    "total_realized": 30,
+    "total_unrealized": 0,
+    "total_unrealized_gain": 0,
+    "total_unrealized_loss": 0,
+    "total_net": 30
+   }
+  },
+  {
+   "kind": "rollup",
+   "name": "تجمیع: فقط تحقق‌نیافته ⇒ gain/loss/net قدیمی صفر (فقط تحقق‌یافته)",
+   "rows": [
+    {
+     "month": "2026-06",
+     "ccy": "EUR",
+     "role": "fx_unrealized",
+     "debit": 0,
+     "credit": 9
+    }
+   ],
+   "expect": {
+    "rows": [
+     {
+      "month": "2026-06",
+      "ccy": "EUR",
+      "gain": 0,
+      "loss": 0,
+      "count": 0,
+      "realized_gain": 0,
+      "realized_loss": 0,
+      "unrealized_gain": 9,
+      "unrealized_loss": 0,
+      "unrealized_count": 1,
+      "net": 0,
+      "realized": 0,
+      "unrealized": 9,
+      "total": 9
+     }
+    ],
+    "total_gain": 0,
+    "total_loss": 0,
+    "net": 0,
+    "total_realized": 0,
+    "total_unrealized": 9,
+    "total_unrealized_gain": 9,
+    "total_unrealized_loss": 0,
+    "total_net": 9
+   }
+  },
+  {
+   "kind": "ccy_nets",
+   "name": "خالص هر ارز: طلب + و بدهی −",
+   "detail": {
+    "items": [
+     {
+      "side": "ar",
+      "ccy": "USD",
+      "delta": 1000
+     },
+     {
+      "side": "ap",
+      "ccy": "USD",
+      "delta": 300
+     },
+     {
+      "side": "ar",
+      "ccy": "EUR",
+      "delta": -50
+     }
+    ]
+   },
+   "expect": {
+    "EUR": -50,
+    "USD": 700
+   }
+  },
+  {
+   "kind": "ccy_nets",
+   "name": "detail قدیمی (آرایهٔ items) و ارز کوچک",
+   "detail": [
+    {
+     "side": "ap",
+     "ccy": "eur",
+     "delta": 40
+    }
+   ],
+   "expect": {
+    "EUR": -40
+   }
+  },
+  {
+   "kind": "ccy_nets",
+   "name": "detail تهی",
+   "detail": null,
+   "expect": {}
+  },
+  {
+   "kind": "ccy_nets",
+   "name": "detail شیء بدون items",
+   "detail": {
+    "fingerprint": "x"
+   },
+   "expect": {}
+  },
+  {
+   "kind": "alloc",
+   "name": "تخصیص: باقی‌مانده روی ارز تهی",
+   "net": 700,
+   "nets": {
+    "EUR": -50,
+    "USD": 700
+   },
+   "rev": false,
+   "expect": {
+    "": 50,
+    "EUR": -50,
+    "USD": 700
+   }
+  },
+  {
+   "kind": "alloc",
+   "name": "تخصیص: سند برگشت علامت‌ها را قرینه می‌کند و باقی‌مانده صفر",
+   "net": -650,
+   "nets": {
+    "EUR": -50,
+    "USD": 700
+   },
+   "rev": true,
+   "expect": {
+    "EUR": 50,
+    "USD": -700
+   }
+  },
+  {
+   "kind": "alloc",
+   "name": "تخصیص: بدون detail ⇒ همه روی ارز تهی",
+   "net": -80,
+   "nets": {},
+   "rev": false,
+   "expect": {
+    "": -80
+   }
+  },
+  {
+   "kind": "alloc",
+   "name": "تخصیص: صفر",
+   "net": 0,
+   "nets": {},
+   "rev": false,
+   "expect": {}
+  },
+  {
+   "kind": "reval_ccy",
+   "name": "جمع تحقق‌نیافته به تفکیک ارز؛ ابطال‌شده و بدون detail نادیده",
+   "revals": [
+    {
+     "status": "active",
+     "detail": {
+      "items": [
+       {
+        "side": "ar",
+        "ccy": "USD",
+        "delta": 1000
+       },
+       {
+        "side": "ap",
+        "ccy": "USD",
+        "delta": 300
+       },
+       {
+        "side": "ar",
+        "ccy": "EUR",
+        "delta": -50
+       }
+      ]
+     }
+    },
+    {
+     "status": "active",
+     "detail": {
+      "items": [
+       {
+        "side": "ar",
+        "ccy": "USD",
+        "delta": -200
+       }
+      ]
+     }
+    },
+    {
+     "status": "reversed",
+     "detail": {
+      "items": [
+       {
+        "side": "ar",
+        "ccy": "USD",
+        "delta": 9999
+       }
+      ]
+     }
+    },
+    {
+     "status": "active",
+     "detail": null
+    }
+   ],
+   "expect": [
+    {
+     "ccy": "EUR",
+     "gain": 0,
+     "loss": 50,
+     "net": -50
+    },
+    {
+     "ccy": "USD",
+     "gain": 700,
+     "loss": 200,
+     "net": 500
+    }
+   ]
+  },
+  {
+   "kind": "reval_ccy",
+   "name": "جمع به تفکیک ارز: ورودی خالی",
+   "revals": [],
+   "expect": []
+  },
+  {
+   "kind": "export",
+   "name": "خروجی: تسعیر کامل (ارزها، اسناد، طرف‌حساب‌ها)",
+   "row": {
+    "id": 7,
+    "as_of": "2026-03-20",
+    "ar_up": 1000,
+    "ar_down": 50,
+    "ap_up": 0,
+    "ap_down": 300,
+    "net_delta": 1250,
+    "doc_count": 3
+   },
+   "detail": {
+    "items": [
+     {
+      "side": "ar",
+      "ccy": "USD",
+      "rate": 600000,
+      "open_ccy": 10,
+      "delta": 1000
+     },
+     {
+      "side": "ap",
+      "ccy": "USD",
+      "rate": 600000,
+      "open_ccy": 4,
+      "delta": -300
+     },
+     {
+      "side": "ar",
+      "ccy": "EUR",
+      "rate": 700000,
+      "open_ccy": 2,
+      "delta": -50
+     }
+    ],
+    "docs": [
+     {
+      "side": "ar",
+      "doc_id": 11,
+      "ref": "#11",
+      "party": "علی",
+      "ccy": "USD",
+      "booked_rate": 590000,
+      "total_ccy": 10,
+      "paid_ccy": 0,
+      "rem_ccy": 10,
+      "rate": 600000,
+      "delta": 1000
+     },
+     {
+      "side": "ap",
+      "doc_id": 5,
+      "ref": "P-5",
+      "party": "رضا",
+      "ccy": "USD",
+      "booked_rate": 600075,
+      "total_ccy": 5,
+      "paid_ccy": 1,
+      "rem_ccy": 4,
+      "rate": 600000,
+      "delta": -300
+     }
+    ],
+    "parties": [
+     {
+      "party": "علی",
+      "side": "ar",
+      "no_party": false,
+      "up": 1000,
+      "down": 0
+     },
+     {
+      "party": "رضا",
+      "side": "ap",
+      "no_party": false,
+      "up": 0,
+      "down": 300
+     }
+    ],
+    "fingerprint": "x"
+   },
+   "expect": {
+    "title": "گزارش تسعیر ارز شمارهٔ 7",
+    "as_of": "2026-03-20",
+    "rows": [
+     [
+      "EUR",
+      700000,
+      2,
+      0,
+      -50,
+      0,
+      -50
+     ],
+     [
+      "USD",
+      600000,
+      10,
+      4,
+      1000,
+      -300,
+      1300
+     ]
+    ],
+    "totals": {
+     "ar_up": 1000,
+     "ar_down": 50,
+     "ap_up": 0,
+     "ap_down": 300,
+     "gain": 1300,
+     "loss": 50,
+     "net_delta": 1250,
+     "doc_count": 3
+    },
+    "docs_rows": [
+     [
+      "طلب (فروش)",
+      "#11",
+      "علی",
+      "USD",
+      590000,
+      10,
+      0,
+      10,
+      600000,
+      1000
+     ],
+     [
+      "بدهی (خرید)",
+      "P-5",
+      "رضا",
+      "USD",
+      600075,
+      5,
+      1,
+      4,
+      600000,
+      -300
+     ]
+    ],
+    "parties_rows": [
+     [
+      "طلب (فروش)",
+      "علی",
+      1000,
+      0,
+      1000
+     ],
+     [
+      "بدهی (خرید)",
+      "رضا",
+      0,
+      300,
+      300
+     ]
+    ],
+    "items_rows": [
+     [
+      "طلب (فروش)",
+      "USD",
+      600000,
+      10,
+      1000
+     ],
+     [
+      "بدهی (خرید)",
+      "USD",
+      600000,
+      4,
+      -300
+     ],
+     [
+      "طلب (فروش)",
+      "EUR",
+      700000,
+      2,
+      -50
+     ]
+    ],
+    "header_counts": {
+     "main": 7,
+     "docs": 10,
+     "parties": 5,
+     "items": 5
+    }
+   }
+  },
+  {
+   "kind": "export",
+   "name": "خروجی: ردیف قدیمی بدون detail ⇒ برگه‌ها خالی، خالص از ستون‌ها",
+   "row": {
+    "id": 3,
+    "as_of": "2025-12-30",
+    "ar_up": 100,
+    "ar_down": 0,
+    "ap_up": 0,
+    "ap_down": 0,
+    "doc_count": 0
+   },
+   "detail": null,
+   "expect": {
+    "title": "گزارش تسعیر ارز شمارهٔ 3",
+    "as_of": "2025-12-30",
+    "rows": [],
+    "totals": {
+     "ar_up": 100,
+     "ar_down": 0,
+     "ap_up": 0,
+     "ap_down": 0,
+     "gain": 100,
+     "loss": 0,
+     "net_delta": 100,
+     "doc_count": 0
+    },
+    "docs_rows": [],
+    "parties_rows": [],
+    "items_rows": [],
+    "header_counts": {
+     "main": 7,
+     "docs": 10,
+     "parties": 5,
+     "items": 5
+    }
+   }
+  }
+ ]
+}

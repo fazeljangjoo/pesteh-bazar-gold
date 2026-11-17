@@ -34,7 +34,7 @@ class InventoryScreen extends StatefulWidget {
 }
 
 class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProviderStateMixin {
-  bool get _canCartex => StaffPerms.I.can('stock.view');
+  bool get _canCartex => StaffPerms.I.canCartex;
   late final TabController _subTabs; // مرحلهٔ ۱۱: «موجودی انبار» | «کارتکس»
 
   @override

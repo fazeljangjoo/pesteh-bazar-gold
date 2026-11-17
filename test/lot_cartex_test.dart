@@ -13,17 +13,34 @@ Map<String, dynamic> _project(LotCartexReport r) => {
           {
             'type_name': t.typeName,
             'total_kg': t.totalKg,
-            'normal': [for (final x in t.normal) [x.party, x.weightKg, x.remainingKg, x.exitType, x.exitDate]],
+            'overview': [for (final x in t.overview) [x.party, x.weightKg, x.remainingKg, x.exitLabel]],
+            'normal': [for (final x in t.normal) [x.party, x.weightKg, x.remainingKg, x.exitType, x.exitDate, x.ounce, x.gram]],
+            'exited': [for (final x in t.exited) [x.party, x.weightKg, x.exitType, x.exitDate]],
             'kot': [
               for (final k in t.kot)
                 {
                   'kot_id': k.kotId,
                   'total_kg': k.totalKg,
                   'color_key': k.colorKey,
-                  'items': [for (final x in k.items) [x.party, x.weightKg, x.exitDate]],
+                  'weight_kg': k.weightKg,
+                  'ounce': k.ounce,
+                  'gram': k.gram,
+                  'items': [for (final x in k.items) [x.party, x.weightKg, x.ounce, x.gram, x.remainingKg]],
                 }
             ],
-            'processed': [for (final x in t.processed) [x.party, x.weightKg, x.exitType, x.exitDate]],
+            'processed': [
+              for (final g in t.processed)
+                {
+                  'group_id': g.groupId,
+                  'kind': g.kind,
+                  'order_id': g.orderId,
+                  'color_key': g.colorKey,
+                  'in_kg': g.inKg,
+                  'out_kg': g.outKg,
+                  'items': [for (final x in g.items) [x.party, x.weightKg]],
+                  'outputs': [for (final o in g.outputs) [o.code, o.weightKg, o.ounce, o.gram]],
+                }
+            ],
           }
       ],
     };
@@ -55,6 +72,7 @@ void main() {
     test('lot_cartex ${m['name']}', () {
       final o = m['opts'] as Map<String, dynamic>;
       final r = lotCartexBuild(_ml(m['lots']), _ml(m['mix_sources']), _ml(m['proc_inputs']), _ml(m['sale_items']),
+          procOutputs: _ml(m['proc_outputs'] ?? const []),
           from: o['from'] as String, to: o['to'] as String, label: (o['label'] as String?) ?? '');
       final got = jsonDecode(jsonEncode(_project(r)));
       expect(_eq(got, m['expect'], tol), isTrue, reason: 'got: ${jsonEncode(got)}\nexp: ${jsonEncode(m['expect'])}');

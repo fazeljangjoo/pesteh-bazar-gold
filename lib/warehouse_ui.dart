@@ -32,7 +32,9 @@ class StockApiException implements Exception {
   /// true = no connection (the request never reached the server) → offline-capable callers may queue instead of failing.
   final bool network;
   final int code; // کد HTTP (۰ = پاسخی نبوده)
-  StockApiException(this.message, {this.network = false, this.code = 0});
+  /// بدنهٔ JSON پاسخِ خطا (اختیاری؛ مثلاً error/ccys/problems در تسعیر ارز). null = پاسخ JSON نبوده یا خالی بوده.
+  final Map<String, dynamic>? data;
+  StockApiException(this.message, {this.network = false, this.code = 0, this.data});
   @override
   String toString() => message;
 }
@@ -63,7 +65,7 @@ class StockApi {
       // STAGE11.3: سرور برای برخی خطاها هم کد (error) و هم پیام فارسی (message) می‌دهد (upgrade_blocked، rollback_blocked، tier_not_entitled، upgrade_required، unit_mismatch)؛ پیام فارسی اولویت دارد
       final Object? m = data['message'];
       final String shown = (m is String && m.trim().isNotEmpty) ? m : (data['error'] ?? 'خطای سرور (کد ${resp.statusCode})').toString();
-      throw StockApiException(shown, code: resp.statusCode);
+      throw StockApiException(shown, code: resp.statusCode, data: data.isEmpty ? null : data);
     }
     return data;
   }

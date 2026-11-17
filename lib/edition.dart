@@ -15,7 +15,7 @@ const Map<String, String> kEditionNames = <String, String>{
 /// آینهٔ کلیدهای طلایی فهرست features.php (برای مجوز قدیمیِ بدون فهرست قابلیت)
 const Set<String> kGoldFeatureKeys = <String>{
   'gold.fiscal_years', 'gold.coa', 'gold.cost_centers', 'gold.treasury', 'gold.vouchers', 'gold.vat',
-  'gold.invoices', 'gold.reports', 'gold.yearend', 'gold.payroll_law', 'gold.fx_accounting',
+  'gold.invoices', 'gold.reports', 'gold.yearend', 'gold.payroll_law', 'gold.fx_accounting', 'fx.reval',
 };
 
 /// نسخهٔ برنامه = سطح (سبز/طلایی) × پلن (ریالی/ارزی).

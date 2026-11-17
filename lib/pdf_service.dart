@@ -109,6 +109,7 @@ class PdfService {
     String company = '',
     bool pageNumbers = false,
     List<String> signatures = const <String>[],
+    String footnote = '',
   }) async {
     await _ensureFonts();
     final doc = pw.Document(theme: _theme());
@@ -146,6 +147,11 @@ class PdfService {
               cellAlignment: pw.Alignment.centerRight,
               headerAlignment: pw.Alignment.centerRight,
               border: pw.TableBorder.all(width: 0.4),
+            ),
+          if (footnote.isNotEmpty)
+            pw.Padding(
+              padding: const pw.EdgeInsets.only(top: 10),
+              child: pw.Text(pdfText(footnote), style: const pw.TextStyle(fontSize: 9)),
             ),
           if (signatures.isNotEmpty)
             pw.Padding(

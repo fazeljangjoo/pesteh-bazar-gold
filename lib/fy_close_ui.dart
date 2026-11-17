@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'fx_reval_ui.dart' show FxRevalPerms, FxRevalScreen; // FXREVAL step 13
 import 'utils.dart';
 import 'warehouse_ui.dart' show StockApi, StockApiException;
 import 'widgets.dart';
@@ -94,9 +95,20 @@ class _FyCloseScreenState extends State<FyCloseScreen> {
         for (final Map<String, dynamic> x in b) '⛔ ${x['message']}',
         for (final Map<String, dynamic> x in w) '⚠ ${x['message']}',
       ].join('\n');
+      final bool toReval = FxRevalPerms.canView && w.any((Map<String, dynamic> x) => x['code'] == 'fx_reval_missing' || x['code'] == 'fx_reval_stale');
       await showDialog<void>(
         context: context,
-        builder: (BuildContext c) => Directionality(textDirection: TextDirection.rtl, child: AlertDialog(title: const Text('پیش‌نمایش بستن سال'), content: Text(body), actions: <Widget>[TextButton(onPressed: () => Navigator.pop(c), child: const Text('بستن'))])),
+        builder: (BuildContext c) => Directionality(textDirection: TextDirection.rtl, child: AlertDialog(title: const Text('پیش‌نمایش بستن سال'), content: Text(body), actions: <Widget>[
+          if (toReval)
+            TextButton(
+              onPressed: () {
+                Navigator.pop(c);
+                Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const FxRevalScreen()));
+              },
+              child: const Text('برو به تسعیر ارز'),
+            ),
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('بستن')),
+        ])),
       );
     } on StockApiException catch (e) {
       if (!mounted) return;

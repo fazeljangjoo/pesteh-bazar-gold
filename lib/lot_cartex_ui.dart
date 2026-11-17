@@ -1,4 +1,5 @@
-// مرحلهٔ ۱۱ — «کارتکس لات» (زیرتب «کارتکس» در تب انبار). غیر از «کارتکس مالک» (reports_ui.dart). بدون هیچ قیمت/مبلغ.
+// مرحلهٔ ۱۱ — «کارتکس لات» (زیرتب «کارتکس» در تب انبار و تنها صفحهٔ نقش «کارتکس»). غیر از «کارتکس مالک» (reports_ui.dart). بدون هیچ قیمت/مبلغ.
+// تب‌ها: دید کلی (همهٔ پسته‌ها) · موجود در انبار · کوت‌ریزی‌شده · فراوری‌شده · پسته‌های خارج‌شده (تاریخ/نوع خروج فقط در تب آخر).
 // داده: StockApi 'stock.lot_cartex' (مجوز stock.view)؛ سرور در دسترس نبود ⇒ محاسبهٔ محلی (lotCartexBuild) از SQLite، بدون فراوری.
 import 'package:flutter/material.dart';
 
@@ -26,6 +27,9 @@ String _jd(String? iso) {
 
 String _kgTxt(double v) => '${faNum(v, dec: 3)} کیلو';
 
+/// انس/گرم اختیاری‌اند؛ ندارد ⇒ «—».
+String _og(double? v) => v == null ? '—' : faNum(v, dec: 3);
+
 class LotCartexView extends StatefulWidget {
   const LotCartexView({super.key});
   @override
@@ -45,7 +49,7 @@ class _LotCartexViewState extends State<LotCartexView> with SingleTickerProvider
   @override
   void initState() {
     super.initState();
-    _tc = TabController(length: 3, vsync: this);
+    _tc = TabController(length: 5, vsync: this);
     _load();
   }
 
@@ -97,7 +101,7 @@ class _LotCartexViewState extends State<LotCartexView> with SingleTickerProvider
     }
 
     final lots = <Map<String, dynamic>>[
-      for (final x in await d.rawQuery('SELECT id, code, type_name, seller, net_weight, remaining, date, is_mix FROM purchases WHERE is_mix IN (0,1,2)'))
+      for (final x in await d.rawQuery('SELECT id, code, type_name, seller, net_weight, remaining, date, is_mix, ounce, gram FROM purchases WHERE is_mix IN (0,1,2)'))
         {...Map<String, dynamic>.from(x), 'date': day(x['date'])}
     ];
     final ms = <Map<String, dynamic>>[
@@ -133,9 +137,11 @@ class _LotCartexViewState extends State<LotCartexView> with SingleTickerProvider
               style: TextStyle(fontSize: 12)),
         ),
       TabBar(controller: _tc, tabs: const [
-        Tab(text: 'پسته‌های عادی'),
+        Tab(text: 'دید کلی'),
+        Tab(text: 'موجود در انبار'),
         Tab(text: 'کوت‌ریزی‌شده'),
         Tab(text: 'فراوری‌شده'),
+        Tab(text: 'پسته‌های خارج‌شده'),
       ]),
       Expanded(child: _body(context, r)),
     ]);
@@ -199,9 +205,11 @@ class _LotCartexViewState extends State<LotCartexView> with SingleTickerProvider
     }
     return Stack(children: [
       TabBarView(controller: _tc, children: [
+        _refreshable(_tabOverview(r)),
         _refreshable(_tabNormal(r)),
         _refreshable(_tabKot(context, r)),
         _refreshable(_tabProcessed(context, r)),
+        _refreshable(_tabExited(r)),
       ]),
       if (_loading) const Align(alignment: Alignment.topCenter, child: LinearProgressIndicator()),
       if (_err != null)
@@ -222,18 +230,29 @@ class _LotCartexViewState extends State<LotCartexView> with SingleTickerProvider
         Center(child: Text(msg, style: const TextStyle(color: Colors.black54))),
       ]);
 
-  // ---------------- زبانهٔ ۱ ----------------
+  // ---------------- زبانهٔ ۰: دید کلی (همهٔ پسته‌ها) ----------------
+  Widget _tabOverview(LotCartexReport r) {
+    final tiles = <Widget>[];
+    for (final t in r.types) {
+      final rows = t.overview.where((x) => _hit(x.party)).toList();
+      if (rows.isEmpty) continue;
+      tiles.add(_typeTile('o', t, rows.length, _overviewTable(rows)));
+    }
+    return tiles.isEmpty ? _empty(_q.isEmpty ? 'در این بازه پسته‌ای ثبت نشده' : 'موردی پیدا نشد') : _list(tiles);
+  }
+
+  // ---------------- زبانهٔ ۱: موجود در انبار ----------------
   Widget _tabNormal(LotCartexReport r) {
     final tiles = <Widget>[];
     for (final t in r.types) {
       final rows = t.normal.where((x) => _hit(x.party)).toList();
       if (rows.isEmpty) continue;
-      tiles.add(_typeTile('n', t, rows.length, _table(rows, showKotColor: true)));
+      tiles.add(_typeTile('n', t, rows.length, _stockTable(rows)));
     }
-    return tiles.isEmpty ? _empty(_q.isEmpty ? 'در این بازه ورودی عادی ثبت نشده' : 'موردی پیدا نشد') : _list(tiles);
+    return tiles.isEmpty ? _empty(_q.isEmpty ? 'در این بازه پستهٔ موجودی در انبار نیست' : 'موردی پیدا نشد') : _list(tiles);
   }
 
-  // ---------------- زبانهٔ ۲ ----------------
+  // ---------------- زبانهٔ ۲: کوت‌ریزی‌شده ----------------
   Widget _tabKot(BuildContext context, LotCartexReport r) {
     final tiles = <Widget>[];
     for (final t in r.types) {
@@ -244,28 +263,18 @@ class _LotCartexViewState extends State<LotCartexView> with SingleTickerProvider
         if (items.isEmpty) continue;
         n += items.length;
         final c = groupColor(k.colorKey);
-        groups.add(Container(
-          margin: const EdgeInsets.only(bottom: 8),
-          decoration: BoxDecoration(border: Border.all(color: c.withAlpha(150)), borderRadius: BorderRadius.circular(8)),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            InkWell(
-              onTap: () => _showKot(context, k),
-              child: Container(
-                color: c.withAlpha(45),
-                padding: const EdgeInsetsDirectional.symmetric(horizontal: 10, vertical: 8),
-                child: Row(children: [
-                  CircleAvatar(radius: 6, backgroundColor: c),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text('کوت ${k.title}  ·  ساخت ${_jd(k.date)}  ·  جمع ${_kgTxt(k.totalKg)}',
-                        style: const TextStyle(fontWeight: FontWeight.w600)),
-                  ),
-                  const Icon(Icons.info_outline, size: 18),
-                ]),
-              ),
-            ),
-            _table(items, fixedColor: c),
-          ]),
+        groups.add(_groupBox(
+          c,
+          header: InkWell(
+            onTap: () => _showKot(context, k),
+            child: _groupHeader(c, 'کوت ${k.title}', [
+              'ساخت ${_jd(k.date)}',
+              'وزن ${_kgTxt(k.weightKg)}',
+              'انس ${_og(k.ounce)}',
+              'گرم ${_og(k.gram)}',
+            ], trailing: const Icon(Icons.info_outline, size: 18)),
+          ),
+          body: _lotsTable(items, c, shareLabel: 'سهم در کوت (کیلو)'),
         ));
       }
       if (groups.isEmpty) continue;
@@ -274,16 +283,56 @@ class _LotCartexViewState extends State<LotCartexView> with SingleTickerProvider
     return tiles.isEmpty ? _empty(_q.isEmpty ? 'در این بازه لاتی کوت نشده' : 'موردی پیدا نشد') : _list(tiles);
   }
 
-  // ---------------- زبانهٔ ۳ ----------------
+  // ---------------- زبانهٔ ۳: فراوری‌شده ----------------
   Widget _tabProcessed(BuildContext context, LotCartexReport r) {
     if (r.offline) return _empty('برای نمایش فراوری آنلاین شوید');
     final tiles = <Widget>[];
     for (final t in r.types) {
-      final rows = t.processed.where((x) => _hit(x.party)).toList();
-      if (rows.isEmpty) continue;
-      tiles.add(_typeTile('p', t, rows.length, _table(rows, orderLink: true, ctx: context)));
+      final groups = <Widget>[];
+      var n = 0;
+      for (final g in t.processed) {
+        if (!g.items.any((x) => _hit(x.party)) && !g.outputs.any((x) => _hit(x.party))) continue;
+        n += g.items.length;
+        final c = groupColor(g.colorKey);
+        groups.add(_groupBox(
+          c,
+          header: InkWell(
+            onTap: g.kind == 'proc' ? () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const ProcessingScreen())) : null,
+            child: _groupHeader(c, g.label, [
+              _jd(g.date),
+              'ورودی ${_kgTxt(g.inKg)}',
+              if (g.outputs.isNotEmpty) 'ساخته‌شده ${_kgTxt(g.outKg)}',
+            ], trailing: g.kind == 'proc' ? const Icon(Icons.open_in_new, size: 18) : null),
+          ),
+          body: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            _subTitle('پستهٔ مبدأ'),
+            _lotsTable(g.items, c, shareLabel: 'وزن فراوری‌شده (کیلو)'),
+            _subTitle('لات‌های ساخته‌شده از آن'),
+            if (g.outputs.isEmpty)
+              const Padding(
+                padding: EdgeInsetsDirectional.fromSTEB(10, 2, 10, 10),
+                child: Text('هنوز لاتی از این فراوری ساخته نشده', style: TextStyle(fontSize: 12, color: Colors.black54)),
+              )
+            else
+              _outputsTable(g.outputs, c),
+          ]),
+        ));
+      }
+      if (groups.isEmpty) continue;
+      tiles.add(_typeTile('p', t, n, Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: groups)));
     }
     return tiles.isEmpty ? _empty(_q.isEmpty ? 'در این بازه لاتی به فراوری/شکست نرفته' : 'موردی پیدا نشد') : _list(tiles);
+  }
+
+  // ---------------- زبانهٔ ۴: پسته‌های خارج‌شده ----------------
+  Widget _tabExited(LotCartexReport r) {
+    final tiles = <Widget>[];
+    for (final t in r.types) {
+      final rows = t.exited.where((x) => _hit(x.party)).toList();
+      if (rows.isEmpty) continue;
+      tiles.add(_typeTile('x', t, rows.length, _exitedTable(rows)));
+    }
+    return tiles.isEmpty ? _empty(_q.isEmpty ? 'در این بازه پسته‌ای خارج نشده' : 'موردی پیدا نشد') : _list(tiles);
   }
 
   Widget _list(List<Widget> tiles) => ListView(padding: const EdgeInsets.all(12), physics: const AlwaysScrollableScrollPhysics(), children: tiles);
@@ -304,57 +353,181 @@ class _LotCartexViewState extends State<LotCartexView> with SingleTickerProvider
     );
   }
 
-  // ---------------- جدول فشرده ----------------
-  Widget _table(List<LotCartexRow> rows, {bool showKotColor = false, Color? fixedColor, bool orderLink = false, BuildContext? ctx}) {
-    DataRow rowOf(LotCartexRow x) {
-      Color? c = fixedColor;
-      if (c == null && showKotColor && x.colorKey != null) c = groupColor(x.colorKey!);
-      var weight = faNum(x.weightKg, dec: 3);
-      final exit = StringBuffer(x.exitLabel);
-      if (x.exitType == 'in_stock') {
-        if (x.partial && x.remainingKg != null) exit.write(' · مانده ${faNum(x.remainingKg!, dec: 3)} کیلو');
-        if ((x.soldKg ?? 0) > 0) exit.write(' · فروخته ${faNum(x.soldKg!, dec: 3)} کیلو');
-      }
-      Widget exitCell = Text(exit.toString());
-      if (orderLink && ctx != null && x.exitType == 'proc') {
-        exitCell = InkWell(
-          onTap: () => Navigator.push(ctx, MaterialPageRoute<void>(builder: (_) => const ProcessingScreen())),
-          child: Text(exit.toString(), style: const TextStyle(color: Colors.blue, decoration: TextDecoration.underline)),
-        );
-      }
-      return DataRow(
-        color: c == null ? null : WidgetStatePropertyAll<Color>(c.withAlpha(32)),
-        cells: [
-          DataCell(Text(x.party.isEmpty ? '—' : x.party)),
-          DataCell(Text(weight)),
-          DataCell(Text(_jd(x.entryDate))),
-          DataCell(Text(_jd(x.exitDate))),
-          DataCell(exitCell),
+  // ---------------- گروه رنگی (کوت / فراوری) ----------------
+  Widget _groupBox(Color c, {required Widget header, required Widget body}) => Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        decoration: BoxDecoration(border: Border.all(color: c.withAlpha(150)), borderRadius: BorderRadius.circular(8)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [header, body]),
+      );
+
+  Widget _groupHeader(Color c, String title, List<String> info, {Widget? trailing}) => Container(
+        color: c.withAlpha(45),
+        padding: const EdgeInsetsDirectional.symmetric(horizontal: 10, vertical: 8),
+        child: Row(children: [
+          CircleAvatar(radius: 6, backgroundColor: c),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Wrap(spacing: 14, runSpacing: 2, crossAxisAlignment: WrapCrossAlignment.center, children: [
+              Text(title, style: const TextStyle(fontWeight: FontWeight.w700)),
+              for (final i in info) Text(i, style: const TextStyle(fontSize: 12.5)),
+            ]),
+          ),
+          if (trailing != null) trailing,
+        ]),
+      );
+
+  Widget _subTitle(String t) => Padding(
+        padding: const EdgeInsetsDirectional.fromSTEB(10, 8, 10, 0),
+        child: Text(t, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black54)),
+      );
+
+  // ---------------- جدول‌های فشرده ----------------
+  Widget _scrollTable(List<DataColumn> columns, List<DataRow> rows, {double minWidth = 560}) => SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(minWidth: minWidth),
+          child: DataTable(
+            columnSpacing: 20,
+            headingRowHeight: 34,
+            dataRowMinHeight: 30,
+            dataRowMaxHeight: 40,
+            columns: columns,
+            rows: rows,
+          ),
+        ),
+      );
+
+  /// دید کلی: همهٔ لات‌ها با ستون «وضعیت» (موجود / وارد کوت / فراوری‌شده / ساخته‌شده از فراوری / فروش رفته).
+  Widget _overviewTable(List<LotCartexRow> rows) => _scrollTable(
+        const [
+          DataColumn(label: Text('نام طرف')),
+          DataColumn(label: Text('وزن خالص (کیلو)'), numeric: true),
+          DataColumn(label: Text('مانده (کیلو)'), numeric: true),
+          DataColumn(label: Text('انس'), numeric: true),
+          DataColumn(label: Text('گرم'), numeric: true),
+          DataColumn(label: Text('تاریخ ورود')),
+          DataColumn(label: Text('وضعیت')),
+        ],
+        [
+          for (final x in rows)
+            DataRow(cells: [
+              DataCell(Text(x.party.isEmpty ? '—' : x.party)),
+              DataCell(Text(faNum(x.weightKg, dec: 3))),
+              DataCell(Text(x.remainingKg == null ? '—' : faNum(x.remainingKg!, dec: 3))),
+              DataCell(Text(_og(x.ounce))),
+              DataCell(Text(_og(x.gram))),
+              DataCell(Text(_jd(x.entryDate))),
+              DataCell(Text(x.exitLabel.isEmpty ? '—' : x.exitLabel)),
+            ]),
+        ],
+        minWidth: 760,
+      );
+
+  /// موجود در انبار: بدون نوع/تاریخ خروج (پسته هنوز در انبار است).
+  Widget _stockTable(List<LotCartexRow> rows) => _scrollTable(
+        const [
+          DataColumn(label: Text('نام طرف')),
+          DataColumn(label: Text('وزن خالص (کیلو)'), numeric: true),
+          DataColumn(label: Text('مانده (کیلو)'), numeric: true),
+          DataColumn(label: Text('انس'), numeric: true),
+          DataColumn(label: Text('گرم'), numeric: true),
+          DataColumn(label: Text('تاریخ ورود')),
+          DataColumn(label: Text('فروخته (کیلو)'), numeric: true),
+        ],
+        [
+          for (final x in rows)
+            DataRow(cells: [
+              DataCell(Text(x.party.isEmpty ? '—' : x.party)),
+              DataCell(Text(faNum(x.weightKg, dec: 3))),
+              DataCell(Text(x.remainingKg == null ? '—' : faNum(x.remainingKg!, dec: 3))),
+              DataCell(Text(_og(x.ounce))),
+              DataCell(Text(_og(x.gram))),
+              DataCell(Text(_jd(x.entryDate))),
+              DataCell(Text((x.soldKg ?? 0) > 0 ? faNum(x.soldKg!, dec: 3) : '—')),
+            ]),
+        ],
+        minWidth: 640,
+      );
+
+  /// لات‌های داخل گروه رنگی (کوت: سهم در کوت؛ فراوری: وزن فراوری‌شده) با انس/گرم و مانده.
+  Widget _lotsTable(List<LotCartexRow> rows, Color c, {required String shareLabel}) => _scrollTable(
+        [
+          const DataColumn(label: Text('نام طرف')),
+          DataColumn(label: Text(shareLabel), numeric: true),
+          const DataColumn(label: Text('انس'), numeric: true),
+          const DataColumn(label: Text('گرم'), numeric: true),
+          const DataColumn(label: Text('تاریخ ورود')),
+          const DataColumn(label: Text('مانده (کیلو)'), numeric: true),
+        ],
+        [
+          for (final x in rows)
+            DataRow(
+              color: WidgetStatePropertyAll<Color>(c.withAlpha(32)),
+              cells: [
+                DataCell(Text(x.party.isEmpty ? '—' : x.party)),
+                DataCell(Text(faNum(x.weightKg, dec: 3))),
+                DataCell(Text(_og(x.ounce))),
+                DataCell(Text(_og(x.gram))),
+                DataCell(Text(_jd(x.entryDate))),
+                DataCell(Text(x.remainingKg == null ? '—' : faNum(x.remainingKg!, dec: 3))),
+              ],
+            ),
         ],
       );
-    }
 
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(minWidth: 640),
-        child: DataTable(
-          columnSpacing: 20,
-          headingRowHeight: 34,
-          dataRowMinHeight: 30,
-          dataRowMaxHeight: 40,
-          columns: const [
-            DataColumn(label: Text('نام طرف')),
-            DataColumn(label: Text('وزن خالص (کیلو)'), numeric: true),
-            DataColumn(label: Text('تاریخ ورود')),
-            DataColumn(label: Text('تاریخ خروج')),
-            DataColumn(label: Text('نوع خروج')),
-          ],
-          rows: [for (final x in rows) rowOf(x)],
-        ),
-      ),
-    );
-  }
+  Widget _outputsTable(List<LotCartexOutput> rows, Color c) => _scrollTable(
+        const [
+          DataColumn(label: Text('کد')),
+          DataColumn(label: Text('نام طرف')),
+          DataColumn(label: Text('نوع')),
+          DataColumn(label: Text('وزن (کیلو)'), numeric: true),
+          DataColumn(label: Text('انس'), numeric: true),
+          DataColumn(label: Text('گرم'), numeric: true),
+          DataColumn(label: Text('تاریخ ساخت')),
+        ],
+        [
+          for (final x in rows)
+            DataRow(
+              color: WidgetStatePropertyAll<Color>(c.withAlpha(32)),
+              cells: [
+                DataCell(Text(x.code.isEmpty ? '#${x.lotId}' : x.code)),
+                DataCell(Text(x.party.isEmpty ? '—' : x.party)),
+                DataCell(Text(x.typeName.isEmpty ? '—' : x.typeName)),
+                DataCell(Text(faNum(x.weightKg, dec: 3))),
+                DataCell(Text(_og(x.ounce))),
+                DataCell(Text(_og(x.gram))),
+                DataCell(Text(_jd(x.entryDate))),
+              ],
+            ),
+        ],
+        minWidth: 640,
+      );
+
+  /// خارج‌شده: تنها جایی که تاریخ و نوع خروج دیده می‌شود.
+  Widget _exitedTable(List<LotCartexRow> rows) => _scrollTable(
+        const [
+          DataColumn(label: Text('نام طرف')),
+          DataColumn(label: Text('وزن خارج‌شده (کیلو)'), numeric: true),
+          DataColumn(label: Text('انس'), numeric: true),
+          DataColumn(label: Text('گرم'), numeric: true),
+          DataColumn(label: Text('تاریخ ورود')),
+          DataColumn(label: Text('تاریخ خروج')),
+          DataColumn(label: Text('نوع خروج')),
+        ],
+        [
+          for (final x in rows)
+            DataRow(cells: [
+              DataCell(Text(x.party.isEmpty ? '—' : x.party)),
+              DataCell(Text(faNum(x.weightKg, dec: 3))),
+              DataCell(Text(_og(x.ounce))),
+              DataCell(Text(_og(x.gram))),
+              DataCell(Text(_jd(x.entryDate))),
+              DataCell(Text(_jd(x.exitDate))),
+              DataCell(Text(x.exitLabel.isEmpty ? '—' : x.exitLabel)),
+            ]),
+        ],
+        minWidth: 680,
+      );
 
   // ---------------- جزئیات کوت ----------------
   void _showKot(BuildContext context, LotCartexKot k) {
@@ -364,12 +537,14 @@ class _LotCartexViewState extends State<LotCartexView> with SingleTickerProvider
       builder: (ctx) => AlertDialog(
         title: Row(children: [CircleAvatar(radius: 7, backgroundColor: c), const SizedBox(width: 8), Text('کوت ${k.title}')]),
         content: SizedBox(
-          width: 560,
+          width: 620,
           child: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('کد/نام کوت: ${k.title}'),
               Text('تاریخ ساخت: ${_jd(k.date)}'),
-              Text('جمع وزن: ${_kgTxt(k.totalKg)}'),
+              Text('وزن کوت: ${_kgTxt(k.weightKg)}'),
+              Text('انس: ${_og(k.ounce)}    گرم: ${_og(k.gram)}'),
+              Text('جمع سهم لات‌ها: ${_kgTxt(k.totalKg)}'),
               const SizedBox(height: 8),
               const Text('لات‌های درون کوت:', style: TextStyle(fontWeight: FontWeight.bold)),
               SingleChildScrollView(
@@ -383,6 +558,8 @@ class _LotCartexViewState extends State<LotCartexView> with SingleTickerProvider
                     DataColumn(label: Text('نام طرف')),
                     DataColumn(label: Text('نوع')),
                     DataColumn(label: Text('وزن سهم (کیلو)'), numeric: true),
+                    DataColumn(label: Text('انس'), numeric: true),
+                    DataColumn(label: Text('گرم'), numeric: true),
                     DataColumn(label: Text('تاریخ ورود')),
                   ],
                   rows: [
@@ -391,6 +568,8 @@ class _LotCartexViewState extends State<LotCartexView> with SingleTickerProvider
                         DataCell(Text(x.party.isEmpty ? '—' : x.party)),
                         DataCell(Text(x.typeName.isEmpty ? '—' : x.typeName)),
                         DataCell(Text(faNum(x.weightKg, dec: 3))),
+                        DataCell(Text(_og(x.ounce))),
+                        DataCell(Text(_og(x.gram))),
                         DataCell(Text(_jd(x.entryDate))),
                       ]),
                   ],

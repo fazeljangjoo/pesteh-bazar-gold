@@ -57,12 +57,11 @@ class ExcelIo {
     return _write(sheetName, <List<String>>[columns, ...rows], filePrefix);
   }
 
-  static Future<File> _write(String sheetName, List<List<String>> all, String filePrefix) async {
-    final Excel excel = Excel.createExcel();
-    final String name = _sheetName(sheetName);
-    final String def = excel.getDefaultSheet() ?? 'Sheet1';
-    if (def != name) excel.rename(def, name);
-    final Sheet sheet = excel[name];
+  static Future<File> _write(String sheetName, List<List<String>> all, String filePrefix) {
+    return exportSheets(<({String name, List<List<String>> rows})>[(name: sheetName, rows: all)], filePrefix: filePrefix);
+  }
+
+  static void _fill(Sheet sheet, List<List<String>> all) {
     sheet.isRTL = true;
     for (final List<String> r in all) {
       final List<CellValue?> cells = <CellValue?>[];
@@ -78,10 +77,36 @@ class ExcelIo {
       }
       sheet.appendRow(cells);
     }
+  }
+
+  /// Multi-sheet RTL xlsx in the temp dir (each sheet = full content, first row usually the headers).
+  /// [fileName] (with .xlsx) = exact file name; otherwise «<filePrefix>_<ms>.xlsx». Sheet names are cleaned/truncated and made unique.
+  static Future<File> exportSheets(
+    List<({String name, List<List<String>> rows})> sheets, {
+    String filePrefix = 'export',
+    String? fileName,
+  }) async {
+    if (sheets.isEmpty) throw Exception('برگه‌ای برای خروجی نیست');
+    final Excel excel = Excel.createExcel();
+    final String def = excel.getDefaultSheet() ?? 'Sheet1';
+    final Set<String> used = <String>{};
+    for (int i = 0; i < sheets.length; i++) {
+      String name = _sheetName(sheets[i].name);
+      int k = 2;
+      while (used.contains(name)) {
+        final String suffix = ' $k';
+        final String base = _sheetName(sheets[i].name);
+        name = (base.length + suffix.length > 31 ? base.substring(0, 31 - suffix.length) : base) + suffix;
+        k++;
+      }
+      used.add(name);
+      if (i == 0 && def != name) excel.rename(def, name);
+      _fill(excel[name], sheets[i].rows);
+    }
     final List<int>? bytes = excel.encode();
     if (bytes == null) throw Exception('ساخت فایل اکسل ناموفق بود');
     final Directory dir = await getTemporaryDirectory();
-    final File f = File(p.join(dir.path, '${filePrefix}_${DateTime.now().millisecondsSinceEpoch}.xlsx'));
+    final File f = File(p.join(dir.path, fileName ?? '${filePrefix}_${DateTime.now().millisecondsSinceEpoch}.xlsx'));
     await f.writeAsBytes(bytes);
     return f;
   }

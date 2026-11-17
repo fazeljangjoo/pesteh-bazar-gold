@@ -3,6 +3,8 @@ import 'cheque_ui.dart';
 import 'payroll_ui.dart'; // T11.4
 import 'dart:async';
 import 'perms.dart'; // T02.2
+import 'cartex_shell.dart' show CartexShell; // نقش «کارتکس»
+import 'fx_reval_ui.dart'; // FXREVAL step 13 (FxRevalScreen + FxRevalPerms)
 import 'ounce_room_shell.dart'; // S5.T4
 import 'workshop_operator_shell.dart'; // کارگاه ۳-ب
 import 'staff_screens.dart'; // T02.2
@@ -453,6 +455,18 @@ class _HomeShellState extends State<HomeShell> {
                   },
                 ),
               ),
+              if (FxRevalPerms.canView)
+                FeatureGate(
+                  feature: 'fx.reval',
+                  child: ListTile(
+                    leading: const Icon(Icons.currency_exchange_outlined),
+                    title: const Text('تسعیر ارز'),
+                    onTap: () {
+                      _closeMenu(context);
+                      _push(context, MaterialPageRoute<void>(builder: (_) => const FxRevalScreen()));
+                    },
+                  ),
+                ),
               FeatureGate(
                 feature: 'gold.coa',
                 child: ListTile(
@@ -698,6 +712,7 @@ class _HomeShellState extends State<HomeShell> {
       builder: (BuildContext c, Map<String, dynamic>? _, Widget? __) {
         if (StaffPerms.I.isOunceRoomOnly) return const OunceRoomShell();
         if (StaffPerms.I.isWorkshopOperatorOnly) return const WorkshopOperatorShell();
+        if (StaffPerms.I.isCartexOnly) return const CartexShell();
         return _buildHome(context);
       },
     );

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import 'backup_screen.dart';
 import 'cheque_ui.dart';
+import 'fx_reval_ui.dart' show FxRevalPerms, FxRevalScreen; // FXREVAL step 13
 import 'stock_count_ui.dart';
 import 'utils.dart';
 import 'vouchers_ui.dart';
@@ -128,6 +129,10 @@ class _FyWizardScreenState extends State<FyWizardScreen> {
       case 'cheques_due':
       case 'cheque_register':
         return TextButton.icon(onPressed: () => _go(const ChequeListScreen()), icon: const Icon(Icons.open_in_new, size: 16), label: const Text('چک‌ها'));
+      case 'fx_reval_missing':
+      case 'fx_reval_stale':
+        if (!FxRevalPerms.canView) return null; // فقط طلایی-ارزی با مجوز مشاهده
+        return TextButton.icon(onPressed: () => _go(const FxRevalScreen()), icon: const Icon(Icons.open_in_new, size: 16), label: const Text('برو به تسعیر ارز'));
       default:
         return null; // e.g. role_retained: fix in Accounting settings (account roles)
     }

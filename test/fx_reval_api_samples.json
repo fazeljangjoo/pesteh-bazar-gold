@@ -1,0 +1,1305 @@
+{
+ "_doc": "نمونهٔ خروجی‌های accounting.fx_reval.* ساخته‌شده با آینهٔ پایتونیِ pb_fxr_build/pb_fxr_export_build (fx_reval.php) و قالب‌های out() اکشن‌ها؛ نه ضبط‌شده از سرور زنده (php در محیط ساخت نبود). سناریو: ۴ فاکتور فروش + ۲ خرید، USD/EUR، as_of=2026-03-19. ردیف‌های list عمداً بعضی مقادیر را رشته می‌دهند (PDO). اعداد ریال صحیح.",
+ "check_ok": {
+  "as_of": "2026-03-19",
+  "rates": [
+   {
+    "ccy": "EUR",
+    "rate": 1120000.0,
+    "rate_date": "2026-03-19",
+    "missing": false
+   },
+   {
+    "ccy": "USD",
+    "rate": 1010000.0,
+    "rate_date": "2026-03-18",
+    "missing": false
+   }
+  ],
+  "open_docs": {
+   "ar": 4,
+   "ap": 2
+  },
+  "has_active_reval": null,
+  "fiscal": {
+   "ok": true,
+   "fy_name": "۱۴۰۴",
+   "status": "open"
+  },
+  "period_locked": false,
+  "in_future": false,
+  "ignored_cheques": {
+   "count": 3
+  },
+  "can_apply": true,
+  "problems": []
+ },
+ "check_blocked": {
+  "as_of": "2026-03-19",
+  "rates": [
+   {
+    "ccy": "EUR",
+    "rate": null,
+    "rate_date": null,
+    "missing": true
+   },
+   {
+    "ccy": "GBP",
+    "rate": null,
+    "rate_date": null,
+    "missing": true
+   },
+   {
+    "ccy": "USD",
+    "rate": 1010000.0,
+    "rate_date": "2026-03-18",
+    "missing": false
+   }
+  ],
+  "open_docs": {
+   "ar": 4,
+   "ap": 2
+  },
+  "has_active_reval": {
+   "id": 7,
+   "status": "active"
+  },
+  "fiscal": {
+   "ok": true,
+   "fy_name": "۱۴۰۴",
+   "status": "open"
+  },
+  "period_locked": false,
+  "in_future": false,
+  "ignored_cheques": {
+   "count": 0
+  },
+  "can_apply": false,
+  "problems": [
+   {
+    "code": "rate_missing",
+    "message": "نرخ ارز EUR، GBP تا تاریخ تسعیر ثبت نشده است",
+    "ccys": [
+     "EUR",
+     "GBP"
+    ]
+   },
+   {
+    "code": "duplicate",
+    "message": "برای این تاریخ تسعیر فعال وجود دارد؛ ابتدا آن را برگردانید"
+   }
+  ]
+ },
+ "check_locked": {
+  "as_of": "2027-12-01",
+  "rates": [],
+  "open_docs": {
+   "ar": 0,
+   "ap": 0
+  },
+  "has_active_reval": null,
+  "fiscal": {
+   "ok": false,
+   "fy_name": null,
+   "status": null
+  },
+  "period_locked": false,
+  "in_future": true,
+  "ignored_cheques": {
+   "count": 0
+  },
+  "can_apply": false,
+  "problems": [
+   {
+    "code": "in_future",
+    "message": "تاریخ تسعیر نباید در آینده باشد"
+   },
+   {
+    "code": "no_fiscal_year",
+    "message": "تاریخ تسعیر در هیچ سال مالی تعریف‌شده‌ای نیست"
+   },
+   {
+    "code": "nothing_to_reval",
+    "message": "فاکتور ارزی بازی برای تسعیر وجود ندارد"
+   }
+  ]
+ },
+ "preview": {
+  "as_of": "2026-03-19",
+  "items": [
+   {
+    "side": "ar",
+    "ccy": "USD",
+    "rate": 1010000.0,
+    "open_ccy": 1200.0,
+    "delta": 11000000
+   },
+   {
+    "side": "ar",
+    "ccy": "EUR",
+    "rate": 1120000.0,
+    "open_ccy": 200.0,
+    "delta": 4000000
+   },
+   {
+    "side": "ap",
+    "ccy": "USD",
+    "rate": 1010000.0,
+    "open_ccy": 300.0,
+    "delta": 6000000
+   },
+   {
+    "side": "ap",
+    "ccy": "EUR",
+    "rate": 1120000.0,
+    "open_ccy": 100.0,
+    "delta": -1000000
+   }
+  ],
+  "docs": [
+   {
+    "side": "ap",
+    "doc_id": 33,
+    "ref": "P-33",
+    "party": "بازار طلا",
+    "ccy": "USD",
+    "booked_rate": 990000.0,
+    "total_ccy": 300.0,
+    "paid_ccy": 0.0,
+    "rem_ccy": 300.0,
+    "rate": 1010000.0,
+    "delta": 6000000
+   },
+   {
+    "side": "ap",
+    "doc_id": 55,
+    "ref": "#55",
+    "party": "بدون طرف‌حساب",
+    "ccy": "EUR",
+    "booked_rate": 1130000.0,
+    "total_ccy": 100.0,
+    "paid_ccy": 0.0,
+    "rem_ccy": 100.0,
+    "rate": 1120000.0,
+    "delta": -1000000
+   },
+   {
+    "side": "ar",
+    "doc_id": 101,
+    "ref": "#101",
+    "party": "علی رضایی",
+    "ccy": "USD",
+    "booked_rate": 980000.0,
+    "total_ccy": 1000.0,
+    "paid_ccy": 400.0,
+    "rem_ccy": 600.0,
+    "rate": 1010000.0,
+    "delta": 18000000
+   },
+   {
+    "side": "ar",
+    "doc_id": 102,
+    "ref": "#102",
+    "party": "علی رضایی",
+    "ccy": "USD",
+    "booked_rate": 1020000.0,
+    "total_ccy": 500.0,
+    "paid_ccy": 0.0,
+    "rem_ccy": 500.0,
+    "rate": 1010000.0,
+    "delta": -5000000
+   },
+   {
+    "side": "ar",
+    "doc_id": 107,
+    "ref": "#107",
+    "party": "شرکت پارس",
+    "ccy": "EUR",
+    "booked_rate": 1100000.0,
+    "total_ccy": 200.0,
+    "paid_ccy": 0.0,
+    "rem_ccy": 200.0,
+    "rate": 1120000.0,
+    "delta": 4000000
+   },
+   {
+    "side": "ar",
+    "doc_id": 110,
+    "ref": "#110",
+    "party": "مریم احمدی",
+    "ccy": "USD",
+    "booked_rate": 1030000.0,
+    "total_ccy": 100.0,
+    "paid_ccy": 0.0,
+    "rem_ccy": 100.0,
+    "rate": 1010000.0,
+    "delta": -2000000
+   }
+  ],
+  "parties": [
+   {
+    "party": "بازار طلا",
+    "side": "ap",
+    "no_party": false,
+    "up": 6000000,
+    "down": 0
+   },
+   {
+    "party": "بدون طرف‌حساب",
+    "side": "ap",
+    "no_party": true,
+    "up": 0,
+    "down": 1000000
+   },
+   {
+    "party": "شرکت پارس",
+    "side": "ar",
+    "no_party": false,
+    "up": 4000000,
+    "down": 0
+   },
+   {
+    "party": "علی رضایی",
+    "side": "ar",
+    "no_party": false,
+    "up": 13000000,
+    "down": 0
+   },
+   {
+    "party": "مریم احمدی",
+    "side": "ar",
+    "no_party": false,
+    "up": 0,
+    "down": 2000000
+   }
+  ],
+  "ar_up": 17000000,
+  "ar_down": 2000000,
+  "ap_up": 6000000,
+  "ap_down": 1000000,
+  "doc_count": 6,
+  "net_delta": 10000000,
+  "fingerprint": "09f9ec6aa646a208b43fe88d927279ae6cb25515",
+  "rates": {
+   "USD": {
+    "rate": 1010000.0,
+    "rate_date": "2026-03-18",
+    "missing": false
+   },
+   "EUR": {
+    "rate": 1120000.0,
+    "rate_date": "2026-03-19",
+    "missing": false
+   }
+  }
+ },
+ "apply_pending": {
+  "id": 9,
+  "rev_date": "2026-03-20",
+  "rev_status": "pending",
+  "note": "تسعیر پایان سال ۱۴۰۴",
+  "as_of": "2026-03-19",
+  "items": [
+   {
+    "side": "ar",
+    "ccy": "USD",
+    "rate": 1010000.0,
+    "open_ccy": 1200.0,
+    "delta": 11000000
+   },
+   {
+    "side": "ar",
+    "ccy": "EUR",
+    "rate": 1120000.0,
+    "open_ccy": 200.0,
+    "delta": 4000000
+   },
+   {
+    "side": "ap",
+    "ccy": "USD",
+    "rate": 1010000.0,
+    "open_ccy": 300.0,
+    "delta": 6000000
+   },
+   {
+    "side": "ap",
+    "ccy": "EUR",
+    "rate": 1120000.0,
+    "open_ccy": 100.0,
+    "delta": -1000000
+   }
+  ],
+  "docs": [
+   {
+    "side": "ap",
+    "doc_id": 33,
+    "ref": "P-33",
+    "party": "بازار طلا",
+    "ccy": "USD",
+    "booked_rate": 990000.0,
+    "total_ccy": 300.0,
+    "paid_ccy": 0.0,
+    "rem_ccy": 300.0,
+    "rate": 1010000.0,
+    "delta": 6000000
+   },
+   {
+    "side": "ap",
+    "doc_id": 55,
+    "ref": "#55",
+    "party": "بدون طرف‌حساب",
+    "ccy": "EUR",
+    "booked_rate": 1130000.0,
+    "total_ccy": 100.0,
+    "paid_ccy": 0.0,
+    "rem_ccy": 100.0,
+    "rate": 1120000.0,
+    "delta": -1000000
+   },
+   {
+    "side": "ar",
+    "doc_id": 101,
+    "ref": "#101",
+    "party": "علی رضایی",
+    "ccy": "USD",
+    "booked_rate": 980000.0,
+    "total_ccy": 1000.0,
+    "paid_ccy": 400.0,
+    "rem_ccy": 600.0,
+    "rate": 1010000.0,
+    "delta": 18000000
+   },
+   {
+    "side": "ar",
+    "doc_id": 102,
+    "ref": "#102",
+    "party": "علی رضایی",
+    "ccy": "USD",
+    "booked_rate": 1020000.0,
+    "total_ccy": 500.0,
+    "paid_ccy": 0.0,
+    "rem_ccy": 500.0,
+    "rate": 1010000.0,
+    "delta": -5000000
+   },
+   {
+    "side": "ar",
+    "doc_id": 107,
+    "ref": "#107",
+    "party": "شرکت پارس",
+    "ccy": "EUR",
+    "booked_rate": 1100000.0,
+    "total_ccy": 200.0,
+    "paid_ccy": 0.0,
+    "rem_ccy": 200.0,
+    "rate": 1120000.0,
+    "delta": 4000000
+   },
+   {
+    "side": "ar",
+    "doc_id": 110,
+    "ref": "#110",
+    "party": "مریم احمدی",
+    "ccy": "USD",
+    "booked_rate": 1030000.0,
+    "total_ccy": 100.0,
+    "paid_ccy": 0.0,
+    "rem_ccy": 100.0,
+    "rate": 1010000.0,
+    "delta": -2000000
+   }
+  ],
+  "parties": [
+   {
+    "party": "بازار طلا",
+    "side": "ap",
+    "no_party": false,
+    "up": 6000000,
+    "down": 0
+   },
+   {
+    "party": "بدون طرف‌حساب",
+    "side": "ap",
+    "no_party": true,
+    "up": 0,
+    "down": 1000000
+   },
+   {
+    "party": "شرکت پارس",
+    "side": "ar",
+    "no_party": false,
+    "up": 4000000,
+    "down": 0
+   },
+   {
+    "party": "علی رضایی",
+    "side": "ar",
+    "no_party": false,
+    "up": 13000000,
+    "down": 0
+   },
+   {
+    "party": "مریم احمدی",
+    "side": "ar",
+    "no_party": false,
+    "up": 0,
+    "down": 2000000
+   }
+  ],
+  "ar_up": 17000000,
+  "ar_down": 2000000,
+  "ap_up": 6000000,
+  "ap_down": 1000000,
+  "doc_count": 6,
+  "net_delta": 10000000,
+  "fingerprint": "09f9ec6aa646a208b43fe88d927279ae6cb25515",
+  "rates": {
+   "USD": {
+    "rate": 1010000.0,
+    "rate_date": "2026-03-18",
+    "missing": false
+   },
+   "EUR": {
+    "rate": 1120000.0,
+    "rate_date": "2026-03-19",
+    "missing": false
+   }
+  }
+ },
+ "list": {
+  "revals": [
+   {
+    "id": 9,
+    "as_of": "2026-03-19",
+    "ar_up": 17000000,
+    "ar_down": 2000000,
+    "ap_up": 6000000,
+    "ap_down": 1000000,
+    "status": "active",
+    "created_by": "فاطمه حسابدار",
+    "created_at": "2026-03-19 10:15:00",
+    "reversed_at": null,
+    "rev_date": "2026-03-20",
+    "rev_status": "pending",
+    "doc_count": 6,
+    "net_delta": 10000000,
+    "note": "تسعیر پایان سال ۱۴۰۴"
+   },
+   {
+    "id": "8",
+    "as_of": "2026-02-19",
+    "ar_up": "4000000",
+    "ar_down": "0",
+    "ap_up": "0",
+    "ap_down": "1500000",
+    "status": "active",
+    "created_by": "فاطمه حسابدار",
+    "created_at": "2026-02-19 09:02:11",
+    "reversed_at": null,
+    "rev_date": "2026-02-20",
+    "rev_status": "posted",
+    "doc_count": "3",
+    "net_delta": "5500000",
+    "note": null
+   },
+   {
+    "id": "7",
+    "as_of": "2026-01-20",
+    "ar_up": "0",
+    "ar_down": "2500000",
+    "ap_up": "900000",
+    "ap_down": "0",
+    "status": "reversed",
+    "created_by": "مدیر",
+    "created_at": "2026-01-20 16:40:00",
+    "reversed_at": "2026-01-20 17:05:00",
+    "rev_date": "2026-01-21",
+    "rev_status": "cancelled",
+    "doc_count": "2",
+    "net_delta": "-3400000",
+    "note": "اشتباه نرخ",
+    "reversed_by": null
+   },
+   {
+    "id": 3,
+    "as_of": "2025-09-22",
+    "ar_up": 1200000,
+    "ar_down": 0,
+    "ap_up": 0,
+    "ap_down": 300000,
+    "status": "active",
+    "created_by": "مدیر",
+    "created_at": "2025-09-22 12:00:00",
+    "reversed_at": null,
+    "rev_date": null,
+    "rev_status": "none",
+    "doc_count": 0,
+    "net_delta": 0,
+    "note": null
+   },
+   {
+    "id": 2,
+    "as_of": "2025-06-21",
+    "ar_up": 0,
+    "ar_down": 700000,
+    "ap_up": 0,
+    "ap_down": 0,
+    "status": "reversed",
+    "created_by": "مدیر",
+    "created_at": "2025-06-21 12:00:00",
+    "reversed_at": "2025-06-22 08:00:00",
+    "rev_date": null,
+    "rev_status": "none",
+    "doc_count": 0,
+    "net_delta": 0,
+    "note": null
+   }
+  ]
+ },
+ "detail_new": {
+  "id": 9,
+  "as_of": "2026-03-19",
+  "ar_up": 17000000,
+  "ar_down": 2000000,
+  "ap_up": 6000000,
+  "ap_down": 1000000,
+  "status": "active",
+  "created_by": "فاطمه حسابدار",
+  "created_at": "2026-03-19 10:15:00",
+  "reversed_at": null,
+  "rev_date": "2026-03-20",
+  "rev_status": "pending",
+  "doc_count": 6,
+  "net_delta": 10000000,
+  "note": "تسعیر پایان سال ۱۴۰۴",
+  "reversed_by": null,
+  "detail": {
+   "items": [
+    {
+     "side": "ar",
+     "ccy": "USD",
+     "rate": 1010000.0,
+     "open_ccy": 1200.0,
+     "delta": 11000000
+    },
+    {
+     "side": "ar",
+     "ccy": "EUR",
+     "rate": 1120000.0,
+     "open_ccy": 200.0,
+     "delta": 4000000
+    },
+    {
+     "side": "ap",
+     "ccy": "USD",
+     "rate": 1010000.0,
+     "open_ccy": 300.0,
+     "delta": 6000000
+    },
+    {
+     "side": "ap",
+     "ccy": "EUR",
+     "rate": 1120000.0,
+     "open_ccy": 100.0,
+     "delta": -1000000
+    }
+   ],
+   "docs": [
+    {
+     "side": "ap",
+     "doc_id": 33,
+     "ref": "P-33",
+     "party": "بازار طلا",
+     "ccy": "USD",
+     "booked_rate": 990000.0,
+     "total_ccy": 300.0,
+     "paid_ccy": 0.0,
+     "rem_ccy": 300.0,
+     "rate": 1010000.0,
+     "delta": 6000000
+    },
+    {
+     "side": "ap",
+     "doc_id": 55,
+     "ref": "#55",
+     "party": "بدون طرف‌حساب",
+     "ccy": "EUR",
+     "booked_rate": 1130000.0,
+     "total_ccy": 100.0,
+     "paid_ccy": 0.0,
+     "rem_ccy": 100.0,
+     "rate": 1120000.0,
+     "delta": -1000000
+    },
+    {
+     "side": "ar",
+     "doc_id": 101,
+     "ref": "#101",
+     "party": "علی رضایی",
+     "ccy": "USD",
+     "booked_rate": 980000.0,
+     "total_ccy": 1000.0,
+     "paid_ccy": 400.0,
+     "rem_ccy": 600.0,
+     "rate": 1010000.0,
+     "delta": 18000000
+    },
+    {
+     "side": "ar",
+     "doc_id": 102,
+     "ref": "#102",
+     "party": "علی رضایی",
+     "ccy": "USD",
+     "booked_rate": 1020000.0,
+     "total_ccy": 500.0,
+     "paid_ccy": 0.0,
+     "rem_ccy": 500.0,
+     "rate": 1010000.0,
+     "delta": -5000000
+    },
+    {
+     "side": "ar",
+     "doc_id": 107,
+     "ref": "#107",
+     "party": "شرکت پارس",
+     "ccy": "EUR",
+     "booked_rate": 1100000.0,
+     "total_ccy": 200.0,
+     "paid_ccy": 0.0,
+     "rem_ccy": 200.0,
+     "rate": 1120000.0,
+     "delta": 4000000
+    },
+    {
+     "side": "ar",
+     "doc_id": 110,
+     "ref": "#110",
+     "party": "مریم احمدی",
+     "ccy": "USD",
+     "booked_rate": 1030000.0,
+     "total_ccy": 100.0,
+     "paid_ccy": 0.0,
+     "rem_ccy": 100.0,
+     "rate": 1010000.0,
+     "delta": -2000000
+    }
+   ],
+   "parties": [
+    {
+     "party": "بازار طلا",
+     "side": "ap",
+     "no_party": false,
+     "up": 6000000,
+     "down": 0,
+     "tafsili_id": 2101
+    },
+    {
+     "party": "بدون طرف‌حساب",
+     "side": "ap",
+     "no_party": true,
+     "up": 0,
+     "down": 1000000,
+     "tafsili_id": 0
+    },
+    {
+     "party": "شرکت پارس",
+     "side": "ar",
+     "no_party": false,
+     "up": 4000000,
+     "down": 0,
+     "tafsili_id": 1202
+    },
+    {
+     "party": "علی رضایی",
+     "side": "ar",
+     "no_party": false,
+     "up": 13000000,
+     "down": 0,
+     "tafsili_id": 1201
+    },
+    {
+     "party": "مریم احمدی",
+     "side": "ar",
+     "no_party": false,
+     "up": 0,
+     "down": 2000000,
+     "tafsili_id": 1203
+    }
+   ],
+   "rates": {
+    "USD": {
+     "rate": 1010000.0,
+     "rate_date": "2026-03-18",
+     "missing": false
+    },
+    "EUR": {
+     "rate": 1120000.0,
+     "rate_date": "2026-03-19",
+     "missing": false
+    }
+   },
+   "fingerprint": "09f9ec6aa646a208b43fe88d927279ae6cb25515"
+  },
+  "stale": false
+ },
+ "detail_stale": {
+  "id": 9,
+  "as_of": "2026-03-19",
+  "ar_up": 17000000,
+  "ar_down": 2000000,
+  "ap_up": 6000000,
+  "ap_down": 1000000,
+  "status": "active",
+  "created_by": "فاطمه حسابدار",
+  "created_at": "2026-03-19 10:15:00",
+  "reversed_at": null,
+  "rev_date": "2026-03-20",
+  "rev_status": "pending",
+  "doc_count": 6,
+  "net_delta": 10000000,
+  "note": "تسعیر پایان سال ۱۴۰۴",
+  "reversed_by": null,
+  "detail": {
+   "items": [
+    {
+     "side": "ar",
+     "ccy": "USD",
+     "rate": 1010000.0,
+     "open_ccy": 1200.0,
+     "delta": 11000000
+    },
+    {
+     "side": "ar",
+     "ccy": "EUR",
+     "rate": 1120000.0,
+     "open_ccy": 200.0,
+     "delta": 4000000
+    },
+    {
+     "side": "ap",
+     "ccy": "USD",
+     "rate": 1010000.0,
+     "open_ccy": 300.0,
+     "delta": 6000000
+    },
+    {
+     "side": "ap",
+     "ccy": "EUR",
+     "rate": 1120000.0,
+     "open_ccy": 100.0,
+     "delta": -1000000
+    }
+   ],
+   "docs": [
+    {
+     "side": "ap",
+     "doc_id": 33,
+     "ref": "P-33",
+     "party": "بازار طلا",
+     "ccy": "USD",
+     "booked_rate": 990000.0,
+     "total_ccy": 300.0,
+     "paid_ccy": 0.0,
+     "rem_ccy": 300.0,
+     "rate": 1010000.0,
+     "delta": 6000000
+    },
+    {
+     "side": "ap",
+     "doc_id": 55,
+     "ref": "#55",
+     "party": "بدون طرف‌حساب",
+     "ccy": "EUR",
+     "booked_rate": 1130000.0,
+     "total_ccy": 100.0,
+     "paid_ccy": 0.0,
+     "rem_ccy": 100.0,
+     "rate": 1120000.0,
+     "delta": -1000000
+    },
+    {
+     "side": "ar",
+     "doc_id": 101,
+     "ref": "#101",
+     "party": "علی رضایی",
+     "ccy": "USD",
+     "booked_rate": 980000.0,
+     "total_ccy": 1000.0,
+     "paid_ccy": 400.0,
+     "rem_ccy": 600.0,
+     "rate": 1010000.0,
+     "delta": 18000000
+    },
+    {
+     "side": "ar",
+     "doc_id": 102,
+     "ref": "#102",
+     "party": "علی رضایی",
+     "ccy": "USD",
+     "booked_rate": 1020000.0,
+     "total_ccy": 500.0,
+     "paid_ccy": 0.0,
+     "rem_ccy": 500.0,
+     "rate": 1010000.0,
+     "delta": -5000000
+    },
+    {
+     "side": "ar",
+     "doc_id": 107,
+     "ref": "#107",
+     "party": "شرکت پارس",
+     "ccy": "EUR",
+     "booked_rate": 1100000.0,
+     "total_ccy": 200.0,
+     "paid_ccy": 0.0,
+     "rem_ccy": 200.0,
+     "rate": 1120000.0,
+     "delta": 4000000
+    },
+    {
+     "side": "ar",
+     "doc_id": 110,
+     "ref": "#110",
+     "party": "مریم احمدی",
+     "ccy": "USD",
+     "booked_rate": 1030000.0,
+     "total_ccy": 100.0,
+     "paid_ccy": 0.0,
+     "rem_ccy": 100.0,
+     "rate": 1010000.0,
+     "delta": -2000000
+    }
+   ],
+   "parties": [
+    {
+     "party": "بازار طلا",
+     "side": "ap",
+     "no_party": false,
+     "up": 6000000,
+     "down": 0,
+     "tafsili_id": 2101
+    },
+    {
+     "party": "بدون طرف‌حساب",
+     "side": "ap",
+     "no_party": true,
+     "up": 0,
+     "down": 1000000,
+     "tafsili_id": 0
+    },
+    {
+     "party": "شرکت پارس",
+     "side": "ar",
+     "no_party": false,
+     "up": 4000000,
+     "down": 0,
+     "tafsili_id": 1202
+    },
+    {
+     "party": "علی رضایی",
+     "side": "ar",
+     "no_party": false,
+     "up": 13000000,
+     "down": 0,
+     "tafsili_id": 1201
+    },
+    {
+     "party": "مریم احمدی",
+     "side": "ar",
+     "no_party": false,
+     "up": 0,
+     "down": 2000000,
+     "tafsili_id": 1203
+    }
+   ],
+   "rates": {
+    "USD": {
+     "rate": 1010000.0,
+     "rate_date": "2026-03-18",
+     "missing": false
+    },
+    "EUR": {
+     "rate": 1120000.0,
+     "rate_date": "2026-03-19",
+     "missing": false
+    }
+   },
+   "fingerprint": "09f9ec6aa646a208b43fe88d927279ae6cb25515"
+  },
+  "stale": true
+ },
+ "detail_legacy_items": {
+  "id": 3,
+  "as_of": "2025-09-22",
+  "ar_up": 1200000,
+  "ar_down": 0,
+  "ap_up": 0,
+  "ap_down": 300000,
+  "status": "active",
+  "created_by": "مدیر",
+  "created_at": "2025-09-22 12:00:00",
+  "reversed_at": null,
+  "rev_date": null,
+  "rev_status": "none",
+  "doc_count": 0,
+  "net_delta": 0,
+  "note": null,
+  "reversed_by": null,
+  "detail": [
+   {
+    "side": "ar",
+    "ccy": "USD",
+    "rate": 1010000,
+    "open_ccy": 800,
+    "delta": 2400000
+   }
+  ],
+  "stale": false
+ },
+ "detail_legacy_null": {
+  "id": 2,
+  "as_of": "2025-06-21",
+  "ar_up": 0,
+  "ar_down": 700000,
+  "ap_up": 0,
+  "ap_down": 0,
+  "status": "reversed",
+  "created_by": "مدیر",
+  "created_at": "2025-06-21 12:00:00",
+  "reversed_at": "2025-06-22 08:00:00",
+  "rev_date": null,
+  "rev_status": "none",
+  "doc_count": 0,
+  "net_delta": 0,
+  "note": null,
+  "reversed_by": "مدیر",
+  "detail": null,
+  "stale": false
+ },
+ "export": {
+  "title": "گزارش تسعیر ارز شمارهٔ 9",
+  "as_of": "2026-03-19",
+  "headers": [
+   "ارز",
+   "نرخ تسعیر",
+   "مانده طلب ارزی",
+   "مانده بدهی ارزی",
+   "سود/زیان طلب (ریال)",
+   "سود/زیان بدهی (ریال)",
+   "خالص سود/زیان (ریال)"
+  ],
+  "rows": [
+   [
+    "EUR",
+    1120000.0,
+    200.0,
+    100.0,
+    4000000,
+    -1000000,
+    5000000
+   ],
+   [
+    "USD",
+    1010000.0,
+    1200.0,
+    300.0,
+    11000000,
+    6000000,
+    5000000
+   ]
+  ],
+  "totals": {
+   "ar_up": 17000000,
+   "ar_down": 2000000,
+   "ap_up": 6000000,
+   "ap_down": 1000000,
+   "gain": 18000000,
+   "loss": 8000000,
+   "net_delta": 10000000,
+   "doc_count": 6
+  },
+  "sheets": {
+   "docs": {
+    "headers": [
+     "نوع",
+     "شمارهٔ سند",
+     "طرف‌حساب",
+     "ارز",
+     "نرخ ثبت‌شده",
+     "مبلغ ارزی",
+     "پرداخت‌شده",
+     "مانده ارزی",
+     "نرخ تسعیر",
+     "تفاوت (ریال)"
+    ],
+    "rows": [
+     [
+      "بدهی (خرید)",
+      "P-33",
+      "بازار طلا",
+      "USD",
+      990000.0,
+      300.0,
+      0.0,
+      300.0,
+      1010000.0,
+      6000000
+     ],
+     [
+      "بدهی (خرید)",
+      "#55",
+      "بدون طرف‌حساب",
+      "EUR",
+      1130000.0,
+      100.0,
+      0.0,
+      100.0,
+      1120000.0,
+      -1000000
+     ],
+     [
+      "طلب (فروش)",
+      "#101",
+      "علی رضایی",
+      "USD",
+      980000.0,
+      1000.0,
+      400.0,
+      600.0,
+      1010000.0,
+      18000000
+     ],
+     [
+      "طلب (فروش)",
+      "#102",
+      "علی رضایی",
+      "USD",
+      1020000.0,
+      500.0,
+      0.0,
+      500.0,
+      1010000.0,
+      -5000000
+     ],
+     [
+      "طلب (فروش)",
+      "#107",
+      "شرکت پارس",
+      "EUR",
+      1100000.0,
+      200.0,
+      0.0,
+      200.0,
+      1120000.0,
+      4000000
+     ],
+     [
+      "طلب (فروش)",
+      "#110",
+      "مریم احمدی",
+      "USD",
+      1030000.0,
+      100.0,
+      0.0,
+      100.0,
+      1010000.0,
+      -2000000
+     ]
+    ]
+   },
+   "parties": {
+    "headers": [
+     "نوع",
+     "طرف‌حساب",
+     "افزایش (ریال)",
+     "کاهش (ریال)",
+     "سود/زیان خالص (ریال)"
+    ],
+    "rows": [
+     [
+      "بدهی (خرید)",
+      "بازار طلا",
+      6000000,
+      0,
+      -6000000
+     ],
+     [
+      "بدهی (خرید)",
+      "بدون طرف‌حساب",
+      0,
+      1000000,
+      1000000
+     ],
+     [
+      "طلب (فروش)",
+      "شرکت پارس",
+      4000000,
+      0,
+      4000000
+     ],
+     [
+      "طلب (فروش)",
+      "علی رضایی",
+      13000000,
+      0,
+      13000000
+     ],
+     [
+      "طلب (فروش)",
+      "مریم احمدی",
+      0,
+      2000000,
+      -2000000
+     ]
+    ]
+   },
+   "items": {
+    "headers": [
+     "نوع",
+     "ارز",
+     "نرخ تسعیر",
+     "مانده ارزی",
+     "تفاوت (ریال)"
+    ],
+    "rows": [
+     [
+      "طلب (فروش)",
+      "USD",
+      1010000.0,
+      1200.0,
+      11000000
+     ],
+     [
+      "طلب (فروش)",
+      "EUR",
+      1120000.0,
+      200.0,
+      4000000
+     ],
+     [
+      "بدهی (خرید)",
+      "USD",
+      1010000.0,
+      300.0,
+      6000000
+     ],
+     [
+      "بدهی (خرید)",
+      "EUR",
+      1120000.0,
+      100.0,
+      -1000000
+     ]
+    ]
+   }
+  }
+ },
+ "reverse_ok": {
+  "ok": true,
+  "id": 9,
+  "rev_status": "cancelled"
+ },
+ "errors": {
+  "rate_missing": {
+   "http": 422,
+   "message": "نرخ ارز EUR، GBP تا تاریخ تسعیر ثبت نشده است",
+   "data": {
+    "error": "rate_missing",
+    "ccy": "EUR",
+    "ccys": [
+     "EUR",
+     "GBP"
+    ],
+    "message": "نرخ ارز EUR، GBP تا تاریخ تسعیر ثبت نشده است",
+    "problems": [
+     {
+      "code": "rate_missing",
+      "message": "نرخ ارز EUR، GBP تا تاریخ تسعیر ثبت نشده است",
+      "ccys": [
+       "EUR",
+       "GBP"
+      ]
+     }
+    ]
+   }
+  },
+  "duplicate": {
+   "http": 409,
+   "message": "برای این تاریخ تسعیر فعال وجود دارد؛ ابتدا آن را برگردانید",
+   "data": {
+    "error": "برای این تاریخ تسعیر فعال وجود دارد؛ ابتدا آن را برگردانید",
+    "code": "duplicate",
+    "problems": [
+     {
+      "code": "duplicate",
+      "message": "برای این تاریخ تسعیر فعال وجود دارد؛ ابتدا آن را برگردانید"
+     }
+    ]
+   }
+  },
+  "nothing": {
+   "http": 400,
+   "message": "فاکتور ارزی بازی برای تسعیر وجود ندارد",
+   "data": {
+    "error": "فاکتور ارزی بازی برای تسعیر وجود ندارد",
+    "code": "nothing_to_reval",
+    "problems": [
+     {
+      "code": "nothing_to_reval",
+      "message": "فاکتور ارزی بازی برای تسعیر وجود ندارد"
+     }
+    ]
+   }
+  },
+  "already_reversed": {
+   "http": 409,
+   "message": "این تسعیر قبلاً خودکار برگشت شده است",
+   "data": {
+    "error": "این تسعیر قبلاً خودکار برگشت شده است"
+   }
+  },
+  "forbidden": {
+   "http": 403,
+   "message": "دسترسی لازم را ندارید",
+   "data": {
+    "error": "forbidden",
+    "message": "دسترسی لازم را ندارید",
+    "need": "accounting.fx_reval.apply"
+   }
+  },
+  "edition": {
+   "http": 403,
+   "message": "edition_required",
+   "data": {
+    "error": "edition_required",
+    "need": "fx"
+   }
+  },
+  "not_found": {
+   "http": 404,
+   "message": "تسعیر یافت نشد",
+   "data": {
+    "error": "تسعیر یافت نشد"
+   }
+  },
+  "network": {
+   "http": 0,
+   "network": true,
+   "message": "اتصال به سرور برقرار نشد. اینترنت را بررسی کنید.",
+   "data": null
+  },
+  "html_500": {
+   "http": 500,
+   "message": "خطای سرور (کد 500)",
+   "data": null
+  }
+ },
+ "sparse": {
+  "preview_empty": {},
+  "record_only_id": {
+   "id": 5
+  },
+  "check_empty": {},
+  "export_empty": {}
+ }
+}
