@@ -1,0 +1,579 @@
+import 'db.dart';
+import 'return_calc.dart';
+
+/// یکسان‌سازی نام طرف حساب: «ي/ك» عربی، فاصله‌های اضافه
+String partyKey(String? name) {
+  if (name == null) return '';
+  return name
+      .replaceAll('ي', 'ی')
+      .replaceAll('ك', 'ک')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+}
+
+// ======================= سررسیدها =======================
+
+/// یک تراکنش پرداخت‌نشده (یکجا/قسط/چک) از خرید (پرداختی) یا فروش (دریافتی)
+class DueItem {
+  final String table; // نام جدول برای علامت‌گذاری «انجام شد»
+  final int id;
+  final bool receivable; // true = باید از خریدار بگیریم، false = باید به فروشنده بدهیم
+  final String kind; // یکجا | قسط | چک
+  final String party;
+  final String label;
+  final String? ref; // شماره چک
+  final String? bank;
+  final double amount;
+  final DateTime date;
+  final bool paid;
+  DueItem({
+    required this.table,
+    required this.id,
+    required this.receivable,
+    required this.kind,
+    required this.party,
+    required this.label,
+    required this.ref,
+    required this.bank,
+    required this.amount,
+    required this.date,
+    required this.paid,
+  });
+}
+
+/// منبع‌های شش‌گانهٔ سررسید: (جدول، ستون طرف‌حساب، join، شرط، دریافتنی؟) — همان شرط‌های loadDues / سرور `pb_dues_credit_meta`.
+const List<(String, String, String, String, bool)> _kDueSources = <(String, String, String, String, bool)>[
+  ('lump_tx', 'p.seller', 'JOIN payments pay ON pay.id = x.payment_id JOIN purchases p ON p.id = pay.purchase_id',
+      "pay.pay_type IN ('lump', 'mixed')", false),
+  ('credit_inst', 'p.seller', 'JOIN payments pay ON pay.id = x.payment_id JOIN purchases p ON p.id = pay.purchase_id',
+      "(pay.pay_type = 'mixed' OR (pay.pay_type = 'staged' AND pay.staged_type = 'credit'))", false),
+  ('cheque_inst', 'p.seller', 'JOIN payments pay ON pay.id = x.payment_id JOIN purchases p ON p.id = pay.purchase_id',
+      "(pay.pay_type = 'mixed' OR (pay.pay_type = 'staged' AND pay.staged_type = 'cheque'))", false),
+  ('receipt_lump_tx', 's.buyer', 'JOIN receipts rec ON rec.id = x.receipt_id JOIN sales s ON s.id = rec.sale_id',
+      "rec.recv_type = 'lump'", true),
+  ('receipt_credit_inst', 's.buyer', 'JOIN receipts rec ON rec.id = x.receipt_id JOIN sales s ON s.id = rec.sale_id',
+      "rec.recv_type = 'staged' AND rec.staged_type = 'credit'", true),
+  ('receipt_cheque_inst', 's.buyer', 'JOIN receipts rec ON rec.id = x.receipt_id JOIN sales s ON s.id = rec.sale_id',
+      "rec.recv_type = 'staged' AND rec.staged_type = 'cheque'", true),
+];
+
+/// Σ credit_used ردیف‌های «پرداخت‌شدهٔ» هر طرف‌حساب (کلید = partyKey) به تفکیک سمت — اعتباری که قبلاً مصرف شده است.
+Future<({Map<String, double> receivable, Map<String, double> payable})> loadCreditUsed() async {
+  final d = await AppDb.I.db;
+  final r = <String, double>{};
+  final p = <String, double>{};
+  for (final (String t, String pcol, String join, String cond, bool recv) in _kDueSources) {
+    final rows = await d.rawQuery('SELECT $pcol AS party, SUM(COALESCE(x.credit_used, 0)) AS u FROM $t x $join '
+        'WHERE x.paid = 1 AND COALESCE(x.credit_used, 0) > 0 AND $cond GROUP BY $pcol');
+    for (final row in rows) {
+      final k = partyKey(row['party'] as String?);
+      final m = recv ? r : p;
+      m[k] = (m[k] ?? 0) + ((row['u'] as num?) ?? 0).toDouble();
+    }
+  }
+  return (receivable: r, payable: p);
+}
+
+/// اعتبار برگشت هر طرف‌حساب = Σ ارزش برگشت − Σ مبلغ بازپرداخت‌شده − Σ credit_used ردیف‌های پرداخت‌شدهٔ همان طرف
+/// (کلید = partyKey؛ هرگز منفی نمی‌شود). receivable: برگشت از فروش، payable: برگشت از خرید.
+Future<({Map<String, double> receivable, Map<String, double> payable})> loadReturnCredits() async {
+  final d = await AppDb.I.db;
+  Future<Map<String, double>> sums(String tbl, String itbl) async {
+    final m = <String, double>{};
+    final rows = await d.rawQuery('''
+        SELECT r.party AS party, COALESCE(r.refund_amount, 0) AS refund,
+               COALESCE((SELECT SUM(i.kg * i.unit_price) FROM $itbl i WHERE i.return_id = r.id), 0) AS total
+        FROM $tbl r''');
+    for (final r in rows) {
+      final k = partyKey(r['party'] as String?);
+      m[k] = (m[k] ?? 0) + (r['total'] as num).toDouble() - (r['refund'] as num).toDouble();
+    }
+    return m;
+  }
+
+  final recv = await sums('sale_returns', 'sale_return_items');
+  final pay = await sums('purchase_returns', 'purchase_return_items');
+  final used = await loadCreditUsed();
+  used.receivable.forEach((k, v) => recv[k] = (recv[k] ?? 0) - v);
+  used.payable.forEach((k, v) => pay[k] = (pay[k] ?? 0) - v);
+  recv.removeWhere((k, v) => v <= 0);
+  pay.removeWhere((k, v) => v <= 0);
+  return (receivable: recv, payable: pay);
+}
+
+/// سررسیدها بدون اعمال اعتبار برگشت (مبلغ‌ها همان مبلغ ذخیره‌شده‌اند).
+Future<List<DueItem>> _loadDuesRaw({bool includePaid = false}) async {
+  final d = await AppDb.I.db;
+  final out = <DueItem>[];
+
+  Future<void> add(String sql, String table, bool receivable, String kind) async {
+    final rows = await d.rawQuery(sql);
+    for (final r in rows) {
+      final paid = ((r['paid'] as num?) ?? 0) == 1;
+      if (paid && !includePaid) continue;
+      out.add(DueItem(
+        table: table,
+        id: r['id'] as int,
+        receivable: receivable,
+        kind: kind,
+        party: partyKey(r['party'] as String?),
+        label: (r['label'] as String?) ?? '',
+        ref: r['ref'] as String?,
+        bank: r['bank'] as String?,
+        amount: (r['amount'] as num).toDouble(),
+        date: DateTime.parse(r['date'] as String),
+        paid: paid,
+      ));
+    }
+  }
+
+  // ---- پرداختی‌ها (خرید) ----
+  const payBase = 'FROM %T% x JOIN payments pay ON pay.id = x.payment_id '
+      'JOIN purchases p ON p.id = pay.purchase_id ';
+  await add(
+      'SELECT x.id AS id, x.amount AS amount, x.date AS date, x.paid AS paid, '
+      'p.seller AS party, p.type_name AS label, NULL AS ref, NULL AS bank '
+      '${payBase.replaceAll('%T%', 'lump_tx')} WHERE pay.pay_type IN (\'lump\', \'mixed\')',
+      'lump_tx',
+      false,
+      'یکجا');
+  await add(
+      'SELECT x.id AS id, x.amount AS amount, x.due_date AS date, x.paid AS paid, '
+      'p.seller AS party, p.type_name AS label, NULL AS ref, NULL AS bank '
+      '${payBase.replaceAll('%T%', 'credit_inst')} '
+      'WHERE (pay.pay_type = \'mixed\' OR (pay.pay_type = \'staged\' AND pay.staged_type = \'credit\'))',
+      'credit_inst',
+      false,
+      'قسط');
+  await add(
+      'SELECT x.id AS id, x.amount AS amount, x.due_date AS date, x.paid AS paid, '
+      'p.seller AS party, p.type_name AS label, x.cheque_no AS ref, x.bank_name AS bank '
+      '${payBase.replaceAll('%T%', 'cheque_inst')} '
+      'WHERE (pay.pay_type = \'mixed\' OR (pay.pay_type = \'staged\' AND pay.staged_type = \'cheque\'))',
+      'cheque_inst',
+      false,
+      'چک');
+
+  // ---- دریافتی‌ها (فروش) ----
+  const recBase = 'FROM %T% x JOIN receipts rec ON rec.id = x.receipt_id '
+      'JOIN sales s ON s.id = rec.sale_id ';
+  await add(
+      'SELECT x.id AS id, x.amount AS amount, x.date AS date, x.paid AS paid, '
+      's.buyer AS party, \'فروش\' AS label, NULL AS ref, NULL AS bank '
+      '${recBase.replaceAll('%T%', 'receipt_lump_tx')} WHERE rec.recv_type = \'lump\'',
+      'receipt_lump_tx',
+      true,
+      'یکجا');
+  await add(
+      'SELECT x.id AS id, x.amount AS amount, x.due_date AS date, x.paid AS paid, '
+      's.buyer AS party, \'فروش\' AS label, NULL AS ref, NULL AS bank '
+      '${recBase.replaceAll('%T%', 'receipt_credit_inst')} '
+      'WHERE rec.recv_type = \'staged\' AND rec.staged_type = \'credit\'',
+      'receipt_credit_inst',
+      true,
+      'قسط');
+  await add(
+      'SELECT x.id AS id, x.amount AS amount, x.due_date AS date, x.paid AS paid, '
+      's.buyer AS party, \'فروش\' AS label, x.cheque_no AS ref, x.bank_name AS bank '
+      '${recBase.replaceAll('%T%', 'receipt_cheque_inst')} '
+      'WHERE rec.recv_type = \'staged\' AND rec.staged_type = \'cheque\'',
+      'receipt_cheque_inst',
+      true,
+      'چک');
+
+  // ---- سررسید قرض و وام (اعطای قرض = دریافتی ما، دریافت قرض = پرداختیِ ما) ----
+  for (final r in await AppDb.I.loanDueRows(includePaid: includePaid)) {
+    final given = r['kind'] == 'given';
+    out.add(DueItem(
+      table: 'loan_dues',
+      id: r['id'] as int,
+      receivable: given,
+      kind: 'قرض',
+      party: partyKey(r['party'] as String?),
+      label: given ? 'قرض اعطایی' : 'قرض دریافتی',
+      ref: null,
+      bank: null,
+      amount: (r['amount'] as num).toDouble(),
+      date: DateTime.parse(r['due_date'] as String),
+      paid: ((r['paid'] as num?) ?? 0) == 1,
+    ));
+  }
+
+  return out;
+}
+
+List<DueRow> _creditRows(List<DueItem> out) => <DueRow>[
+      for (final x in out)
+        (
+          party: x.party,
+          receivable: x.receivable,
+          paid: x.paid,
+          eligible: x.table != 'loan_dues',
+          date: x.date,
+          amount: x.amount,
+        ),
+    ];
+
+/// اعتباری که این ردیفِ پرداخت‌نشده همین الان مصرف می‌کند (0 اگر اعتباری نباشد/ردیف پرداخت‌شده باشد).
+/// همان تخصیص loadDues: نزدیک‌ترین سررسید اول، با استخرِ بعد از کسر credit_used ردیف‌های پرداخت‌شده.
+Future<double> dueCreditTake(String table, int id) async {
+  if (table == 'loan_dues') return 0;
+  final credits = await loadReturnCredits();
+  if (credits.receivable.isEmpty && credits.payable.isEmpty) return 0;
+  final raw = await _loadDuesRaw();
+  final takes = allocateReturnCredit(
+      rows: _creditRows(raw), receivableCredit: credits.receivable, payableCredit: credits.payable);
+  for (final e in takes.entries) {
+    if (raw[e.key].table == table && raw[e.key].id == id) return e.value;
+  }
+  return 0;
+}
+
+/// «پرداخت/دریافت شد» با حسابداری اعتبار برگشت (معادل `dues.mark_paid` سرور).
+/// [shownAmount] = مبلغ کاهش‌یافتهٔ نمایش‌داده‌شده در لیست سررسید؛ اگر ندهید و [paid] درست باشد، از تخصیص فعلی حساب می‌شود.
+/// [paid]=false مبلغ اصلی (قبل از کاهش) را برمی‌گرداند.
+Future<void> setPaidWithCredit(String table, int id, bool paid, {double? shownAmount}) async {
+  if (!paid || table == 'loan_dues') {
+    await AppDb.I.setPaid(table, id, paid);
+    return;
+  }
+  double? shown = shownAmount;
+  if (shown == null) {
+    final take = await dueCreditTake(table, id);
+    if (take > 0.004) {
+      final stored = await AppDb.I.lineAmount(table, id);
+      if (stored != null) shown = stored - take;
+    }
+  }
+  await AppDb.I.setPaid(table, id, true, shownAmount: shown);
+}
+
+/// ذخیرهٔ ویرایش یک ردیف از فرم: اگر در این ویرایش ردیف از «پرداخت‌نشده» به «پرداخت‌شده» رسید، اول بدون پرداخت ذخیره می‌شود
+/// و بعد با [setPaidWithCredit] علامت می‌خورد تا اعتبار برگشت مصرف شود (فرم نباید از دور اعتبار خارج کند).
+/// بقیهٔ حالت‌ها (از جمله برگرداندن به پرداخت‌نشده) همان [update] است که خودش `credit_used` را برمی‌گرداند.
+Future<void> updateLineWithCredit(String table, int id, Map<String, dynamic> row, bool wasPaid,
+    Future<void> Function(int id, Map<String, dynamic> row) update) async {
+  final nowPaid = row['paid'] == 1 || row['paid'] == true;
+  if (nowPaid && !wasPaid) {
+    await update(id, <String, dynamic>{...row, 'paid': 0});
+    await setPaidWithCredit(table, id, true);
+  } else {
+    await update(id, row);
+  }
+}
+
+Future<List<DueItem>> loadDues({bool includePaid = false}) async {
+  final out = await _loadDuesRaw(includePaid: includePaid);
+  // برگشت‌ها: اعتبار برگشت هر طرف‌حساب (ارزش − بازپرداخت‌شده) از سررسیدهای پرداخت‌نشدهٔ همان طرف کم می‌شود (نزدیک‌ترین سررسید اول).
+  final credits = await loadReturnCredits();
+  if (credits.receivable.isNotEmpty || credits.payable.isNotEmpty) {
+    final amounts = applyReturnCredit(
+      rows: _creditRows(out),
+      receivableCredit: credits.receivable,
+      payableCredit: credits.payable,
+    );
+    final adjusted = <DueItem>[];
+    for (var i = 0; i < out.length; i++) {
+      final x = out[i];
+      if (amounts[i] == x.amount) {
+        adjusted.add(x);
+      } else if (amounts[i] >= 0.5) {
+        adjusted.add(DueItem(
+          table: x.table, id: x.id, receivable: x.receivable, kind: x.kind, party: x.party, label: x.label,
+          ref: x.ref, bank: x.bank, amount: amounts[i], date: x.date, paid: x.paid,
+        ));
+      } // else: کاملاً با اعتبار برگشت پوشش داده شده ⇒ در سررسیدها نمی‌آید
+    }
+    out
+      ..clear()
+      ..addAll(adjusted);
+  }
+
+  out.sort((a, b) => a.date.compareTo(b.date));
+  return out;
+}
+
+// ======================= حساب طرف‌ها =======================
+
+class PartyEntry {
+  final bool isPurchase; // true = خرید از او، false = فروش به او
+  final int id;
+  final DateTime date;
+  final String label;
+  final double weight;
+  final double total;
+  final double settled;
+  PartyEntry({
+    required this.isPurchase,
+    required this.id,
+    required this.date,
+    required this.label,
+    required this.weight,
+    required this.total,
+    required this.settled,
+  });
+  double get remaining => total - settled;
+}
+
+/// نام‌های رسمی انواع تراکنش دفتر قرض و وام
+const Map<String, String> kLoanKindLabel = {
+  'given': 'قرض اعطایی',
+  'taken': 'قرض دریافتی',
+  'repay_in': 'بازپرداخت دریافتی',
+  'repay_out': 'بازپرداخت پرداختی',
+};
+
+/// آیا این نوع تراکنش پول به حساب ما وارد می‌کند؟ (قرض دریافتی / بازپرداخت دریافتی)
+bool loanKindIsIn(String kind) => kind == 'taken' || kind == 'repay_in';
+
+class LoanEntry {
+  final int id;
+  final String uid;
+  final String kind; // given | taken | repay_in | repay_out
+  final double amount;
+  final DateTime date;
+  final String? note;
+  LoanEntry({
+    required this.id,
+    required this.uid,
+    required this.kind,
+    required this.amount,
+    required this.date,
+    required this.note,
+  });
+  String get label => kLoanKindLabel[kind] ?? kind;
+  bool get isIn => loanKindIsIn(kind);
+}
+
+class PartyAccount {
+  final String key;
+  double bought = 0; // جمع خرید از او
+  double paid = 0; // پرداخت‌شده به او
+  double sold = 0; // جمع فروش به او
+  double received = 0; // دریافت‌شده از او
+  final List<PartyEntry> entries = [];
+
+  // ---- دفتر قرض و وام (جدا از خرید/فروش؛ در سود و زیان حساب نمی‌شود) ----
+  double loanGiven = 0; // قرض اعطایی
+  double loanTaken = 0; // قرض دریافتی
+  double repaidToUs = 0; // بازپرداخت دریافتی (او به ما پس داده)
+  double repaidByUs = 0; // بازپرداخت پرداختی (ما به او پس داده‌ایم)
+  final List<LoanEntry> loans = [];
+
+  PartyAccount(this.key);
+
+  /// مانده طلب قرضی: چقدر از قرضِ اعطایی هنوز به ما برنگشته
+  double get loanReceivable => loanGiven - repaidToUs;
+
+  /// مانده بدهی قرضی: چقدر از قرضِ دریافتی هنوز پس نداده‌ایم
+  double get loanPayable => loanTaken - repaidByUs;
+
+  /// مثبت = او بابت قرض به ما بدهکار است، منفی = ما بدهکاریم
+  double get loanNet => loanReceivable - loanPayable;
+
+  bool get hasLoans => loans.isNotEmpty;
+
+  /// تراز کل (خرید/فروش + قرض)
+  double get totalNet => net + loanNet;
+
+  String get name => key.isEmpty ? 'بدون نام' : key;
+
+  /// بدهی ما به او
+  double get weOwe => bought - paid;
+
+  /// طلب ما از او
+  double get theyOwe => sold - received;
+
+  /// مثبت = او به ما بدهکار است، منفی = ما به او بدهکاریم
+  double get net => theyOwe - weOwe;
+}
+
+double _settledOf(String? type, String? staged, num lump, num credit, num cheque) {
+  if (type == 'lump') return lump.toDouble();
+  if (type == 'staged' && staged == 'credit') return credit.toDouble();
+  if (type == 'staged' && staged == 'cheque') return cheque.toDouble();
+  if (type == 'mixed') return (lump + credit + cheque).toDouble();
+  return 0;
+}
+
+Future<List<PartyAccount>> loadParties() async {
+  final d = await AppDb.I.db;
+  final map = <String, PartyAccount>{};
+  PartyAccount acc(String? name) => map.putIfAbsent(partyKey(name), () => PartyAccount(partyKey(name)));
+
+  final purchases = await d.rawQuery('''
+      SELECT p.id AS id, p.seller AS party, p.date AS date, p.type_name AS label,
+             p.net_weight AS net, p.price AS price,
+             pay.pay_type AS pt, pay.staged_type AS st,
+             COALESCE((SELECT SUM(amount) FROM lump_tx WHERE payment_id = pay.id AND paid = 1), 0) AS lp,
+             COALESCE((SELECT SUM(amount) FROM credit_inst WHERE payment_id = pay.id AND paid = 1), 0) AS cp,
+             COALESCE((SELECT SUM(amount) FROM cheque_inst WHERE payment_id = pay.id AND paid = 1), 0) AS hp
+      FROM purchases p LEFT JOIN payments pay ON pay.purchase_id = p.id
+      WHERE p.is_mix = 0''');
+  for (final r in purchases) {
+    final net = (r['net'] as num).toDouble();
+    final total = net * (r['price'] as num).toDouble();
+    final settled = _settledOf(r['pt'] as String?, r['st'] as String?, r['lp'] as num,
+        r['cp'] as num, r['hp'] as num);
+    final a = acc(r['party'] as String?);
+    a.bought += total;
+    a.paid += settled;
+    a.entries.add(PartyEntry(
+      isPurchase: true,
+      id: r['id'] as int,
+      date: DateTime.parse(r['date'] as String),
+      label: (r['label'] as String?) ?? '',
+      weight: net,
+      total: total,
+      settled: settled,
+    ));
+  }
+
+  final sales = await d.rawQuery('''
+      SELECT s.id AS id, s.buyer AS party, s.date AS date,
+             s.net_weight AS net, s.price AS price,
+             rec.recv_type AS rt, rec.staged_type AS st,
+             COALESCE((SELECT SUM(amount) FROM receipt_lump_tx WHERE receipt_id = rec.id AND paid = 1), 0) AS lp,
+             COALESCE((SELECT SUM(amount) FROM receipt_credit_inst WHERE receipt_id = rec.id AND paid = 1), 0) AS cp,
+             COALESCE((SELECT SUM(amount) FROM receipt_cheque_inst WHERE receipt_id = rec.id AND paid = 1), 0) AS hp
+      FROM sales s LEFT JOIN receipts rec ON rec.sale_id = s.id''');
+  for (final r in sales) {
+    final net = (r['net'] as num).toDouble();
+    final total = net * (r['price'] as num).toDouble();
+    final settled = _settledOf(r['rt'] as String?, r['st'] as String?, r['lp'] as num,
+        r['cp'] as num, r['hp'] as num);
+    final a = acc(r['party'] as String?);
+    a.sold += total;
+    a.received += settled;
+    a.entries.add(PartyEntry(
+      isPurchase: false,
+      id: r['id'] as int,
+      date: DateTime.parse(r['date'] as String),
+      label: 'فروش',
+      weight: net,
+      total: total,
+      settled: settled,
+    ));
+  }
+
+  // برگشت از فروش: ارزش کالای برگشتی (V) از طلب ما کم می‌شود؛ مبلغی که نقد/چکی به خریدار پس داده‌ایم (R) دوباره به طلب اضافه می‌شود.
+  // اثر روی تراز = −(V − R) (همان منطق سرور: sold −= V، received −= R). قبلاً برگشت‌ها اینجا اصلاً حساب نمی‌شد و خریدار بعد از برگشت هم بدهکار می‌ماند.
+  final saleReturns = await d.rawQuery('''
+      SELECT r.party AS party, COALESCE(r.refund_amount, 0) AS refund,
+             COALESCE((SELECT SUM(i.kg * i.unit_price) FROM sale_return_items i WHERE i.return_id = r.id), 0) AS total
+      FROM sale_returns r''');
+  for (final r in saleReturns) {
+    final a = acc(r['party'] as String?);
+    a.sold -= (r['total'] as num).toDouble();
+    a.received -= (r['refund'] as num).toDouble();
+  }
+
+  // برگشت از خرید (قرینهٔ برگشت از فروش؛ همان منطق سرور returns.php: bought −= V، paid −= R).
+  // ارزش کالای برگشتی (V) از بدهی ما به فروشنده کم می‌شود؛ مبلغی که فروشنده نقد/چکی به ما پس داده (R) دوباره به بدهی اضافه می‌شود.
+  // قبلاً برگشت از خرید اینجا حساب نمی‌شد و فروشنده بعد از برگشت هم طلبکار می‌ماند.
+  final purchaseReturns = await d.rawQuery('''
+      SELECT r.party AS party, COALESCE(r.refund_amount, 0) AS refund,
+             COALESCE((SELECT SUM(i.kg * i.unit_price) FROM purchase_return_items i WHERE i.return_id = r.id), 0) AS total
+      FROM purchase_returns r''');
+  for (final r in purchaseReturns) {
+    final a = acc(r['party'] as String?);
+    a.bought -= (r['total'] as num).toDouble();
+    a.paid -= (r['refund'] as num).toDouble();
+  }
+
+  // طرف‌حساب‌هایی که دستی تعریف شده‌اند (حتی اگر هنوز خرید/فروشی نداشته باشند)
+  for (final r in await d.query('parties')) {
+    acc(r['name'] as String?);
+  }
+
+  // دفتر قرض و وام
+  for (final r in await d.query('loan_entries', orderBy: 'date DESC, id DESC')) {
+    final a = acc(r['party'] as String?);
+    final kind = (r['kind'] as String?) ?? '';
+    final amount = (r['amount'] as num).toDouble();
+    switch (kind) {
+      case 'given':
+        a.loanGiven += amount;
+        break;
+      case 'taken':
+        a.loanTaken += amount;
+        break;
+      case 'repay_in':
+        a.repaidToUs += amount;
+        break;
+      case 'repay_out':
+        a.repaidByUs += amount;
+        break;
+      default:
+        continue;
+    }
+    a.loans.add(LoanEntry(
+      id: (r['id'] as num).toInt(),
+      uid: (r['uid'] as String?) ?? '',
+      kind: kind,
+      amount: amount,
+      date: DateTime.parse(r['date'] as String),
+      note: r['note'] as String?,
+    ));
+  }
+
+  final list = map.values.toList();
+  for (final a in list) {
+    a.entries.sort((x, y) => y.date.compareTo(x.date));
+  }
+  list.sort((a, b) => b.totalNet.abs().compareTo(a.totalNet.abs()));
+  return list;
+}
+
+// ======================= گردش واریزی و برداشت =======================
+
+/// یک حرکت واقعیِ پول: واریزی (به حساب ما) یا برداشت (از حساب ما)
+class CashFlow {
+  final DateTime date;
+  final double amount;
+  final bool isIn; // true = واریزی، false = برداشت
+  final String party;
+  final bool isLoan;
+  CashFlow(this.date, this.amount, this.isIn, this.party, this.isLoan);
+}
+
+/// فقط تراکنش‌های «انجام‌شده» (تسویه‌شده) در بازهٔ [from, to] (هر دو شامل).
+/// واریزی = دریافت از خریدارها (+ قرض دریافتی و بازپرداخت دریافتی در صورت [includeLoans])
+/// برداشت = پرداخت به فروشنده‌ها (+ قرض اعطایی و بازپرداخت پرداختی در صورت [includeLoans])
+Future<List<CashFlow>> loadCashFlows({
+  required DateTime from,
+  required DateTime to,
+  String? partyKeyFilter,
+  bool includeLoans = false,
+}) async {
+  final out = <CashFlow>[];
+  final start = DateTime(from.year, from.month, from.day);
+  final endEx = DateTime(to.year, to.month, to.day + 1);
+  bool inRange(DateTime d) => !d.isBefore(start) && d.isBefore(endEx);
+  bool matches(String name) => partyKeyFilter == null || partyKey(name) == partyKeyFilter;
+
+  final db = AppDb.I;
+  for (final r in await db.allReceiptTransactions()) {
+    if (((r['paid'] as num?) ?? 0) != 1) continue;
+    final dt = DateTime.parse(r['date'] as String);
+    final name = '${r['name'] ?? ''}';
+    if (!inRange(dt) || !matches(name == '-' ? '' : name)) continue;
+    out.add(CashFlow(dt, (r['amount'] as num).toDouble(), true, name, false));
+  }
+  for (final r in await db.allPaymentTransactions()) {
+    if (((r['paid'] as num?) ?? 0) != 1) continue;
+    final dt = DateTime.parse(r['date'] as String);
+    final name = '${r['name'] ?? ''}';
+    if (!inRange(dt) || !matches(name == '-' ? '' : name)) continue;
+    out.add(CashFlow(dt, (r['amount'] as num).toDouble(), false, name, false));
+  }
+  if (includeLoans) {
+    for (final r in await db.loanEntries()) {
+      final dt = DateTime.parse(r['date'] as String);
+      final name = '${r['party'] ?? ''}';
+      if (!inRange(dt) || !matches(name)) continue;
+      out.add(CashFlow(dt, (r['amount'] as num).toDouble(), loanKindIsIn('${r['kind']}'), name, true));
+    }
+  }
+  return out;
+}
