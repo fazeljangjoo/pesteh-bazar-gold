@@ -8,6 +8,7 @@ import 'correction_ui.dart' show showCorrectionDialog;
 import 'doc_drafts.dart' show DraftsScreen;
 import 'form_settings.dart' show FormSettingsLocal;
 import 'vouchers_links.dart';
+import 'list_filter.dart';
 import 'live_query.dart';
 import 'invoice_service.dart';
 import 'license_service.dart';
@@ -35,6 +36,8 @@ class SalesScreen extends StatefulWidget {
 
 class _SalesScreenState extends State<SalesScreen> {
   String _query = '';
+  // پیش‌فرض: سال پسته‌ای جاری (۱ مهر تا ۳۱ شهریور سال بعد)، جدیدترین اول
+  DocListFilter _filter = DocListFilter.defaults();
 
   /// کد پسته‌ی فروش (هر فروش فقط یک قلم دارد)
   static String _codeOf(Map<String, dynamic> sale) {
@@ -83,7 +86,7 @@ class _SalesScreenState extends State<SalesScreen> {
             final all = s.data!;
             if (all.isEmpty) return const Center(child: Text('هنوز فروشی ثبت نشده'));
             final q = _norm(_query);
-            final list = all.where((sale) => _matches(sale, q)).toList();
+            final list = _filter.apply(all.where((sale) => _matches(sale, q)).toList());
             return ListView.builder(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 88),
               itemCount: list.length + 1,
@@ -99,6 +102,13 @@ class _SalesScreenState extends State<SalesScreen> {
                           border: OutlineInputBorder(),
                         ),
                         onChanged: (v) => setState(() => _query = v),
+                      ),
+                      const SizedBox(height: 8),
+                      DocListFilterBar(
+                        value: _filter,
+                        onChanged: (f) => setState(() => _filter = f),
+                        shown: list.length,
+                        total: all.length,
                       ),
                       if (list.isEmpty)
                         const Padding(

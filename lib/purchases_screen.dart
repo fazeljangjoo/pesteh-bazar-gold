@@ -8,6 +8,7 @@ import 'doc_drafts.dart' show DraftsScreen;
 import 'form_settings.dart' show FormSettingsLocal;
 import 'grade_lines_ui.dart' show GradeCostRows;
 import 'vouchers_links.dart';
+import 'list_filter.dart';
 import 'live_query.dart';
 import 'invoice_service.dart';
 import 'license_service.dart';
@@ -37,6 +38,8 @@ class PurchasesScreen extends StatefulWidget {
 class _PurchasesScreenState extends State<PurchasesScreen> {
   String _query = '';
   bool _openedCode = false;
+  // پیش‌فرض: سال پسته‌ای جاری (۱ مهر تا ۳۱ شهریور سال بعد)، جدیدترین اول
+  DocListFilter _filter = DocListFilter.defaults();
 
   void _details(BuildContext context, Map<String, dynamic> p) {
     String? pct(String k) => p[k] == null ? null : '${faNum(p[k] as num)}٪';
@@ -248,8 +251,8 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
     );
   }
 
-  Widget _tabList(BuildContext context, List<Map<String, dynamic>> list, String emptyText) {
-    if (list.isEmpty) return Center(child: Text(_query.trim().isEmpty ? emptyText : 'نتیجه‌ای پیدا نشد'));
+  Widget _tabList(BuildContext context, List<Map<String, dynamic>> list, String emptyText, {bool narrowed = false}) {
+    if (list.isEmpty) return Center(child: Text(_query.trim().isEmpty && !narrowed ? emptyText : 'نتیجه‌ای پیدا نشد'));
     return ListView.builder(
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 88),
       itemCount: list.length,
@@ -304,11 +307,13 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                 }
               }
               final q = _norm(_query);
-              final filtered = q.isEmpty
+              final byText = q.isEmpty
                   ? all
                   : all
                       .where((p) => _norm('${p['code']} ${p['category_name']} ${p['type_name']}').contains(q))
                       .toList();
+              final filtered = _filter.apply(byText); // بازهٔ تاریخ + ترتیب
+              final narrowed = !_filter.isAll && all.isNotEmpty;
               final available = filtered.where((p) => !_isSold(p)).toList();
               final sold = filtered.where(_isSold).toList();
               return Column(children: [
@@ -323,10 +328,19 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
                     onChanged: (v) => setState(() => _query = v),
                   ),
                 ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
+                  child: DocListFilterBar(
+                    value: _filter,
+                    onChanged: (f) => setState(() => _filter = f),
+                    shown: filtered.length,
+                    total: all.length,
+                  ),
+                ),
                 Expanded(
                   child: TabBarView(children: [
-                    _tabList(context, available, 'هیچ خرید موجودی در انبار نیست'),
-                    _tabList(context, sold, 'هنوز خریدِ کاملاً فروخته‌شده‌ای نداریم'),
+                    _tabList(context, available, 'هیچ خرید موجودی در انبار نیست', narrowed: narrowed),
+                    _tabList(context, sold, 'هنوز خریدِ کاملاً فروخته‌شده‌ای نداریم', narrowed: narrowed),
                   ]),
                 ),
               ]);
