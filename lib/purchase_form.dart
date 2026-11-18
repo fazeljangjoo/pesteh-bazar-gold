@@ -518,7 +518,7 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
         'weighbridge_cost': MoneyField.stored(_finWb) ?? 0,
         'side_cost_payer': _finPayer,
       },
-      'gram': preset == 'dombest' ? parseNum(_gram.text) : null,
+      'gram': parseNum(_gram.text), // مثل پذیرش اتاق انس: برای همهٔ انواع
       'pct_khandan': preset == 'dombest' ? parseNum(_pctKhandan.text) : null,
       'pct_dombest': preset == 'khandan' ? parseNum(_pctDombest.text) : null,
       'pct_tuchin': preset == 'khandan' ? parseNum(_pctTuchin.text) : null,
@@ -692,8 +692,8 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
             locked(WarehousePicker(
                 value: _warehouseUid, useLast: !_isEdit, onChanged: (String? v) => _warehouseUid = v)),
             locked(numField(_ounce, 'انس پسته (اختیاری)', gap: g)),
+            locked(numField(_gram, 'گرم (اختیاری)', gap: g)), // مثل پذیرش اتاق انس: برای همهٔ انواع
             if (preset == 'dombest') ...[
-              locked(numField(_gram, 'گرم', gap: g)),
               locked(numField(_pctKhandan, 'درصد پسته خندان در دنبست', suffix: '٪', max: 100, gap: g)),
               locked(numField(_pctCrooked, 'درصد پسته کج / ناخالص', suffix: '٪', max: 100, gap: g)),
             ] else if (preset == 'khandan') ...[

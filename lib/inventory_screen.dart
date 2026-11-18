@@ -16,7 +16,6 @@ import 'mix_form.dart';
 import 'orchard_ui.dart';
 import 'pdf_output.dart';
 import 'pdf_service.dart';
-import 'processing_ui.dart';
 import 'separation_form.dart';
 import 'stock_reports_screen.dart';
 import 'fmt.dart' show Fmt;
@@ -200,14 +199,6 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
             onPressed: () => Navigator.push(
               context,
               MaterialPageRoute<void>(builder: (_) => const OrchardsScreen()),
-            ),
-          ),
-          IconButton(
-            tooltip: 'فراوری (برون‌سپاری و امانی)',
-            icon: const Icon(Icons.precision_manufacturing_outlined),
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute<void>(builder: (_) => const ProcessingScreen()),
             ),
           ),
           if (StaffPerms.I.can('workshop.manage')) // CP7: مدیر کارگاه ⇒ ثبت/فهرست گزارش‌های خط شکست

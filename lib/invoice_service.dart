@@ -49,7 +49,7 @@ class InvoiceService {
     final preset = p['category_preset'] as String?;
     return [
       if (p['ounce'] != null) ['انس', faNum(p['ounce'] as num)],
-      if (preset == 'dombest' && p['gram'] != null) ['گرم', faNum(p['gram'] as num)],
+      if (p['gram'] != null) ['گرم', faNum(p['gram'] as num)],
       if (preset == 'dombest' && pct('pct_khandan') != null) ['درصد خندان در دنبست', pct('pct_khandan')!],
       if (preset == 'khandan' && pct('pct_dombest') != null) ['درصد دنبست در خندان', pct('pct_dombest')!],
       if (preset == 'khandan' && pct('pct_tuchin') != null) ['درصد توچین', pct('pct_tuchin')!],

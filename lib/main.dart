@@ -58,6 +58,7 @@ import 'pos_screen.dart';
 import 'import_screen.dart';
 import 'print_service.dart';
 import 'returns_ui.dart';
+import 'processing_ui.dart';
 import 'proforma_ui.dart';
 import 'db_crypto.dart';
 import 'dues_screen.dart';
@@ -230,6 +231,17 @@ class _HomeShellState extends State<HomeShell> {
                 ),
                 const Divider(height: 1),
               ],
+              // فراوری: بخش مستقل منو (قبلاً آیکن کوچک بالای صفحهٔ انبار بود)
+              ListTile(
+                leading: const Icon(Icons.precision_manufacturing_outlined),
+                title: const Text('فراوری'),
+                subtitle: const Text('برون‌سپاری، امانی و کارگاه داخلی', style: TextStyle(fontSize: 11.5)),
+                onTap: () {
+                  _closeMenu(context);
+                  _push(context, MaterialPageRoute<void>(builder: (_) => const ProcessingScreen()));
+                },
+              ),
+              const Divider(height: 1),
               if (StaffPerms.I.can('settings.manage'))
                 ListTile( // S35.T35.1
                   leading: const Icon(Icons.tune_outlined),

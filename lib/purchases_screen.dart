@@ -63,7 +63,7 @@ class _PurchasesScreenState extends State<PurchasesScreen> {
       if (p['transport_cost'] != null) ['هزینه حمل‌ونقل / باسکول', '${Fmt.money(p['transport_cost'] as num)}'],
       if (((p['in_mix_codes'] as List?) ?? const []).isNotEmpty)
         ['داخل مخلوط/جداسازی (هنوز فروش نرفته)', ((p['in_mix_codes'] as List).cast<String>()).join('، ')],
-      if (preset == 'dombest' && p['gram'] != null) ['گرم', faNum(p['gram'] as num)],
+      if (p['gram'] != null) ['گرم', faNum(p['gram'] as num)],
       if (preset == 'dombest' && pct('pct_khandan') != null) ['درصد خندان در دنبست', pct('pct_khandan')!],
       if (preset == 'khandan' && pct('pct_dombest') != null) ['درصد دنبست در خندان', pct('pct_dombest')!],
       if (preset == 'khandan' && pct('pct_tuchin') != null) ['درصد توچین', pct('pct_tuchin')!],
