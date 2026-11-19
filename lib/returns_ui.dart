@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'package:sqflite/sqflite.dart' show Database;
+
 import 'db.dart';
 import 'offline_docs.dart';
 import 'pdf_output.dart';
@@ -65,7 +67,11 @@ class _ReturnForm extends StatefulWidget {
   final double maxKg;
   final double defaultPrice;
   final Future<Map<String, dynamic>> Function(Map<String, dynamic> base) submit;
+
+  /// فاز ۳: ویرایش ⇒ مقادیر فعلی برگشت (date, kg, unit_price, refund_mode, refund_amount, cheque_no, note).
+  final Map<String, dynamic>? initial;
   const _ReturnForm({
+    this.initial,
     required this.isSale,
     required this.title,
     required this.party,
@@ -97,6 +103,16 @@ class _ReturnFormState extends State<_ReturnForm> {
     _mode = widget.isSale ? 'reduce_receivable' : 'reduce_payable';
     _kg.text = faNum(widget.maxKg, dec: 3);
     MoneyField.setStored(_price, widget.defaultPrice);
+    final Map<String, dynamic>? ini = widget.initial;
+    if (ini != null) {
+      _mode = '${ini['refund_mode'] ?? _mode}';
+      _kg.text = faNum(ReturnsHelp.d(ini['kg']), dec: 3);
+      MoneyField.setStored(_price, ReturnsHelp.d(ini['unit_price']));
+      if (ReturnsHelp.d(ini['refund_amount']) > 0) MoneyField.setStored(_refund, ReturnsHelp.d(ini['refund_amount']));
+      _cheque.text = '${ini['cheque_no'] ?? ''}';
+      _note.text = '${ini['note'] ?? ''}';
+      _date = DateTime.tryParse('${ini['date'] ?? ''}') ?? _date;
+    }
   }
 
   @override
@@ -136,7 +152,7 @@ class _ReturnFormState extends State<_ReturnForm> {
     try {
       final r = await widget.submit(base);
       if (!mounted) return;
-      snack(context, 'برگشت ثبت شد (شمارهٔ ${faNum(ReturnsHelp.d(r['number']), dec: 0)})');
+      snack(context, '${widget.initial == null ? 'برگشت ثبت شد' : 'ویرایش برگشت ذخیره شد'} (شمارهٔ ${faNum(ReturnsHelp.d(r['number']), dec: 0)})');
       Navigator.pop(context, true);
     } catch (e) {
       if (!mounted) return;
@@ -342,6 +358,50 @@ class _ReturnsTabState extends State<_ReturnsTab> {
     }
   }
 
+  /// فاز ۳: ویرایش برگشت تک‌قلمی (همان فرم ثبت؛ ذخیرهٔ محلی + صف `*.update`؛ همان شماره).
+  Future<void> _edit(Map<String, dynamic> r, Map<String, dynamic> it) async {
+    final Database d = await AppDb.I.db;
+    final int id = ReturnsHelp.d(r['id']).toInt();
+    final int lot = ReturnsHelp.d(it['lot_id']).toInt();
+    final double kg = ReturnsHelp.d(it['kg']);
+    double maxKg;
+    if (widget.isSale) {
+      final int sale = ReturnsHelp.d(it['sale_id']).toInt();
+      final List<Map<String, Object?>> w = await d.rawQuery('SELECT weight FROM sale_items WHERE sale_id=? AND purchase_id=? LIMIT 1', <Object?>[sale, lot]);
+      final List<Map<String, Object?>> other = await d.rawQuery(
+          'SELECT COALESCE(SUM(kg),0) AS k FROM sale_return_items WHERE sale_id=? AND lot_id=? AND return_id<>?', <Object?>[sale, lot, id]);
+      maxKg = (w.isEmpty ? kg : ReturnsHelp.d(w.first['weight'])) - ReturnsHelp.d(other.first['k']);
+    } else {
+      final List<Map<String, Object?>> pu = await d.query('purchases', columns: <String>['remaining'], where: 'id=?', whereArgs: <Object?>[lot], limit: 1);
+      maxKg = (pu.isEmpty ? 0 : ReturnsHelp.d(pu.first['remaining'])) + kg;
+    }
+    if (!mounted) return;
+    final bool? ok = await Navigator.push<bool>(
+      context,
+      MaterialPageRoute<bool>(
+        builder: (_) => _ReturnForm(
+          isSale: widget.isSale,
+          title: '${widget.isSale ? 'ویرایش برگشت از فروش' : 'ویرایش برگشت از خرید'} شمارهٔ ${faNum(ReturnsHelp.d(r['number']), dec: 0)}',
+          party: '${r['party'] ?? ''}',
+          subtitle: '${it['code'] ?? '-'} — ${it['type_name'] ?? ''}',
+          maxKg: maxKg,
+          defaultPrice: ReturnsHelp.d(it['unit_price']),
+          initial: <String, dynamic>{...r, 'kg': kg, 'unit_price': it['unit_price']},
+          submit: (Map<String, dynamic> b) => OfflineDocs.call('$_pre.update', <String, dynamic>{
+            'id': r['id'], 'date': b['date'], 'note': b['note'], 'refund_mode': b['refund_mode'],
+            if (b.containsKey('refund_amount')) 'refund_amount': b['refund_amount'],
+            if (b.containsKey('cheque_no')) 'cheque_no': b['cheque_no'],
+            if (r['edit_version'] != null) 'base_version': r['edit_version'],
+            'items': <Map<String, dynamic>>[
+              <String, dynamic>{if (widget.isSale) 'sale_id': it['sale_id'], 'lot_id': lot, 'kg': b['kg'], 'unit_price': b['unit_price']},
+            ],
+          }),
+        ),
+      ),
+    );
+    if (ok == true) await _load();
+  }
+
   Future<void> _open(Map<String, dynamic> row) async {
     try {
       final Map<String, dynamic> r = await OfflineDocs.call('$_pre.get', <String, dynamic>{'id': row['id']});
@@ -398,6 +458,15 @@ class _ReturnsTabState extends State<_ReturnsTab> {
                   icon: const Icon(Icons.picture_as_pdf_outlined),
                   label: const Text('PDF'),
                 ),
+                if (its.length == 1 && StaffPerms.I.can(widget.isSale ? 'sales.return' : 'purchases.return'))
+                  OutlinedButton.icon(
+                    onPressed: () {
+                      Navigator.pop(ctx);
+                      _edit(r, its.first);
+                    },
+                    icon: const Icon(Icons.edit_outlined),
+                    label: const Text('ویرایش'),
+                  ),
                 OutlinedButton.icon(
                   onPressed: () async {
                     if (!await confirm(ctx, 'این برگشت حذف شود؟ موجودی انبار به حالت قبل برمی‌گردد.')) return;

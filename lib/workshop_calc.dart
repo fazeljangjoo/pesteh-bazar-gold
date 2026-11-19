@@ -1,5 +1,5 @@
 // کارگاه داخلی (مرحلهٔ ۱) — آینهٔ Dart منطق تراز سرور (`public_html/backend/api/workshop_calc.php`، تابع pb_ws_balance).
-// تست مشترک: test/workshop_cases.json (کپی بایت‌به‌بایت از backend/tests/workshop_cases.json) + test/workshop_balance_test.dart.
+// تست مشترک: test/workshop_cases.json (کپی بایت‌به‌بایت از backend/api/workshop_cases.json) + test/workshop_cases_test.dart.
 //
 // فرمول اکسل: R = H − (I+J+K+L+M+N+O)؛ «تراز صحیح» وقتی |R| < ۰٫۰۱ کیلو؛ S = I/H؛ T = F − H.
 // محاسبه روی گرمِ صحیح انجام می‌شود تا مرز ۰٫۰۱ در ممیز شناور جابه‌جا نشود (اختلاف باید *کمتر* از ۱۰ گرم باشد).
@@ -7,7 +7,8 @@
 
 const int kWsTolGrams = 10; // 0.01 kg
 
-const List<String> kWsGrades = <String>['sound', 'deformed_fine', 'hull', 'kernel', 'soil', 'discolored'];
+/// ردیف‌های ثابت UI. فاز ۱ (مجد): چفت (chaft) و دهنبست (dombest) با قیمت فروش جدا.
+const List<String> kWsGrades = <String>['sound', 'deformed_fine', 'hull', 'kernel', 'soil', 'discolored', 'chaft', 'dombest'];
 
 /// مرحلهٔ ۵: «خروجی جدید» (نام آزاد، چند ردیف مجاز). در kWsGrades نیست (۶ ردیف ثابت UI)، اما در تراز/بها/تخصیص شناخته می‌شود.
 const String kWsCustomGrade = 'custom';
@@ -19,8 +20,13 @@ const Map<String, String> kWsGradeLabels = <String, String>{
   'kernel': 'مغز',
   'soil': 'خاک',
   'discolored': 'بدرنگ',
+  'chaft': 'چفت',
+  'dombest': 'دهنبست',
   'custom': 'سایر',
 };
+
+/// درجه‌های غیرسالم (جزو P). آینهٔ PB_WS_SUB_GRADES.
+const List<String> kWsSubGrades = <String>['deformed_fine', 'hull', 'kernel', 'soil', 'discolored', 'chaft', 'dombest', 'custom'];
 
 const List<String> kWsOpTypes = <String>['dehull', 'desoil', 'split', 'fines', 'crack'];
 
@@ -37,12 +43,14 @@ int wsGrams(num? kg) => ((kg ?? 0) * 1000).round();
 class WsBalance {
   final double inputKg;
   final double soundKg;
-  final double wasteKg; // P = J+K+L+M+N+O (شامل افت)
+  final double wasteKg; // P = J+K+L+M+N+چفت+دهنبست+سایر+O (شامل افت)
   final double lossKg;
+  final double? lossPct; // O/H (درصد، ۳ رقم)؛ H=0 ⇒ null
   final double outPlusLossKg; // Q = I+P
   final double diffKg; // R = H−Q
   final double? soundPct; // S (درصد، ۳ رقم اعشار)؛ H=0 ⇒ null
   final double? undeliveredKg; // T = F−H؛ F نامشخص ⇒ null
+  final bool overOutput; // فاز ۱: Σخروجی > ورودی (افت منفی) ⇒ ثبت رد می‌شود
   final bool ok;
 
   const WsBalance({
@@ -50,36 +58,54 @@ class WsBalance {
     required this.soundKg,
     required this.wasteKg,
     required this.lossKg,
+    this.lossPct,
     required this.outPlusLossKg,
     required this.diffKg,
     required this.soundPct,
     required this.undeliveredKg,
+    this.overOutput = false,
     required this.ok,
   });
 
   String get status => ok ? 'ok' : 'check';
-  String get label => ok ? 'تراز صحیح' : 'نیاز به بررسی';
+  String get label => overOutput ? 'جمع خروجی‌ها از ورودی بیشتر است' : (ok ? 'تراز صحیح' : 'نیاز به بررسی');
 }
 
-/// [out] کلیدهای kWsGrades + اختیاری 'custom' (= Σ همهٔ ردیف‌های custom؛ کلید غایب = ۰)؛ [lossKg] = O؛ [initialKg] = F (null = ثبت‌نشده).
-WsBalance wsBalance({required num inputKg, Map<String, num> out = const <String, num>{}, num lossKg = 0, num? initialKg}) {
+/// فاز ۱ (مجد): افت خودکار O = H − Σ خروجی‌ها (گرم صحیح؛ کاربر وارد نمی‌کند). منفی ⇒ خروجی بیش از ورودی. آینهٔ `pb_ws_auto_loss_g`.
+int wsAutoLossGrams({required num inputKg, Map<String, num> out = const <String, num>{}}) {
+  int sum = wsGrams(out['sound']);
+  for (final String k in kWsSubGrades) {
+    sum += wsGrams(out[k]);
+  }
+  return wsGrams(inputKg) - sum;
+}
+
+/// [out] کلیدهای kWsGrades + اختیاری 'custom' (= Σ همهٔ ردیف‌های custom؛ کلید غایب = ۰)؛ [initialKg] = F (null = ثبت‌نشده).
+/// [lossKg] = O؛ فاز ۱: null (پیش‌فرض) ⇒ افت خودکار (wsAutoLossGrams) و R همیشه ۰، مگر Σخروجی > ورودی (overOutput ⇒ ok=false).
+/// مقدار عددی فقط برای داده‌های قدیمی است. آینهٔ `pb_ws_balance`.
+WsBalance wsBalance({required num inputKg, Map<String, num> out = const <String, num>{}, num? lossKg, num? initialKg}) {
   final int h = wsGrams(inputKg);
-  final int o = wsGrams(lossKg);
-  int g(String k) => wsGrams(out[k]);
-  final int sound = g('sound');
-  final int p = g('deformed_fine') + g('hull') + g('kernel') + g('soil') + g('discolored') + g('custom') + o;
+  final int o = lossKg == null ? wsAutoLossGrams(inputKg: inputKg, out: out) : wsGrams(lossKg);
+  final int sound = wsGrams(out['sound']);
+  int p = o;
+  for (final String k in kWsSubGrades) {
+    p += wsGrams(out[k]);
+  }
   final int q = sound + p;
   final int r = h - q;
-  final bool ok = r.abs() < kWsTolGrams;
+  final bool over = o < 0;
+  final bool ok = r.abs() < kWsTolGrams && !over;
   return WsBalance(
     inputKg: h / 1000,
     soundKg: sound / 1000,
     wasteKg: p / 1000,
     lossKg: o / 1000,
+    lossPct: h > 0 ? (o / h * 100 * 1000).round() / 1000 : null,
     outPlusLossKg: q / 1000,
     diffKg: r / 1000,
     soundPct: h > 0 ? (sound / h * 100 * 1000).round() / 1000 : null,
     undeliveredKg: initialKg == null ? null : (wsGrams(initialKg) - h) / 1000,
+    overOutput: over,
     ok: ok,
   );
 }
@@ -94,7 +120,30 @@ const Map<String, String> kWsPriceKeys = <String, String>{
   'kernel': 'price_kernel',
   'soil': 'price_soil',
   'discolored': 'price_discolored',
+  'chaft': 'price_chaft', // فاز ۱
+  'dombest': 'price_dombest', // فاز ۱
 };
+
+/// نتیجهٔ wsInputCost.
+class WsInputCost {
+  final double? buyPerKg; // V؛ Σkg=۰ ⇒ null
+  final String? warning; // 'missing_input_cost'
+  const WsInputCost(this.buyPerKg, this.warning);
+}
+
+/// فاز ۱ (مجد) — V (قیمت ورودی) = Σcost ÷ Σkg لات‌های ورودی (گرد ۴ رقم). ردیف بی‌بها (unit_cost null یا ≤ ۰) ⇒ warning='missing_input_cost'.
+/// [inputs]: ردیف‌های inputs پاسخ workshop.get ({kg, cost, unit_cost}). آینهٔ `pb_ws_input_cost_info`.
+WsInputCost wsInputCost(List<Map<String, Object?>> inputs) {
+  double kg = 0, cost = 0;
+  bool missing = false;
+  for (final Map<String, Object?> r in inputs) {
+    kg += ((r['kg'] as num?) ?? 0).toDouble();
+    cost += ((r['cost'] as num?) ?? 0).toDouble();
+    final num? u = r['unit_cost'] as num?;
+    if (u == null || u <= 0) missing = true;
+  }
+  return WsInputCost(kg > 0 ? (cost / kg * 10000).round() / 10000 : null, missing ? 'missing_input_cost' : null);
+}
 
 double wsR2(double v) {
   final double r = (v * 100).round() / 100;
@@ -109,7 +158,7 @@ class WsCost {
   final double? costPerKgSound; // AH؛ I=0 ⇒ null
   final double soundKg;
   final String? warning; // 'negative_cost'
-  /// بهای هر دسته (۵ کلید استاندارد همیشه؛ 'custom' فقط وقتی ردیف custom هست). مرحلهٔ ۵.
+  /// بهای هر دسته (۷ کلید استاندارد kWsPriceKeys همیشه؛ 'custom' فقط وقتی ردیف custom هست). مرحلهٔ ۵.
   final Map<String, double> subValues;
 
   const WsCost({
@@ -124,7 +173,7 @@ class WsCost {
   });
 }
 
-/// [pr]: buy_per_kg=V, wage_per_kg=X, other_cost=Y (+ قدیمی: price_deformed=AA, price_discolored=AB, price_hull=AC, price_soil=AD, price_kernel=AE؛ غایب = ۰).
+/// [pr]: buy_per_kg=V, wage_per_kg=X, other_cost=Y (+ قدیمی: price_deformed=AA, price_discolored=AB, price_hull=AC, price_soil=AD, price_kernel=AE, price_chaft, price_dombest؛ غایب = ۰).
 /// [outs] (اختیاری، مرحلهٔ ۵): [{grade, kg, price}] به ترتیب ثبت؛ اگر داده شود AF = Σ r2(kg×price) هر ردیف جدا (شامل چند custom) و price_* نادیده است
 /// (آینهٔ `pb_ws_cost`). اگر null ⇒ رفتار قدیمی (قیمت دسته × وزن دسته).
 WsCost wsCost({required num inputKg, Map<String, num> out = const <String, num>{}, Map<String, num> pr = const <String, num>{}, List<Map<String, Object?>>? outs}) {
@@ -563,14 +612,16 @@ CartexResult cartexBuild(List<Map<String, dynamic>> events, {String? from, Strin
 int _wsMinutesCents(Object? v) => (((v is num) ? v : 0) * 100).round();
 double? _wsPct3(int a, int b) => b > 0 ? (a / b * 100 * 1000).round() / 1000 : null;
 
-/// جمع ستون‌های «کنترل ورود و خروج تولید» (کارگاه داخلی)؛ هر ردیف: {initial_kg?, input_kg, loss_kg, sound_kg, deformed_fine_kg, hull_kg, kernel_kg, soil_kg, discolored_kg}.
-/// کلیدها: orders_count, delivered_kg, input_kg, sound_kg, deformed_fine_kg, hull_kg, kernel_kg, soil_kg, discolored_kg, loss_kg, waste_total_kg, diff_kg, undelivered_kg, sound_pct (nullable), check_count.
+/// جمع ستون‌های «کنترل ورود و خروج تولید» (کارگاه داخلی)؛ هر ردیف: {initial_kg?, input_kg, loss_kg, sound_kg, deformed_fine_kg, hull_kg, kernel_kg, soil_kg, discolored_kg, chaft_kg?, dombest_kg?, other_kg?}.
+/// کلیدها: orders_count, delivered_kg, input_kg, sound_kg, deformed_fine_kg, hull_kg, kernel_kg, soil_kg, discolored_kg, chaft_kg, dombest_kg, other_kg, loss_kg, waste_total_kg, diff_kg, undelivered_kg, sound_pct (nullable), check_count.
+/// فاز ۱: چفت، دهنبست و «سایر» (custom) جزو P. آینهٔ `pb_wsum_internal`.
 Map<String, double?> wsumInternal(List<Map<String, dynamic>> rows) {
-  int f = 0, h = 0, i = 0, j = 0, k = 0, l = 0, m = 0, n = 0, o = 0, p = 0, r = 0, t = 0, check = 0;
+  int f = 0, h = 0, i = 0, j = 0, k = 0, l = 0, m = 0, n = 0, c = 0, d = 0, e = 0, o = 0, p = 0, r = 0, t = 0, check = 0;
   for (final Map<String, dynamic> x in rows) {
     final int hh = wsGrams(x['input_kg'] as num?), ii = wsGrams(x['sound_kg'] as num?), jj = wsGrams(x['deformed_fine_kg'] as num?), kk = wsGrams(x['hull_kg'] as num?);
     final int ll = wsGrams(x['kernel_kg'] as num?), mm = wsGrams(x['soil_kg'] as num?), nn = wsGrams(x['discolored_kg'] as num?), oo = wsGrams(x['loss_kg'] as num?);
-    final int pp = jj + kk + ll + mm + nn + oo, rr = hh - (ii + pp);
+    final int cc = wsGrams(x['chaft_kg'] as num?), dd = wsGrams(x['dombest_kg'] as num?), ee = wsGrams(x['other_kg'] as num?);
+    final int pp = jj + kk + ll + mm + nn + cc + dd + ee + oo, rr = hh - (ii + pp);
     final Object? ini = x['initial_kg'];
     if (ini is num) {
       f += wsGrams(ini);
@@ -583,14 +634,18 @@ Map<String, double?> wsumInternal(List<Map<String, dynamic>> rows) {
     l += ll;
     m += mm;
     n += nn;
+    c += cc;
+    d += dd;
+    e += ee;
     o += oo;
     p += pp;
     r += rr;
-    if (!(rr.abs() < 10)) check++;
+    if (!(rr.abs() < 10 && oo >= 0)) check++;
   }
   return <String, double?>{
     'orders_count': rows.length.toDouble(), 'delivered_kg': f / 1000, 'input_kg': h / 1000, 'sound_kg': i / 1000, 'deformed_fine_kg': j / 1000, 'hull_kg': k / 1000,
-    'kernel_kg': l / 1000, 'soil_kg': m / 1000, 'discolored_kg': n / 1000, 'loss_kg': o / 1000, 'waste_total_kg': p / 1000, 'diff_kg': r / 1000,
+    'kernel_kg': l / 1000, 'soil_kg': m / 1000, 'discolored_kg': n / 1000, 'chaft_kg': c / 1000, 'dombest_kg': d / 1000, 'other_kg': e / 1000,
+    'loss_kg': o / 1000, 'waste_total_kg': p / 1000, 'diff_kg': r / 1000,
     'undelivered_kg': t / 1000, 'sound_pct': _wsPct3(i, h), 'check_count': check.toDouble(),
   };
 }
@@ -774,4 +829,143 @@ double? crKgToPct(double? inputKg, double? kg) {
   final int lg = wsGrams(inputKg);
   if (lg <= 0) return null;
   return ((wsGrams(kg) * 100 / lg) * 10000).round() / 10000;
+}
+
+// ───────────────────────── فاز ۲ مجد: «کارگاه مرحله‌ای» ─────────────────────────
+// آینهٔ pb_ws_flow_check / pb_ws_flow_apply / pb_ws_flow_totals (workshop_calc.php). تست مشترک: test/workshop_flow_cases.json + test/workshop_flow_test.dart.
+// open ⇒ (input_add / input_remove / output_save / output_delete) ⇒ close ⇒ done ⇒ reopen ⇒ open.
+// wsFlowApply روی همان شکل پاسخ workshop.get کار می‌کند (status, inputs[], outputs[]) ⇒ نمای آفلاین = پاسخ ذخیره‌شده + اکشن‌های صف.
+
+const String kWsOpen = 'open';
+
+const Map<String, String> kWsFlowErrors = <String, String>{
+  'not_open': 'این عملیات باز نیست؛ ابتدا آن را برای اصلاح باز کنید',
+  'not_done': 'فقط عملیات بسته را می‌توان دوباره باز کرد',
+  'no_input': 'حداقل یک ورودی لازم است',
+  'last_input': 'آخرین ورودی را نمی‌توان برداشت؛ ابتدا ورودی دیگری اضافه کنید',
+  'no_output': 'برای بستن حداقل یک خروجی ثبت کنید',
+  'over_output': 'جمع خروجی‌ها از ورودی بیشتر است',
+  'outputs_used': 'خروجی این عملیات فروخته، مصرف یا منتقل شده است؛ ابتدا آن سند را برگردانید',
+};
+
+/// کد خطای قاعده (کلید kWsFlowErrors) یا null. [inputs]/[outputs] = تعداد ردیف‌ها، [lossG] = افت خودکار به گرم.
+String? wsFlowCheck(String? status, String action, {int inputs = 0, int outputs = 0, int lossG = 0, bool allowEmpty = false, bool used = false}) {
+  switch (action) {
+    case 'input_add':
+    case 'output_save':
+    case 'output_delete':
+      return status == kWsOpen ? null : 'not_open';
+    case 'input_remove':
+      if (status != kWsOpen) return 'not_open';
+      return inputs <= 1 ? 'last_input' : null;
+    case 'close':
+      if (status != kWsOpen) return 'not_open';
+      if (inputs < 1) return 'no_input';
+      if (outputs < 1 && !allowEmpty) return 'no_output';
+      return lossG < 0 ? 'over_output' : null;
+    case 'reopen':
+      if (status != 'done') return 'not_done';
+      return used ? 'outputs_used' : null;
+  }
+  return null;
+}
+
+/// نوار زنده (ورودی / Σخروجی / افت / درصد سالم) از state یا پاسخ workshop.get.
+WsBalance wsFlowTotals(Map<String, dynamic> s) {
+  int inG = 0;
+  final Map<String, int> byG = <String, int>{};
+  for (final dynamic r in (s['inputs'] as List<dynamic>? ?? const <dynamic>[])) {
+    inG += wsGrams((r as Map)['kg'] as num?);
+  }
+  for (final dynamic r in (s['outputs'] as List<dynamic>? ?? const <dynamic>[])) {
+    final String g = '${(r as Map)['grade']}';
+    byG[g] = (byG[g] ?? 0) + wsGrams(r['kg'] as num?);
+  }
+  return wsBalance(inputKg: inG / 1000, out: <String, num>{for (final MapEntry<String, int> e in byG.entries) e.key: e.value / 1000});
+}
+
+/// نتیجهٔ wsFlowApply.
+class WsFlowStep {
+  final Map<String, dynamic> state;
+  final String? error;
+  const WsFlowStep(this.state, this.error);
+}
+
+/// یک اکشن را روی state اعمال می‌کند (کپی؛ ورودی تغییر نمی‌کند). ردیف‌ها با uid شناسایی می‌شوند؛ replay خطا نیست.
+/// ردیف‌های جدید همهٔ فیلدهای payload را دارند (به‌جز order_uid/id) تا نمای آفلاین کامل باشد.
+WsFlowStep wsFlowApply(Map<String, dynamic> s0, String action, Map<String, dynamic> p) {
+  final Map<String, dynamic> s = <String, dynamic>{
+    ...s0,
+    'inputs': <Map<String, dynamic>>[for (final dynamic r in (s0['inputs'] as List<dynamic>? ?? const <dynamic>[])) Map<String, dynamic>.from(r as Map)],
+    'outputs': <Map<String, dynamic>>[for (final dynamic r in (s0['outputs'] as List<dynamic>? ?? const <dynamic>[])) Map<String, dynamic>.from(r as Map)],
+  };
+  final List<Map<String, dynamic>> ins = s['inputs'] as List<Map<String, dynamic>>;
+  final List<Map<String, dynamic>> outs = s['outputs'] as List<Map<String, dynamic>>;
+  final String? status = s['status'] as String?;
+  int find(List<Map<String, dynamic>> rows, Object? uid) => uid == null ? -1 : rows.indexWhere((Map<String, dynamic> r) => r['uid'] == uid);
+  Map<String, dynamic> row(Map<String, dynamic> x) => <String, dynamic>{...x}..remove('order_uid')..remove('id');
+  String? err;
+  switch (action) {
+    case 'open':
+      if (status != null) break;
+      s['status'] = kWsOpen;
+      for (final dynamic it in (p['items'] as List<dynamic>? ?? const <dynamic>[])) {
+        ins.add(Map<String, dynamic>.from(it as Map));
+      }
+      for (final String k in <String>['uid', 'op_type', 'owner', 'pistachio_type', 'defect_note', 'initial_kg', 'bale_count', 'note']) {
+        if (p.containsKey(k)) s[k] = p[k];
+      }
+      s['started_at'] = p['start_date'] ?? p['date'];
+      break;
+    case 'input_add':
+      if (find(ins, p['uid']) >= 0) break;
+      err = wsFlowCheck(status, 'input_add');
+      if (err == null) ins.add(row(p));
+      break;
+    case 'input_remove':
+      final int i = find(ins, p['input_uid']) >= 0
+          ? find(ins, p['input_uid'])
+          : (p['input_id'] == null ? -1 : ins.indexWhere((Map<String, dynamic> r) => r['id'] == p['input_id']));
+      if (i < 0) break;
+      err = wsFlowCheck(status, 'input_remove', inputs: ins.length);
+      if (err == null) ins.removeAt(i);
+      break;
+    case 'output_save':
+      err = wsFlowCheck(status, 'output_save');
+      if (err != null) break;
+      int i = find(outs, p['uid']);
+      if (i < 0 && p['output_id'] != null) i = outs.indexWhere((Map<String, dynamic> r) => r['id'] == p['output_id']);
+      if (i >= 0) {
+        outs[i] = <String, dynamic>{...outs[i], ...row(p)};
+      } else {
+        outs.add(row(p));
+      }
+      break;
+    case 'output_delete':
+      final int i = find(outs, p['uid']) >= 0
+          ? find(outs, p['uid'])
+          : (p['output_id'] == null ? -1 : outs.indexWhere((Map<String, dynamic> r) => r['id'] == p['output_id']));
+      if (i < 0) break;
+      err = wsFlowCheck(status, 'output_delete');
+      if (err == null) outs.removeAt(i);
+      break;
+    case 'close':
+      if (status == 'done') break;
+      final WsBalance t = wsFlowTotals(s);
+      err = wsFlowCheck(status, 'close', inputs: ins.length, outputs: outs.length, lossG: wsGrams(t.lossKg));
+      if (err == null) {
+        s['status'] = 'done';
+        if (p['end_date'] != null) s['closed_at'] = p['end_date'];
+      }
+      break;
+    case 'reopen':
+      if (status == kWsOpen) break;
+      err = wsFlowCheck(status, 'reopen', used: s['used'] == true);
+      if (err == null) {
+        s['status'] = kWsOpen;
+        s['closed_at'] = null;
+      }
+      break;
+  }
+  return WsFlowStep(s, err);
 }

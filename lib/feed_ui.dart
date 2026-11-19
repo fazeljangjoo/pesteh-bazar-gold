@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'edit_guard_ui.dart'; // فاز ۳: ویرایش امن
 import 'perms.dart';
 import 'returns_ui.dart' show ReturnsHelp;
 import 'utils.dart';
@@ -105,6 +106,21 @@ class _FeedStockScreenState extends State<FeedStockScreen> {
     }
   }
 
+  /// فاز ۳: ویرایش تعدیل دستی (feed.adjust_update؛ نمای جدا، بدون اثر بر موجودی انبار ⇒ همهٔ فیلدها قابل ویرایش).
+  Future<void> _edit(Map<String, dynamic> r) async {
+    final bool out = r['kind'] == 'out';
+    final Map<String, dynamic>? v = await showEditDocDialog(context, 'ویرایش تعدیل دستی', <EditField>[
+      EditField('date', 'تاریخ', r['date'], kind: EditKind.date),
+      EditField('kind', 'نوع', r['kind'], options: const <String, String>{'in': 'ورود (ارسال به کارگاه)', 'out': 'خروج (برگشت از کارگاه)'}),
+      EditField('kg', 'وزن (کیلو)', ReturnsHelp.d(out ? r['returned_kg'] : r['sent_kg']), kind: EditKind.number),
+      EditField('workshop', 'کارگاه', r['workshop']),
+      EditField('owner', 'مالک', r['owner']),
+      EditField('reason', 'دلیل تعدیل', r['reason']),
+    ]);
+    if (v == null || !mounted) return;
+    if (await submitDocEdit(context, 'feed.adjust_update', <String, dynamic>{'id': r['id'], ...v}, baseVersion: r['edit_version']) != null) await _load();
+  }
+
   Future<void> _addAdjust() async {
     final bool? ok = await showModalBottomSheet<bool>(
       context: context,
@@ -205,14 +221,17 @@ class _FeedStockScreenState extends State<FeedStockScreen> {
               ),
             if (_canManage && adjusts.isNotEmpty) ...<Widget>[
               const SizedBox(height: 12),
-              const Text('تعدیل‌های دستی (قابل حذف)', style: TextStyle(fontWeight: FontWeight.bold)),
+              const Text('تعدیل‌های دستی (قابل ویرایش و حذف)', style: TextStyle(fontWeight: FontWeight.bold)),
               for (final Map<String, dynamic> r in adjusts)
                 Card(
                   child: ListTile(
                     dense: true,
                     title: Text('${r['kind'] == 'out' ? 'خروج' : 'ورود'} ${_fkg(r['kind'] == 'out' ? r['returned_kg'] : r['sent_kg'])} کیلو · ${r['workshop'] ?? '—'} · ${r['owner'] ?? '—'}'),
                     subtitle: Text('${r['date'] == null ? '' : jalaliDate('${r['date']}')} · ${r['reason'] ?? ''}'),
-                    trailing: IconButton(tooltip: 'حذف', icon: const Icon(Icons.delete_outline), onPressed: () => _delete(r)),
+                    trailing: Row(mainAxisSize: MainAxisSize.min, children: <Widget>[
+                      IconButton(tooltip: 'ویرایش', icon: const Icon(Icons.edit_outlined), onPressed: () => _edit(r)),
+                      IconButton(tooltip: 'حذف', icon: const Icon(Icons.delete_outline), onPressed: () => _delete(r)),
+                    ]),
                   ),
                 ),
             ],

@@ -1,3 +1,4 @@
+import 'edit_guard_ui.dart'; // فاز ۳: ویرایش امن
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -435,6 +436,47 @@ class _OrchardDetailScreenState extends State<OrchardDetailScreen> {
     }
   }
 
+  /// فاز ۳: ویرایش برداشت (harvests.update). فصل تسهیم‌شده ⇒ وزن‌ها قفل؛ لات مصرف‌شده را سرور با نام سند رد می‌کند.
+  Future<void> _editHarvest(Map<String, dynamic> h, bool allocated) async {
+    final Map<String, dynamic>? v = await showEditDocDialog(
+      context,
+      'ویرایش برداشت ${h['code'] ?? ''}',
+      <EditField>[
+        EditField('date', 'تاریخ', h['date'], kind: EditKind.date),
+        EditField('wet_kg', 'وزن تر (کیلو)', h['wet_kg'], kind: EditKind.number, locked: allocated),
+        EditField('dry_kg', 'وزن خشک (کیلو)', h['dry_kg'], kind: EditKind.number, locked: allocated),
+        EditField('note', 'یادداشت', h['note']),
+      ],
+      lockReason: 'چون هزینه‌های این فصل تسهیم شده، وزن قابل تغییر نیست',
+    );
+    if (v == null || !mounted) return;
+    if (await submitDocEdit(context, 'harvests.update', <String, dynamic>{'id': h['id'], ...v}, baseVersion: h['edit_version']) != null) {
+      _changed = true;
+      _load();
+    }
+  }
+
+  /// فاز ۳: ویرایش هزینهٔ فصلی (orchard_costs.update). فصل تسهیم‌شده ⇒ دسته و مبلغ قفل.
+  Future<void> _editCost(Map<String, dynamic> c, bool allocated) async {
+    final Map<String, dynamic>? v = await showEditDocDialog(
+      context,
+      'ویرایش هزینه',
+      <EditField>[
+        EditField('category', 'دسته', c['category'], options: _catLabels, locked: allocated),
+        EditField('amount', 'مبلغ (${Fmt.unitLabel()})', c['amount'], kind: EditKind.number, locked: allocated),
+        EditField('date', 'تاریخ', c['date'], kind: EditKind.date),
+        EditField('party', 'طرف حساب', c['party']),
+        EditField('note', 'یادداشت', c['note']),
+      ],
+      lockReason: 'چون هزینه‌های این فصل تسهیم شده، دسته و مبلغ قابل تغییر نیست',
+    );
+    if (v == null || !mounted) return;
+    if (await submitDocEdit(context, 'orchard_costs.update', <String, dynamic>{'id': c['id'], ...v}, baseVersion: c['edit_version']) != null) {
+      _changed = true;
+      _load();
+    }
+  }
+
   Future<void> _addHarvest() async {
     final List<WhOption> whs = await StockLookup.warehouses();
     if (!mounted) return;
@@ -625,6 +667,14 @@ class _OrchardDetailScreenState extends State<OrchardDetailScreen> {
               ]),
             if (s['allocation'] is Map && (s['allocation'] as Map)['id'] != null)
               VoucherLinkButton(sourceType: 'orch_alloc', sourceId: '${(s['allocation'] as Map)['id']}', label: 'سند تسهیم'),
+            for (final Map<String, dynamic> c in ReturnsHelp.maps(s['cost_rows']))
+              ListTile(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: Text('${_catLabels[c['category']] ?? c['category']}  •  ${_money(c['amount'])}  •  ${jalaliDate('${c['date']}')}'),
+                subtitle: '${c['party'] ?? ''}${c['note'] ?? ''}'.isEmpty ? null : Text('${c['party'] ?? ''} ${c['note'] ?? ''}'.trim()),
+                trailing: canManage ? IconButton(tooltip: 'ویرایش هزینه', icon: const Icon(Icons.edit_outlined), onPressed: () => _editCost(c, allocated)) : null,
+              ),
             const Divider(),
             for (final Map<String, dynamic> h in ReturnsHelp.maps(s['harvests']))
               ListTile(
@@ -633,6 +683,7 @@ class _OrchardDetailScreenState extends State<OrchardDetailScreen> {
                 title: Text('${h['code'] ?? ''}  •  ${jalaliDate('${h['date']}')}'),
                 subtitle: Text('تر ${_kg(h['wet_kg'])} • خشک ${_kg(h['dry_kg'])} کیلو'
                     '${h['cost'] != null ? ' • بهای ${_money(h['cost'])}' : ''}'),
+                trailing: canManage ? IconButton(tooltip: 'ویرایش برداشت', icon: const Icon(Icons.edit_outlined), onPressed: () => _editHarvest(h, allocated)) : null,
               ),
             if (canManage && !allocated)
               Align(

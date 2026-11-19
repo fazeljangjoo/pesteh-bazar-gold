@@ -1,0 +1,472 @@
+{
+ "_doc": "کیس‌های مشترک کارگاه داخلی (تراز + بها). فاز ۱ مجد: افت = ورودی − Σخروجی (خودکار؛ payload_loss_kg نادیده) · V = Σcost÷Σkg لات‌های ورودی (input_lots؛ اگر هست prices.buy_per_kg از آن ساخته می‌شود) · چفت/دهنبست جزو P با قیمت جدا. outs به ترتیب ثبت (price=قیمت هر کیلوی ردیف؛ null برای سالم). مبالغ گرد ۲رقم؛ cost_per_kg_sound و buy_per_kg گرد ۴رقم؛ درصدها ۳ رقم. کلیدهای expect که غایب‌اند بررسی نمی‌شوند (کیس بدون prices ⇒ فقط تراز). tol=1e-6. کپی بایت‌به‌بایت: backend/api/workshop_cases.json ↔ test/workshop_cases.json (هر دو پروژهٔ Flutter). PHP: php backend/api/workshop_selftest.php؛ Dart: flutter test test/workshop_cases_test.dart.",
+ "cases": [
+  {
+   "name": "no_custom",
+   "input_kg": 100,
+   "prices": {
+    "buy_per_kg": 100000,
+    "wage_per_kg": 2000,
+    "other_cost": 50000
+   },
+   "legacy_same": true,
+   "outs": [
+    {
+     "grade": "sound",
+     "kg": 80,
+     "price": null
+    },
+    {
+     "grade": "deformed_fine",
+     "kg": 5,
+     "price": 30000
+    },
+    {
+     "grade": "hull",
+     "kg": 6,
+     "price": 1000
+    },
+    {
+     "grade": "kernel",
+     "kg": 3,
+     "price": 200000
+    },
+    {
+     "grade": "soil",
+     "kg": 1,
+     "price": 0
+    }
+   ],
+   "expect": {
+    "balance_ok": true,
+    "over_output": false,
+    "diff_kg": 0.0,
+    "loss_kg": 5.0,
+    "loss_pct": 5.0,
+    "value_in": 10000000.0,
+    "cost_total": 250000.0,
+    "recovery_value": 756000.0,
+    "cost_sound": 9494000.0,
+    "cost_per_kg_sound": 118675.0,
+    "warning": null,
+    "lots": [
+     9494000.0,
+     150000.0,
+     6000.0,
+     600000.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "one_custom",
+   "input_kg": 100,
+   "prices": {
+    "buy_per_kg": 100000,
+    "wage_per_kg": 2000,
+    "other_cost": 50000
+   },
+   "outs": [
+    {
+     "grade": "sound",
+     "kg": 75,
+     "price": null
+    },
+    {
+     "grade": "deformed_fine",
+     "kg": 5,
+     "price": 30000
+    },
+    {
+     "grade": "hull",
+     "kg": 6,
+     "price": 1000
+    },
+    {
+     "grade": "kernel",
+     "kg": 3,
+     "price": 200000
+    },
+    {
+     "grade": "soil",
+     "kg": 1,
+     "price": 0
+    },
+    {
+     "grade": "custom",
+     "kg": 4,
+     "price": 15000
+    }
+   ],
+   "expect": {
+    "balance_ok": true,
+    "over_output": false,
+    "diff_kg": 0.0,
+    "loss_kg": 6.0,
+    "loss_pct": 6.0,
+    "value_in": 10000000.0,
+    "cost_total": 250000.0,
+    "recovery_value": 816000.0,
+    "cost_sound": 9434000.0,
+    "cost_per_kg_sound": 125786.6667,
+    "warning": null,
+    "lots": [
+     9434000.0,
+     150000.0,
+     6000.0,
+     600000.0,
+     0.0,
+     60000.0
+    ]
+   }
+  },
+  {
+   "name": "two_custom",
+   "input_kg": 100,
+   "prices": {
+    "buy_per_kg": 100000,
+    "wage_per_kg": 2000,
+    "other_cost": 50000
+   },
+   "outs": [
+    {
+     "grade": "sound",
+     "kg": 70,
+     "price": null
+    },
+    {
+     "grade": "deformed_fine",
+     "kg": 5,
+     "price": 30000
+    },
+    {
+     "grade": "hull",
+     "kg": 6,
+     "price": 1000
+    },
+    {
+     "grade": "kernel",
+     "kg": 3,
+     "price": 200000
+    },
+    {
+     "grade": "custom",
+     "kg": 4,
+     "price": 15000
+    },
+    {
+     "grade": "custom",
+     "kg": 2.5,
+     "price": 40000
+    }
+   ],
+   "expect": {
+    "balance_ok": true,
+    "over_output": false,
+    "diff_kg": 0.0,
+    "loss_kg": 9.5,
+    "loss_pct": 9.5,
+    "value_in": 10000000.0,
+    "cost_total": 250000.0,
+    "recovery_value": 916000.0,
+    "cost_sound": 9334000.0,
+    "cost_per_kg_sound": 133342.8571,
+    "warning": null,
+    "lots": [
+     9334000.0,
+     150000.0,
+     6000.0,
+     600000.0,
+     60000.0,
+     100000.0
+    ]
+   }
+  },
+  {
+   "name": "negative_cost",
+   "input_kg": 10,
+   "prices": {
+    "buy_per_kg": 1000,
+    "wage_per_kg": 0,
+    "other_cost": 0
+   },
+   "outs": [
+    {
+     "grade": "sound",
+     "kg": 5,
+     "price": null
+    },
+    {
+     "grade": "kernel",
+     "kg": 5,
+     "price": 5000
+    }
+   ],
+   "expect": {
+    "balance_ok": true,
+    "over_output": false,
+    "diff_kg": 0.0,
+    "loss_kg": 0.0,
+    "loss_pct": 0.0,
+    "value_in": 10000.0,
+    "cost_total": 0.0,
+    "recovery_value": 25000.0,
+    "cost_sound": -15000.0,
+    "cost_per_kg_sound": -3000.0,
+    "warning": "negative_cost",
+    "lots": [
+     -15000.0,
+     25000.0
+    ]
+   }
+  },
+  {
+   "name": "zero_weight_custom",
+   "input_kg": 10,
+   "prices": {
+    "buy_per_kg": 1000,
+    "wage_per_kg": 0,
+    "other_cost": 0
+   },
+   "outs": [
+    {
+     "grade": "sound",
+     "kg": 10,
+     "price": null
+    },
+    {
+     "grade": "custom",
+     "kg": 0,
+     "price": 99999
+    }
+   ],
+   "expect": {
+    "balance_ok": true,
+    "over_output": false,
+    "diff_kg": 0.0,
+    "loss_kg": 0.0,
+    "loss_pct": 0.0,
+    "value_in": 10000.0,
+    "cost_total": 0.0,
+    "recovery_value": 0.0,
+    "cost_sound": 10000.0,
+    "cost_per_kg_sound": 1000.0,
+    "warning": null,
+    "lots": [
+     10000.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "zero_sound",
+   "input_kg": 10,
+   "prices": {
+    "buy_per_kg": 1000,
+    "wage_per_kg": 0,
+    "other_cost": 0
+   },
+   "outs": [
+    {
+     "grade": "kernel",
+     "kg": 10,
+     "price": 1000
+    }
+   ],
+   "expect": {
+    "balance_ok": true,
+    "over_output": false,
+    "diff_kg": 0.0,
+    "loss_kg": 0.0,
+    "loss_pct": 0.0,
+    "value_in": 10000.0,
+    "cost_total": 0.0,
+    "recovery_value": 10000.0,
+    "cost_sound": 0.0,
+    "cost_per_kg_sound": null,
+    "warning": null,
+    "lots": [
+     10000.0
+    ]
+   }
+  },
+  {
+   "name": "chaft_dombest_majd",
+   "input_kg": 1000,
+   "initial_kg": 1010,
+   "input_lots": [
+    {
+     "kg": 600,
+     "cost": 60000000,
+     "unit_cost": 100000
+    },
+    {
+     "kg": 400,
+     "cost": 44000000,
+     "unit_cost": 110000
+    }
+   ],
+   "prices": {
+    "wage_per_kg": 3000,
+    "other_cost": 200000
+   },
+   "legacy_same": true,
+   "outs": [
+    {
+     "grade": "sound",
+     "kg": 800,
+     "price": null
+    },
+    {
+     "grade": "chaft",
+     "kg": 60,
+     "price": 70000
+    },
+    {
+     "grade": "dombest",
+     "kg": 40,
+     "price": 90000
+    },
+    {
+     "grade": "hull",
+     "kg": 50,
+     "price": 2000
+    },
+    {
+     "grade": "kernel",
+     "kg": 20,
+     "price": 250000
+    },
+    {
+     "grade": "soil",
+     "kg": 10,
+     "price": 0
+    }
+   ],
+   "expect": {
+    "balance_ok": true,
+    "over_output": false,
+    "diff_kg": 0.0,
+    "loss_kg": 20.0,
+    "loss_pct": 2.0,
+    "sound_pct": 80.0,
+    "undelivered_kg": 10.0,
+    "buy_per_kg": 104000.0,
+    "input_cost_warning": null,
+    "value_in": 104000000.0,
+    "cost_total": 3200000.0,
+    "recovery_value": 12900000.0,
+    "cost_sound": 94300000.0,
+    "cost_per_kg_sound": 117875.0,
+    "warning": null,
+    "lots": [
+     94300000.0,
+     4200000.0,
+     3600000.0,
+     100000.0,
+     5000000.0,
+     0.0
+    ]
+   }
+  },
+  {
+   "name": "auto_loss_ignores_payload",
+   "input_kg": 50.001,
+   "payload_loss_kg": 3,
+   "outs": [
+    {
+     "grade": "sound",
+     "kg": 45.5,
+     "price": null
+    },
+    {
+     "grade": "hull",
+     "kg": 2.25,
+     "price": null
+    }
+   ],
+   "expect": {
+    "balance_ok": true,
+    "over_output": false,
+    "diff_kg": 0.0,
+    "loss_kg": 2.251,
+    "loss_pct": 4.502
+   }
+  },
+  {
+   "name": "over_output",
+   "input_kg": 10,
+   "outs": [
+    {
+     "grade": "sound",
+     "kg": 9,
+     "price": null
+    },
+    {
+     "grade": "hull",
+     "kg": 1.5,
+     "price": null
+    }
+   ],
+   "expect": {
+    "balance_ok": false,
+    "over_output": true,
+    "diff_kg": 0.0,
+    "loss_kg": -0.5,
+    "loss_pct": -5.0,
+    "label": "جمع خروجی‌ها از ورودی بیشتر است"
+   }
+  },
+  {
+   "name": "missing_input_cost",
+   "input_kg": 100,
+   "input_lots": [
+    {
+     "kg": 60,
+     "cost": 6000000,
+     "unit_cost": 100000
+    },
+    {
+     "kg": 40,
+     "cost": null,
+     "unit_cost": null
+    }
+   ],
+   "prices": {
+    "wage_per_kg": 0,
+    "other_cost": 0
+   },
+   "outs": [
+    {
+     "grade": "sound",
+     "kg": 90,
+     "price": null
+    },
+    {
+     "grade": "hull",
+     "kg": 10,
+     "price": 1000
+    }
+   ],
+   "expect": {
+    "balance_ok": true,
+    "over_output": false,
+    "diff_kg": 0.0,
+    "loss_kg": 0.0,
+    "loss_pct": 0.0,
+    "buy_per_kg": 60000.0,
+    "input_cost_warning": "missing_input_cost",
+    "value_in": 6000000.0,
+    "cost_total": 0.0,
+    "recovery_value": 10000.0,
+    "cost_sound": 5990000.0,
+    "cost_per_kg_sound": 66555.5556,
+    "warning": null,
+    "lots": [
+     5990000.0,
+     10000.0
+    ]
+   }
+  }
+ ]
+}

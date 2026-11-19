@@ -53,6 +53,10 @@ class OfflineDocs {
           return await _deleteReturn(true, p);
         case 'purchase_returns.delete':
           return await _deleteReturn(false, p);
+        case 'sale_returns.update': // فاز ۳: ویرایش اتمی (همان شماره و uid)
+          return await _createReturn(true, p, editId: await AppDb.I.currentId('sret', _i(p['id'])));
+        case 'purchase_returns.update':
+          return await _createReturn(false, p, editId: await AppDb.I.currentId('pret', _i(p['id'])));
         case 'sale_returns.list':
           return await _listReturns(true, p);
         case 'purchase_returns.list':
@@ -87,14 +91,24 @@ class OfflineDocs {
   }
 
   // ======================= returns =======================
-  static Future<Map<String, dynamic>> _createReturn(bool isSale, Map<String, dynamic> p) async {
+  /// ثبت برگشت؛ با [editId] ⇒ ویرایش اتمی (فاز ۳): اثر اقلام قبلی برمی‌گردد و اقلام تازه اعمال می‌شوند، همان id/uid/شماره.
+  /// سند همگام‌شده ⇒ `*.update` در صف؛ هنوز همگام‌نشده ⇒ همان «ثبت» در صف با دادهٔ تازه جایگزین می‌شود.
+  static Future<Map<String, dynamic>> _createReturn(bool isSale, Map<String, dynamic> p, {int? editId}) async {
     final String tbl = isSale ? 'sale_returns' : 'purchase_returns';
     final String itbl = isSale ? 'sale_return_items' : 'purchase_return_items';
     final String kind = isSale ? 'sret' : 'pret';
     final Database d = await AppDb.I.db;
-    final String uid = _uid(p['uid'], 'r');
-    final List<Map<String, Object?>> dup = await d.query(tbl, columns: <String>['id', 'number'], where: 'uid=?', whereArgs: <Object?>[uid], limit: 1);
-    if (dup.isNotEmpty) return <String, dynamic>{'id': _i(dup.first['id']), 'number': _i(dup.first['number'])};
+    String uid = _uid(p['uid'], 'r');
+    Map<String, Object?>? old;
+    if (editId != null) {
+      final List<Map<String, Object?>> o = await d.query(tbl, where: 'id=?', whereArgs: <Object?>[editId], limit: 1);
+      if (o.isEmpty) throw StockApiException('برگشت یافت نشد');
+      old = o.first;
+      uid = '${old['uid']}';
+    } else {
+      final List<Map<String, Object?>> dup = await d.query(tbl, columns: <String>['id', 'number'], where: 'uid=?', whereArgs: <Object?>[uid], limit: 1);
+      if (dup.isNotEmpty) return <String, dynamic>{'id': _i(dup.first['id']), 'number': _i(dup.first['number'])};
+    }
     final String date = _date(p['date']);
     final String? note = _s(p['note'], 500);
     final List<String> modes = isSale ? _saleModes : _purModes;
@@ -120,6 +134,22 @@ class OfflineDocs {
     late int number;
     await AppDb.I.docWrite((Database d) async {
       await d.transaction((Transaction t) async {
+        if (editId != null) {
+          // فاز ۳: اثر اقلام قبلی برمی‌گردد (همان قواعد حذف: کالای برگشتی که دوباره مصرف شده ⇒ رد)
+          for (final Map<String, Object?> it in await t.query(itbl, where: 'return_id=?', whereArgs: <Object?>[editId])) {
+            final int lot = _i(it['lot_id']);
+            final double kg = _d(it['kg']);
+            if (isSale) {
+              final List<Map<String, Object?>> pu = await t.query('purchases', columns: <String>['remaining'], where: 'id=?', whereArgs: <Object?>[lot], limit: 1);
+              if (pu.isNotEmpty && kg - _d(pu.first['remaining']) > 1e-6) {
+                throw StockApiException('کالای این برگشت دوباره فروخته/مصرف شده؛ فقط توضیح و تاریخ قابل ویرایش است');
+              }
+            }
+            final double sgn = isSale ? -1 : 1;
+            await AppDb.I.docStock(t, lot, sgn * kg, sgn * _d(it['small_sacks']), sgn * _d(it['large_sacks']));
+          }
+          await t.delete(itbl, where: 'return_id=?', whereArgs: <Object?>[editId]);
+        }
         String? party;
         int idx = -1;
         final List<Map<String, dynamic>> lines = <Map<String, dynamic>>[];
@@ -211,14 +241,22 @@ class OfflineDocs {
             chequeDue = cd.isEmpty ? null : _date(cd);
           }
         }
-        final List<Map<String, Object?>> mx = await t.rawQuery('SELECT COALESCE(MAX(number),0)+1 AS n FROM $tbl');
-        number = _i(mx.first['n']);
-        rid = await AppDb.I.docTempId(t, tbl);
-        await t.insert(tbl, <String, Object?>{
-          'id': rid, 'uid': uid, 'number': number, 'party': party, 'date': date, 'refund_mode': mode,
-          'refund_amount': refund, 'cheque_no': chequeNo, 'cheque_due': chequeDue, 'note': note,
-          'created_at': date,
-        });
+        if (editId != null) {
+          rid = editId;
+          number = _i(old!['number']);
+          await t.update(tbl, <String, Object?>{
+            'party': party, 'date': date, 'refund_mode': mode, 'refund_amount': refund, 'cheque_no': chequeNo, 'cheque_due': chequeDue, 'note': note,
+          }, where: 'id=?', whereArgs: <Object?>[rid]);
+        } else {
+          final List<Map<String, Object?>> mx = await t.rawQuery('SELECT COALESCE(MAX(number),0)+1 AS n FROM $tbl');
+          number = _i(mx.first['n']);
+          rid = await AppDb.I.docTempId(t, tbl);
+          await t.insert(tbl, <String, Object?>{
+            'id': rid, 'uid': uid, 'number': number, 'party': party, 'date': date, 'refund_mode': mode,
+            'refund_amount': refund, 'cheque_no': chequeNo, 'cheque_due': chequeDue, 'note': note,
+            'created_at': date,
+          });
+        }
         final List<Map<String, dynamic>> payItems = <Map<String, dynamic>>[];
         for (final Map<String, dynamic> l in lines) {
           final int iid = await AppDb.I.docTempId(t, itbl);
@@ -233,13 +271,20 @@ class OfflineDocs {
             'small_sacks': l['small'], 'large_sacks': l['large'], 'unit_price': l['price'],
           });
         }
-        await AppDb.I.docEnqueue(t, '$tbl.create', <String, dynamic>{
+        final Map<String, dynamic> body = <String, dynamic>{
           'uid': uid, 'date': date, 'note': note, 'refund_mode': mode,
           if (mode != modes.first) 'refund_amount': refund,
           if (chequeNo != null) 'cheque_no': chequeNo,
           if (chequeDue != null) 'cheque_due': chequeDue,
           'items': payItems,
-        }, refKind: kind, refId: rid, mapKind: kind, localId: rid);
+        };
+        if (editId != null && await AppDb.I.hasServerCopy(t, kind, rid)) {
+          await AppDb.I.docEnqueue(t, '$tbl.update', <String, dynamic>{'id': rid, ...body,
+            if (p['base_version'] != null) 'base_version': p['base_version']}, refKind: kind, refId: rid);
+        } else {
+          if (editId != null) await AppDb.I.docPurgeOps(t, kind, rid); // «ثبت» هنوز نرفته ⇒ با دادهٔ تازه جایگزین
+          await AppDb.I.docEnqueue(t, '$tbl.create', body, refKind: kind, refId: rid, mapKind: kind, localId: rid);
+        }
       });
     });
     AppDb.I.version.value++;

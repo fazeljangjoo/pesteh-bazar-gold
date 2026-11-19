@@ -1,0 +1,457 @@
+{
+ "_doc": "کیس‌های مشترک «کارگاه مرحله‌ای» (فاز ۲ مجد). هر سناریو: گام‌ها به ترتیب صف آفلاین؛ state از گام قبل ادامه می‌یابد. set (اختیاری) قبل از اکشن روی state اعمال می‌شود (used=true یعنی یکی از لات‌های خروجی مصرف شده). expect.error = کد قاعده (PB_WS_FLOW_ERRORS / kWsFlowErrors) یا null؛ بقیهٔ کلیدهای expect (status، تعداد ورودی/خروجی، جمع‌ها) فقط اگر حاضر باشند بررسی می‌شوند. replay (ردیف/وضعیت تکراری) خطا نیست. cartex_open: گروه «در کارگاه» کارتکس لات برای عملیات باز. کپی بایت‌به‌بایت: backend/api/workshop_flow_cases.json ↔ test/ هر دو پروژهٔ Flutter. PHP: php workshop_flow_selftest.php · Dart: flutter test test/workshop_flow_test.dart",
+ "scenarios": [
+  {
+   "name": "majd_open_close_reopen",
+   "steps": [
+    {
+     "action": "open",
+     "payload": {
+      "uid": "o-1",
+      "op_type": "dehull",
+      "items": [
+       {
+        "uid": "i1",
+        "purchase_id": 11,
+        "kg": 600
+       }
+      ]
+     },
+     "expect": {
+      "error": null,
+      "status": "open",
+      "inputs": 1,
+      "outputs": 0,
+      "input_kg": 600.0,
+      "output_kg": 0.0,
+      "loss_kg": 600.0,
+      "loss_pct": 100.0,
+      "sound_pct": 0.0,
+      "over_output": false
+     }
+    },
+    {
+     "action": "output_save",
+     "payload": {
+      "order_uid": "o-1",
+      "uid": "x1",
+      "grade": "sound",
+      "kg": 300
+     },
+     "expect": {
+      "error": null,
+      "status": "open",
+      "outputs": 1,
+      "input_kg": 600.0,
+      "output_kg": 300.0,
+      "loss_kg": 300.0,
+      "loss_pct": 50.0,
+      "sound_pct": 50.0
+     }
+    },
+    {
+     "action": "output_save",
+     "payload": {
+      "order_uid": "o-1",
+      "uid": "x2",
+      "grade": "chaft",
+      "kg": 40
+     },
+     "expect": {
+      "error": null,
+      "outputs": 2,
+      "output_kg": 340.0,
+      "loss_kg": 260.0
+     }
+    },
+    {
+     "action": "input_add",
+     "payload": {
+      "order_uid": "o-1",
+      "uid": "i2",
+      "purchase_id": 12,
+      "kg": 400
+     },
+     "expect": {
+      "error": null,
+      "inputs": 2,
+      "input_kg": 1000.0,
+      "output_kg": 340.0,
+      "loss_kg": 660.0,
+      "loss_pct": 66.0,
+      "sound_pct": 30.0
+     }
+    },
+    {
+     "action": "input_add",
+     "payload": {
+      "order_uid": "o-1",
+      "uid": "i2",
+      "purchase_id": 12,
+      "kg": 400
+     },
+     "expect": {
+      "error": null,
+      "inputs": 2,
+      "input_kg": 1000.0
+     }
+    },
+    {
+     "action": "output_save",
+     "payload": {
+      "order_uid": "o-1",
+      "uid": "x1",
+      "grade": "sound",
+      "kg": 800
+     },
+     "expect": {
+      "error": null,
+      "outputs": 2,
+      "output_kg": 840.0,
+      "loss_kg": 160.0,
+      "loss_pct": 16.0,
+      "sound_pct": 80.0
+     }
+    },
+    {
+     "action": "output_save",
+     "payload": {
+      "order_uid": "o-1",
+      "uid": "x3",
+      "grade": "dombest",
+      "kg": 150
+     },
+     "expect": {
+      "error": null,
+      "outputs": 3,
+      "output_kg": 990.0,
+      "loss_kg": 10.0,
+      "loss_pct": 1.0
+     }
+    },
+    {
+     "action": "output_save",
+     "payload": {
+      "order_uid": "o-1",
+      "uid": "x4",
+      "grade": "hull",
+      "kg": 20
+     },
+     "expect": {
+      "error": null,
+      "outputs": 4,
+      "output_kg": 1010.0,
+      "loss_kg": -10.0,
+      "loss_pct": -1.0,
+      "over_output": true
+     }
+    },
+    {
+     "action": "close",
+     "payload": {
+      "order_uid": "o-1"
+     },
+     "expect": {
+      "error": "over_output",
+      "status": "open"
+     }
+    },
+    {
+     "action": "output_delete",
+     "payload": {
+      "order_uid": "o-1",
+      "uid": "x4"
+     },
+     "expect": {
+      "error": null,
+      "outputs": 3,
+      "output_kg": 990.0,
+      "loss_kg": 10.0,
+      "over_output": false
+     }
+    },
+    {
+     "action": "close",
+     "payload": {
+      "order_uid": "o-1",
+      "end_date": "2026-11-20"
+     },
+     "expect": {
+      "error": null,
+      "status": "done",
+      "loss_kg": 10.0
+     }
+    },
+    {
+     "action": "output_save",
+     "payload": {
+      "order_uid": "o-1",
+      "uid": "x5",
+      "grade": "soil",
+      "kg": 1
+     },
+     "expect": {
+      "error": "not_open",
+      "status": "done",
+      "outputs": 3
+     }
+    },
+    {
+     "action": "input_add",
+     "payload": {
+      "order_uid": "o-1",
+      "uid": "i3",
+      "purchase_id": 13,
+      "kg": 5
+     },
+     "expect": {
+      "error": "not_open",
+      "inputs": 2
+     }
+    },
+    {
+     "action": "reopen",
+     "payload": {
+      "order_uid": "o-1"
+     },
+     "expect": {
+      "error": null,
+      "status": "open",
+      "outputs": 3,
+      "input_kg": 1000.0,
+      "output_kg": 990.0
+     }
+    },
+    {
+     "action": "output_save",
+     "payload": {
+      "order_uid": "o-1",
+      "uid": "x3",
+      "grade": "dombest",
+      "kg": 140
+     },
+     "expect": {
+      "error": null,
+      "outputs": 3,
+      "output_kg": 980.0,
+      "loss_kg": 20.0,
+      "loss_pct": 2.0
+     }
+    },
+    {
+     "action": "close",
+     "payload": {
+      "order_uid": "o-1",
+      "end_date": "2026-11-21"
+     },
+     "expect": {
+      "error": null,
+      "status": "done"
+     }
+    },
+    {
+     "action": "close",
+     "payload": {
+      "order_uid": "o-1"
+     },
+     "expect": {
+      "error": null,
+      "status": "done"
+     }
+    },
+    {
+     "action": "reopen",
+     "payload": {
+      "order_uid": "o-1"
+     },
+     "set": {
+      "used": true
+     },
+     "expect": {
+      "error": "outputs_used",
+      "status": "done"
+     }
+    }
+   ]
+  },
+  {
+   "name": "edge_rules",
+   "steps": [
+    {
+     "action": "reopen",
+     "payload": {
+      "order_uid": "o-2"
+     },
+     "expect": {
+      "error": "not_done"
+     }
+    },
+    {
+     "action": "open",
+     "payload": {
+      "uid": "o-2",
+      "op_type": "desoil",
+      "items": [
+       {
+        "uid": "j1",
+        "purchase_id": 21,
+        "kg": 10
+       }
+      ]
+     },
+     "expect": {
+      "error": null,
+      "status": "open",
+      "inputs": 1
+     }
+    },
+    {
+     "action": "input_remove",
+     "payload": {
+      "order_uid": "o-2",
+      "input_uid": "j1"
+     },
+     "expect": {
+      "error": "last_input",
+      "inputs": 1
+     }
+    },
+    {
+     "action": "close",
+     "payload": {
+      "order_uid": "o-2"
+     },
+     "expect": {
+      "error": "no_output",
+      "status": "open"
+     }
+    },
+    {
+     "action": "input_add",
+     "payload": {
+      "order_uid": "o-2",
+      "uid": "j2",
+      "purchase_id": 22,
+      "kg": 5
+     },
+     "expect": {
+      "error": null,
+      "inputs": 2,
+      "input_kg": 15.0
+     }
+    },
+    {
+     "action": "input_remove",
+     "payload": {
+      "order_uid": "o-2",
+      "input_uid": "j1"
+     },
+     "expect": {
+      "error": null,
+      "inputs": 1,
+      "input_kg": 5.0
+     }
+    },
+    {
+     "action": "input_remove",
+     "payload": {
+      "order_uid": "o-2",
+      "input_uid": "j1"
+     },
+     "expect": {
+      "error": null,
+      "inputs": 1,
+      "input_kg": 5.0
+     }
+    },
+    {
+     "action": "output_delete",
+     "payload": {
+      "order_uid": "o-2",
+      "uid": "nope"
+     },
+     "expect": {
+      "error": null,
+      "outputs": 0
+     }
+    },
+    {
+     "action": "output_save",
+     "payload": {
+      "order_uid": "o-2",
+      "uid": "y1",
+      "grade": "sound",
+      "kg": 5
+     },
+     "expect": {
+      "error": null,
+      "output_kg": 5.0,
+      "loss_kg": 0.0,
+      "sound_pct": 100.0
+     }
+    },
+    {
+     "action": "close",
+     "payload": {
+      "order_uid": "o-2"
+     },
+     "expect": {
+      "error": null,
+      "status": "done"
+     }
+    },
+    {
+     "action": "reopen",
+     "payload": {
+      "order_uid": "o-2"
+     },
+     "expect": {
+      "error": null,
+      "status": "open"
+     }
+    },
+    {
+     "action": "reopen",
+     "payload": {
+      "order_uid": "o-2"
+     },
+     "expect": {
+      "error": null,
+      "status": "open"
+     }
+    }
+   ]
+  }
+ ],
+ "cartex_open": {
+  "lots": [
+   {
+    "id": 1,
+    "code": "L1",
+    "type_name": "اکبری",
+    "seller": "الف",
+    "net_weight": 100,
+    "remaining": 40,
+    "date": "2026-10-01",
+    "is_mix": 0
+   }
+  ],
+  "proc_inputs": [
+   {
+    "lot_id": 1,
+    "kg": 60,
+    "order_id": 7,
+    "order_date": "2026-11-01",
+    "op_type": "dehull",
+    "status": "open"
+   }
+  ],
+  "expect": {
+   "label": "در کارگاه — عملیات 7",
+   "in_workshop": true,
+   "in_kg": 60.0,
+   "out_kg": 0.0,
+   "overview_label": "در کارگاه · موجود در انبار"
+  }
+ }
+}

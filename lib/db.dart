@@ -41,7 +41,8 @@ const List<(String, List<String>)> _kSnapshot = [
       'is_mix', 'created_at', 'usd_rate', 'price_usd', 'ccy', 'fx_rate', 'fx_rate_source', 'fx_rate_entered_at', 'price_ccy', 'waste', 'base_type', 'labor_cost', 'transport_cost',
       'warehouse_uid', 'ounce_uid', 'tax_status', 'tax_rate_milli',
       'gross_kg', 'tare_kg', 'quality_deduct_kg', 'weigh_ticket_no', 'vehicle_plate', 'driver_name', // S35.T35.2
-      'discount_amount', 'weighbridge_cost', 'side_cost_payer', 'taxable' // S35.T35.6b
+      'discount_amount', 'weighbridge_cost', 'side_cost_payer', 'taxable', // S35.T35.6b
+      'edit_version' // فاز ۳: نسخهٔ سرور برای base_version (همزمانی)
     ]
   ),
   ('mix_sources', ['id', 'mix_purchase_id', 'source_purchase_id', 'weight', 'small_sacks', 'large_sacks']),
@@ -68,7 +69,8 @@ const List<(String, List<String>)> _kSnapshot = [
       'buyer', 'note', 'created_at', 'usd_rate', 'ccy', 'fx_rate', 'fx_rate_source', 'fx_rate_entered_at', 'total_ccy',
       'labor_cost', 'transport_cost', 'tax_status', 'tax_rate_milli',
       'gross_kg', 'tare_kg', 'quality_deduct_kg', 'weigh_ticket_no', 'vehicle_plate', 'driver_name', // S35.T35.2
-      'discount_amount', 'weighbridge_cost', 'side_cost_payer', 'taxable' // S35.T35.6b
+      'discount_amount', 'weighbridge_cost', 'side_cost_payer', 'taxable', // S35.T35.6b
+      'edit_version' // فاز ۳
     ]
   ),
   ('sale_items', ['id', 'sale_id', 'purchase_id', 'weight', 'item_price', 'small_sacks', 'large_sacks']),
@@ -96,9 +98,9 @@ const List<(String, List<String>)> _kSnapshot = [
   ('loan_entries', ['id', 'uid', 'party', 'kind', 'amount', 'date', 'note', 'created_at']),
   ('loan_dues', ['id', 'loan_uid', 'seq', 'due_date', 'amount', 'note', 'paid']),
   // S04.T04.4b: برگشت از خرید/فروش (آینهٔ محلی؛ سرور در backup.export می‌فرستد)
-  ('purchase_returns', ['id', 'uid', 'number', 'party', 'date', 'refund_mode', 'refund_amount', 'cheque_no', 'cheque_due', 'note', 'tax_amount', 'created_at']),
+  ('purchase_returns', ['id', 'uid', 'number', 'party', 'date', 'refund_mode', 'refund_amount', 'cheque_no', 'cheque_due', 'note', 'tax_amount', 'created_at', 'edit_version']),
   ('purchase_return_items', ['id', 'return_id', 'lot_id', 'warehouse_uid', 'kg', 'small_sacks', 'large_sacks', 'unit_price']),
-  ('sale_returns', ['id', 'uid', 'number', 'party', 'date', 'refund_mode', 'refund_amount', 'cheque_no', 'cheque_due', 'note', 'tax_amount', 'created_at']),
+  ('sale_returns', ['id', 'uid', 'number', 'party', 'date', 'refund_mode', 'refund_amount', 'cheque_no', 'cheque_due', 'note', 'tax_amount', 'created_at', 'edit_version']),
   ('sale_return_items', ['id', 'return_id', 'sale_id', 'lot_id', 'warehouse_uid', 'kg', 'small_sacks', 'large_sacks', 'unit_price']),
   ('doc_grade_lines', ['id', 'doc_type', 'doc_id', 'grade_key', 'kg', 'unit_price']), // S35.T35.3b
 ];
@@ -154,7 +156,7 @@ const Set<String> _kRealCols = {
 };
 const Set<String> _kIntCols = {
   'id', 'category_id', 'mix_purchase_id', 'source_purchase_id', 'purchase_id', 'payment_id', 'sale_id',
-  'receipt_id', 'is_mix', 'paid', 'return_id', 'lot_id', 'reserve', 'proforma_id', 'doc_id',
+  'receipt_id', 'is_mix', 'paid', 'return_id', 'lot_id', 'reserve', 'proforma_id', 'doc_id', 'edit_version',
 };
 
 /// ستون‌های خرید برای لیست‌ها: عکس (base64 سنگین) عمداً انتخاب نمی‌شود؛ فقط has_photo.
@@ -186,7 +188,7 @@ class AppDb {
   /// با هر تغییر داده زیاد می‌شود تا صفحه‌ها بازخوانی شوند
   final ValueNotifier<int> version = ValueNotifier<int>(0);
 
-  static const int schemaVersion = 29;
+  static const int schemaVersion = 30; // فاز ۳: edit_version
 
   String? _phone;
   Database? _db;
@@ -395,6 +397,18 @@ class AppDb {
     if (oldV < 29) {
       await _addCreditUsedCols(d); // S36 (server v71): return credit consumed by a paid line
       await createConsTerms(d); // S36: consignment settlement terms mirror
+    }
+    if (oldV < 30) {
+      await addEditVersionCols(d); // فاز ۳ (سرور v78): نسخهٔ سند برای تشخیص تعارض همزمانی
+    }
+  }
+
+  /// فاز ۳ (سرور v78): `edit_version` روی سندهای آفلاینِ قابل‌ویرایش. NULL = نامعلوم (بدون base_version).
+  static Future<void> addEditVersionCols(DatabaseExecutor d) async {
+    for (final String t in const <String>['purchases', 'sales', 'purchase_returns', 'sale_returns']) {
+      try {
+        await d.execute('ALTER TABLE $t ADD COLUMN edit_version INTEGER'); // fails when the column already exists
+      } catch (_) {/* column already exists or table not created yet */}
     }
   }
 
@@ -764,6 +778,7 @@ class AppDb {
     await GradeLinesLocal.createTables(d); // S35.T35.3b
     await _addTxFxCols(d); // S28.T28.2b
     await _addCreditUsedCols(d); // S36
+    await addEditVersionCols(d); // فاز ۳
     await _createIndexes(d);
     // نکته: دسته‌ها و انواع پیش‌فرض را سرور می‌سازد (bootstrap) و هنگام ورود دریافت می‌شوند.
   }
@@ -1372,6 +1387,36 @@ class AppDb {
     await (await db).delete('sync_ops', where: 'seq=? AND rev=?', whereArgs: [seq, rev]);
   }
 
+  static String? _editTable(String kind) => switch (kind) {
+        'pur' => 'purchases',
+        'sale' => 'sales',
+        'sret' => 'sale_returns',
+        'pret' => 'purchase_returns',
+        _ => null,
+      };
+
+  /// فاز ۳: آخرین edit_version سرورِ یک سند آفلاین (برای base_version هنگام ارسال ویرایش). null = نامعلوم.
+  Future<int?> editVersionOf(String kind, int localId) async {
+    final String? t = _editTable(kind);
+    if (t == null) return null;
+    try {
+      final r = await (await db).query(t, columns: ['edit_version'], where: 'id=?', whereArgs: [localId], limit: 1);
+      if (r.isEmpty) return null;
+      return (r.first['edit_version'] as num?)?.toInt();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// فاز ۳: نسخهٔ تازهٔ سرور بعد از ویرایش موفق (تا ویرایش بعدیِ همان سند در صف تعارض کاذب نگیرد).
+  Future<void> setEditVersion(String kind, int localId, int v) async {
+    final String? t = _editTable(kind);
+    if (t == null) return;
+    try {
+      await (await db).update(t, {'edit_version': v}, where: 'id=?', whereArgs: [localId]);
+    } catch (_) {}
+  }
+
   /// آیا رکورد محلی هنوز وجود دارد؟ (kind: pur | sale | cat)
   Future<bool> localExists(String kind, int id) async {
     final table = switch (kind) {
@@ -1433,6 +1478,30 @@ class AppDb {
     });
     version.value++;
     return id;
+  }
+
+  /// فاز ۳ مجد: تغییر نام دسته (بی‌اثر روی محاسبات؛ سرور: categories.rename با نگاشت شناسهٔ محلی ⇒ سرور در صف).
+  Future<void> renameCategory(int id, String name) async {
+    final n = _s(name, 100);
+    if (n == null) throw Exception('نام دسته را (حداکثر ۱۰۰ حرف) وارد کنید');
+    final d = await db;
+    await d.transaction((t) async {
+      await t.update('categories', {'name': n}, where: 'id=?', whereArgs: [id]);
+      await _enqueue(t, 'categories.rename', {'id': id, 'name': n});
+    });
+    version.value++;
+  }
+
+  /// فاز ۳ مجد: تغییر نام نوع (فقط فهرست انتخاب؛ لات‌های ثبت‌شده نامشان می‌ماند). سرور نوع را با «دسته + نام قبلی» پیدا می‌کند.
+  Future<void> renameType(int categoryId, String oldName, String name) async {
+    final n = _s(name, 100);
+    if (n == null) throw Exception('نام نوع را (حداکثر ۱۰۰ حرف) وارد کنید');
+    final d = await db;
+    await d.transaction((t) async {
+      await t.update('types', {'name': n}, where: 'category_id=? AND name=?', whereArgs: [categoryId, oldName]);
+      await _enqueue(t, 'types.rename', {'category_id': categoryId, 'old_name': oldName, 'name': n});
+    });
+    version.value++;
   }
 
   // ======================= خرید =======================
@@ -3435,6 +3504,30 @@ class AppDb {
               where: "action='loans.create' AND ref_kind='loan' AND ref_id=? AND state='pending'", whereArgs: [id]);
           await _enqueue(t, 'loans.delete', {'uid': uid}, refKind: 'loan', refId: id);
           await _confirm(t, 'SELECT 1 WHERE NOT EXISTS (SELECT 1 FROM loan_entries WHERE id = ?)', [id]);
+        }));
+    version.value++;
+  }
+
+  /// فاز ۳ مجد: ویرایش قرض/بازپرداخت (همان uid؛ سرور: loans.update). مبلغ فقط وقتی سررسید ندارد قابل تغییر است
+  /// (سررسیدها باید با مبلغ بخوانند)؛ سررسیدِ پرداخت‌شده ⇒ سرور فقط تاریخ و توضیح را می‌پذیرد.
+  Future<void> updateLoanEntry(int id, {double? amount, DateTime? date, String? note}) async {
+    await _write((d) => d.transaction((t) async {
+          final cur = await t.query('loan_entries', where: 'id=?', whereArgs: [id]);
+          if (cur.isEmpty) throw Exception('این مورد یافت نشد');
+          final row = cur.first;
+          final uid = row['uid'] as String;
+          final dueCount = Sqflite.firstIntValue(await t.rawQuery('SELECT COUNT(*) FROM loan_dues WHERE loan_uid = ?', [uid])) ?? 0;
+          final changes = <String, dynamic>{};
+          if (amount != null && (amount - ((row['amount'] as num?)?.toDouble() ?? 0)).abs() > 0.005) {
+            if (dueCount > 0) throw Exception('این قرض سررسید دارد؛ مبلغ قابل تغییر نیست (حذف و ثبت دوباره)');
+            if (amount <= 0 || amount > 1e13) throw Exception('مبلغ را درست وارد کنید');
+            changes['amount'] = _r(amount, 2);
+          }
+          if (date != null) changes['date'] = _dateOnly(date.toIso8601String());
+          if (note != null) changes['note'] = _s(note, 500);
+          if (changes.isEmpty) return;
+          await t.update('loan_entries', changes, where: 'id=?', whereArgs: [id]);
+          await _enqueue(t, 'loans.update', {'uid': uid, ...changes}, refKind: 'loan', refId: id);
         }));
     version.value++;
   }

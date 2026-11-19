@@ -319,6 +319,7 @@ class _SummaryBodyState extends State<_SummaryBody> with AutomaticKeepAliveClien
   String? _error;
   Map<String, dynamic> _internal = <String, dynamic>{};
   Map<String, dynamic> _crack = <String, dynamic>{};
+  Map<String, dynamic> _inWs = <String, dynamic>{}; // عملیات باز «در کارگاه» (جدا از جمع‌های بسته)
 
   @override
   bool get wantKeepAlive => true;
@@ -349,6 +350,7 @@ class _SummaryBodyState extends State<_SummaryBody> with AutomaticKeepAliveClien
       setState(() {
         _internal = _map(r['internal']);
         _crack = _map(r['crack']);
+        _inWs = _map(r['in_workshop']); // فاز ۲ کارگاه
         _error = null;
         _loading = false;
       });
@@ -402,7 +404,13 @@ class _SummaryBodyState extends State<_SummaryBody> with AutomaticKeepAliveClien
         if (_error != null) _rerr(context, _error!),
         if (_loading) const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator())),
         if (!_loading && _error == null) ...<Widget>[
-          _card('کارگاه داخلی (کنترل ورود و خروج تولید)', <Widget>[
+          if (_inWs.isNotEmpty)
+            _card('در کارگاه (عملیات باز؛ ورودی از انبار کم شده، خروجی هنوز در انبار نیست)', <Widget>[
+              _rkv('تعداد عملیات باز', _rnum(_inWs['count'])),
+              _rkv('ورودی در کارگاه (کیلو)', _rkg(_inWs['input_kg']), bold: true),
+              _rkv('خروجی ثبت‌شده تا کنون (کیلو)', _rkg(_inWs['output_kg'])),
+            ]),
+          _card('کارگاه داخلی — عملیات بسته (کنترل ورود و خروج تولید)', <Widget>[
             _rkv('تعداد عملیات', _rnum(i['orders_count'])),
             _rkv('وزن تحویلی (کیلو)', _rkg(i['delivered_kg'])),
             _rkv('وزن ورودی (کیلو)', _rkg(i['input_kg']), bold: true),
@@ -412,6 +420,9 @@ class _SummaryBodyState extends State<_SummaryBody> with AutomaticKeepAliveClien
             _rkv('مغز', _rkg(i['kernel_kg'])),
             _rkv('خاک', _rkg(i['soil_kg'])),
             _rkv('بدرنگ', _rkg(i['discolored_kg'])),
+            _rkv('چفت', _rkg(i['chaft_kg'])),
+            _rkv('دهنبست', _rkg(i['dombest_kg'])),
+            _rkv('سایر خروجی‌ها', _rkg(i['other_kg'])),
             _rkv('افت وزن', _rkg(i['loss_kg'])),
             _rkv('مجموع ضایعات', _rkg(i['waste_total_kg'])),
             _rkv('اختلاف تراز', _rkg(i['diff_kg'])),

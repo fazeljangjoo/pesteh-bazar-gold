@@ -237,6 +237,32 @@ class _IntakeFormScreenState extends State<IntakeFormScreen> {
     }
   }
 
+  /// فاز ۳: تغییر نام دسته/نوع انتخاب‌شده (بی‌اثر روی محاسبات؛ در صف همگام‌سازی).
+  Future<void> _renameCategory() async {
+    if (_categoryId == null) return;
+    final name = await _askName('نام تازهٔ دسته');
+    if (name == null || !mounted) return;
+    try {
+      await AppDb.I.renameCategory(_categoryId!, name);
+      final cats = await AppDb.I.categories();
+      if (mounted) setState(() => _categories = cats);
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+    }
+  }
+
+  Future<void> _renameType() async {
+    if (_categoryId == null || _typeName == null) return;
+    final name = await _askName('نام تازهٔ نوع «$_typeName»');
+    if (name == null || !mounted) return;
+    try {
+      await AppDb.I.renameType(_categoryId!, _typeName!, name);
+      await _loadTypes(_categoryId!, keep: name);
+    } catch (e) {
+      if (mounted) setState(() => _error = e.toString().replaceFirst('Exception: ', ''));
+    }
+  }
+
   void _resetForm() {
     setState(() {
       _uid = null;
@@ -518,6 +544,7 @@ class _IntakeFormScreenState extends State<IntakeFormScreen> {
               ),
             ),
             TextButton.icon(onPressed: _addCategory, icon: const Icon(Icons.add), label: const Text('دستهٔ جدید')),
+            if (_categoryId != null) IconButton(tooltip: 'تغییر نام دسته', icon: const Icon(Icons.drive_file_rename_outline), onPressed: _renameCategory),
             SizedBox(
               width: 220,
               child: DropdownButtonFormField<String>(
@@ -534,6 +561,7 @@ class _IntakeFormScreenState extends State<IntakeFormScreen> {
               ),
             ),
             TextButton.icon(onPressed: _addType, icon: const Icon(Icons.add), label: const Text('نوع جدید')),
+            if (_typeName != null) IconButton(tooltip: 'تغییر نام نوع', icon: const Icon(Icons.drive_file_rename_outline), onPressed: _renameType),
             _num(_gross, 'وزن کل', suffix: 'کیلو'),
             _num(_small, 'گونی کوچک', integer: true, width: 150),
             _num(_large, 'گونی بزرگ', integer: true, width: 150),

@@ -1,3 +1,4 @@
+import 'edit_guard_ui.dart'; // فاز ۳
 import 'package:flutter/material.dart';
 
 import 'db.dart';
@@ -330,6 +331,21 @@ class PartyDetailScreen extends StatelessWidget {
     );
   }
 
+  /// فاز ۳: ویرایش قرض/بازپرداخت؛ محلی ذخیره و در صف همگام‌سازی (loans.update). سررسید پرداخت‌شده ⇒ سرور فقط تاریخ و توضیح را می‌پذیرد.
+  Future<void> _editLoan(BuildContext context, LoanEntry l) async {
+    final Map<String, dynamic>? v = await showEditDocDialog(context, 'ویرایش ${l.label}', <EditField>[
+      EditField('amount', 'مبلغ', l.amount, kind: EditKind.number),
+      EditField('date', 'تاریخ', l.date.toIso8601String(), kind: EditKind.date),
+      EditField('note', 'توضیح', l.note),
+    ]);
+    if (v == null || !context.mounted) return;
+    await saveConfirmed(
+      context,
+      () => AppDb.I.updateLoanEntry(l.id, amount: (v['amount'] as num?)?.toDouble(), date: DateTime.tryParse('${v['date']}'), note: v['note'] as String?),
+      successMsg: 'ویرایش ذخیره شد',
+    );
+  }
+
   Widget _loanTile(BuildContext context, LoanEntry l) {
     final color = l.isIn ? Colors.green.shade800 : Colors.deepOrange.shade800;
     return ListTile(
@@ -340,6 +356,7 @@ class PartyDetailScreen extends StatelessWidget {
       title: Text('${l.label} • ${Fmt.money(l.amount)}', style: TextStyle(color: color, fontWeight: FontWeight.w600)),
       subtitle: Text('${jalaliDateFromDt(l.date)}${(l.note ?? '').isEmpty ? '' : '\n${l.note}'}'),
       isThreeLine: (l.note ?? '').isNotEmpty,
+      onTap: () => _editLoan(context, l), // فاز ۳: ویرایش امن (loans.update)
       trailing: IconButton(
         icon: const Icon(Icons.delete_outline),
         tooltip: 'حذف',

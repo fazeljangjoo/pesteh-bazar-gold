@@ -1,3 +1,4 @@
+import 'edit_guard_ui.dart'; // فاز ۳: ویرایش امن
 import 'dart:convert';
 import 'dart:io';
 
@@ -524,7 +525,10 @@ class _Line {
 
 class ConsignmentFormScreen extends StatefulWidget {
   final String direction;
-  const ConsignmentFormScreen({super.key, required this.direction});
+
+  /// فاز ۳: ویرایش کامل امانی دریافتیِ بدون فروش/برگشت/تسویه (پاسخ consignments.get) ⇒ consignments.update (اتمی، همان id و uid).
+  final Map<String, dynamic>? edit;
+  const ConsignmentFormScreen({super.key, required this.direction, this.edit});
 
   @override
   State<ConsignmentFormScreen> createState() => _ConsignmentFormScreenState();
@@ -550,6 +554,27 @@ class _ConsignmentFormScreenState extends State<ConsignmentFormScreen> {
   void initState() {
     super.initState();
     _mode = _isIn ? 'commission' : 'to_consignee';
+    final Map<String, dynamic>? e = widget.edit;
+    if (e != null) {
+      _party.text = '${e['party'] ?? ''}';
+      _note.text = '${e['note'] ?? ''}';
+      _date = DateTime.tryParse('${e['date'] ?? ''}') ?? _date;
+      _mode = '${e['settlement_mode'] ?? _mode}';
+      _ctype = '${e['commission_type'] ?? _ctype}';
+      final double cv = _n(e['commission_value']);
+      _value.text = _ctype == 'percent' ? '$cv' : '${Fmt.toDisplay(cv)}';
+      if (e['agreed_price'] != null) _agreed.text = '${Fmt.toDisplay(_n(e['agreed_price']))}';
+      _lines.clear();
+      for (final Map<String, dynamic> it in ReturnsHelp.maps(e['lots'])) {
+        final _Line l = _Line()
+          ..name.text = '${it['type_name'] ?? ''}'
+          ..kg.text = '${it['kg']}'
+          ..small.text = '${it['small_sacks'] ?? 0}'
+          ..large.text = '${it['large_sacks'] ?? 0}';
+        _lines.add(l);
+      }
+      if (_lines.isEmpty) _lines.add(_Line());
+    }
     _init();
   }
 
@@ -559,7 +584,8 @@ class _ConsignmentFormScreenState extends State<ConsignmentFormScreen> {
       if (!mounted) return;
       setState(() {
         _whs = whs;
-        _wh = whs.isEmpty ? null : (whs.where((WhOption w) => w.isDefault).isNotEmpty ? whs.firstWhere((WhOption w) => w.isDefault).uid : whs.first.uid);
+        _wh = (widget.edit?['warehouse_uid'] as String?) ??
+            (whs.isEmpty ? null : (whs.where((WhOption w) => w.isDefault).isNotEmpty ? whs.firstWhere((WhOption w) => w.isDefault).uid : whs.first.uid));
       });
     } else {
       final List<Map<String, dynamic>> rows = await AppDb.I.inventoryAll();
@@ -636,7 +662,13 @@ class _ConsignmentFormScreenState extends State<ConsignmentFormScreen> {
         if (_mode == 'purchase_on_sale') payload['agreed_price'] = _storedNum(_agreed.text);
         if (_wh != null) payload['warehouse_uid'] = _wh;
       }
-      final bool queued = await ConsignmentStore.write('consignments.create', payload, label);
+      if (widget.edit != null) {
+        payload.remove('uid');
+        payload['id'] = widget.edit!['id'];
+        if (widget.edit!['edit_version'] != null) payload['base_version'] = widget.edit!['edit_version'];
+        label = 'ویرایش $label';
+      }
+      final bool queued = await ConsignmentStore.write(widget.edit != null ? 'consignments.update' : 'consignments.create', payload, label);
       if (!mounted) return;
       _snack(queued ? 'آفلاین ذخیره شد؛ پس از اتصال ارسال می‌شود' : 'ثبت شد');
       Navigator.pop(context, true);
@@ -1001,6 +1033,27 @@ class _ConsignmentDetailScreenState extends State<ConsignmentDetailScreen> {
     }
   }
 
+  /// فاز ۳: ویرایش امانی (consignments.update). دریافتیِ بدون فروش/برگشت/تسویه ⇒ فرم کامل؛ وگرنه تاریخ و توضیح.
+  Future<void> _edit() async {
+    if ('${_d['direction']}' == kConsIn && _d['deletable'] == true) {
+      final bool? ok = await Navigator.push<bool>(context, MaterialPageRoute<bool>(builder: (_) => ConsignmentFormScreen(direction: kConsIn, edit: _d)));
+      if (ok == true) {
+        _changed = true;
+        _load();
+      }
+      return;
+    }
+    final Map<String, dynamic>? v = await showEditDocDialog(context, 'ویرایش امانی', <EditField>[
+      EditField('date', 'تاریخ', _d['date'], kind: EditKind.date),
+      EditField('note', 'توضیح', _d['note']),
+    ]);
+    if (v == null || !mounted) return;
+    if (await submitDocEdit(context, 'consignments.update', <String, dynamic>{'id': widget.id, ...v}, baseVersion: _d['edit_version']) != null) {
+      _changed = true;
+      _load();
+    }
+  }
+
   Future<void> _printNote() async {
     final List<dynamic> lots = (_d['lots'] is List) ? (_d['lots'] as List<dynamic>) : <dynamic>[];
     final List<List<String>> rows = <List<String>>[
@@ -1044,6 +1097,7 @@ class _ConsignmentDetailScreenState extends State<ConsignmentDetailScreen> {
           title: Text(_d['party'] == null ? 'امانی' : '${_d['party']}'),
           actions: <Widget>[
             if (_d.isNotEmpty) IconButton(tooltip: 'چاپ', icon: const Icon(Icons.print_outlined), onPressed: _printNote),
+            if (_d.isNotEmpty && canManage) IconButton(tooltip: 'ویرایش', icon: const Icon(Icons.edit_outlined), onPressed: _edit),
             if (_d['deletable'] == true && canManage)
               IconButton(tooltip: 'حذف', icon: const Icon(Icons.delete_outline), onPressed: _delete),
           ],

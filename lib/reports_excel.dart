@@ -41,7 +41,8 @@ class ReportsExcel {
   static const List<List<String>> summaryInternal = <List<String>>[
     <String>['orders_count', 'تعداد عملیات'], <String>['delivered_kg', 'وزن تحویلی (کیلو)'], <String>['input_kg', 'وزن ورودی (کیلو)'], <String>['sound_kg', 'سالم (کیلو)'],
     <String>['deformed_fine_kg', 'بدشکل و ریز (کیلو)'], <String>['hull_kg', 'پوست (کیلو)'], <String>['kernel_kg', 'مغز (کیلو)'], <String>['soil_kg', 'خاک (کیلو)'],
-    <String>['discolored_kg', 'بدرنگ (کیلو)'], <String>['loss_kg', 'افت وزن (کیلو)'], <String>['waste_total_kg', 'مجموع ضایعات (کیلو)'], <String>['diff_kg', 'اختلاف تراز (کیلو)'],
+    <String>['discolored_kg', 'بدرنگ (کیلو)'], <String>['chaft_kg', 'چفت (کیلو)'], <String>['dombest_kg', 'دهنبست (کیلو)'], <String>['other_kg', 'سایر خروجی‌ها (کیلو)'],
+    <String>['loss_kg', 'افت وزن (کیلو)'], <String>['waste_total_kg', 'مجموع ضایعات (کیلو)'], <String>['diff_kg', 'اختلاف تراز (کیلو)'],
     <String>['undelivered_kg', 'تحویل‌نشده (کیلو)'], <String>['sound_pct', 'درصد سالم از ورودی (٪)'], <String>['check_count', 'عملیات نیازمند بررسی تراز'],
   ];
   static const List<List<String>> summaryCrack = <List<String>>[

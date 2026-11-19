@@ -68,7 +68,12 @@ class _ApiResult {
   final int code;
   final Map<String, dynamic>? data;
   _ApiResult(this.code, this.data);
-  String get error => (data?['error'] ?? 'خطای سرور (کد $code)').toString();
+  /// فاز ۳: پیام فارسی سرور (message) اولویت دارد؛ مثلاً ۴۰۹ edit_conflict ⇒ «این سند در این فاصله تغییر کرده؛ دوباره باز کنید».
+  String get error {
+    final Object? m = data?['message'];
+    if (m is String && m.trim().isNotEmpty) return m;
+    return (data?['error'] ?? 'خطای سرور (کد $code)').toString();
+  }
 }
 
 /// همگام‌سازی دیتابیس محلی با سرور (همان API نسخهٔ وب: `app.php`).
@@ -501,7 +506,20 @@ class SyncService {
 
     switch (action) {
       case 'types.create':
+      case 'types.rename': // فاز ۳
         await one('category_id', 'cat');
+        break;
+      case 'categories.rename': // فاز ۳
+        await one('id', 'cat');
+        break;
+      case 'sale_returns.update': // فاز ۳ (سرور آماده؛ ثبت از اپ در فاز بعد)
+        await one('id', 'sret');
+        await list('items', 'sale_id', 'sale');
+        await list('items', 'lot_id', 'pur');
+        break;
+      case 'purchase_returns.update':
+        await one('id', 'pret');
+        await list('items', 'lot_id', 'pur');
         break;
       case 'purchases.create':
         await one('category_id', 'cat');
@@ -609,6 +627,16 @@ class SyncService {
         continue;
       }
 
+      // فاز ۳: ویرایش سند آفلاین ⇒ base_version از آینهٔ محلی (اگر سرور تعارض ببیند ۴۰۹ می‌دهد و این مورد «خطادار» می‌شود، تکرار نمی‌شود)
+      final String? refKind = op['ref_kind'] as String?;
+      final int? refId = (op['ref_id'] as num?)?.toInt();
+      final bool editOp = const <String>{'sales.update', 'mixes.update', 'sale_returns.update', 'purchase_returns.update'}.contains(action) ||
+          (action == 'purchases.create' && ((payload['id'] as num?)?.toInt() ?? 0) > 0);
+      if (editOp && !payload.containsKey('base_version') && refKind != null && refId != null) {
+        final int? bv = await AppDb.I.editVersionOf(refKind, refId);
+        if (bv != null) payload['base_version'] = bv;
+      }
+
       _ApiResult r;
       try {
         r = await _call(phone, token, action, payload, idem: op['idem'] as String);
@@ -620,6 +648,8 @@ class SyncService {
       _offline = false;
 
       if (r.code == 200 && r.data != null) {
+        final Object? nv = r.data?['edit_version'];
+        if (editOp && nv is num && refKind != null && refId != null) await AppDb.I.setEditVersion(refKind, refId, nv.toInt());
         final mk = op['map_kind'] as String?;
         final lid = (op['local_id'] as num?)?.toInt();
         final sid = (r.data?['id'] as num?)?.toInt();

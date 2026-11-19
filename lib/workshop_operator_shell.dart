@@ -8,6 +8,7 @@ import 'feed_ui.dart' show FeedStockScreen;
 import 'license_service.dart';
 import 'reports_ui.dart' show WorkshopReportsScreen;
 import 'widgets.dart' show confirm;
+import 'workshop_flow_ui.dart' show WorkshopOpenFormScreen, WorkshopOpsScreen; // فاز ۲: کارگاه مرحله‌ای
 import 'workshop_ui.dart';
 
 /// کارگاه ۳-ب: پوستهٔ «اپراتور کارگاه». فقط: فرم خط شکست · فهرست خودش · فرم عملیات داخلی · موجودی پستهٔ خرجی (فقط‌مشاهده، ۵-ب) · گزارش‌های کارگاه (کارتکس/مقایسه، ۶-۳) · خروج.
@@ -138,9 +139,21 @@ class _InternalOpLauncher extends StatelessWidget {
                 const Text('ثبت عملیات داخلی (خاک‌گیری، پوست‌گیری، جداسازی، ریزبرداری، شکست)', textAlign: TextAlign.center),
                 const SizedBox(height: 16),
                 FilledButton.icon(
+                  onPressed: () => Navigator.of(context).push(MaterialPageRoute<bool>(builder: (_) => const WorkshopOpenFormScreen())),
+                  icon: const Icon(Icons.play_arrow),
+                  label: const Text('شروع عملیات (ثبت خروجی‌ها در طول کار)'),
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  onPressed: () => Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => const WorkshopOpsScreen())),
+                  icon: const Icon(Icons.pending_actions),
+                  label: const Text('عملیات باز'),
+                ),
+                const SizedBox(height: 10),
+                TextButton.icon(
                   onPressed: () => Navigator.of(context).push(MaterialPageRoute<bool>(builder: (_) => const WorkshopFormScreen())),
-                  icon: const Icon(Icons.add),
-                  label: const Text('عملیات جدید'),
+                  icon: const Icon(Icons.post_add),
+                  label: const Text('ثبت یک‌جا (ورودی و خروجی با هم)'),
                 ),
               ],
             ),

@@ -207,6 +207,8 @@ class LotCartexOutput {
 /// گروه فراوری/شکست: پسته(های) مبدأ (items) + همهٔ لات‌های ساخته‌شده از آن (outputs) با یک رنگ.
 class LotCartexProcGroup {
   final String groupId, kind, date, label; // kind: proc | crack
+  /// فاز ۲ کارگاه: عملیات باز ⇒ «در کارگاه» (ورودی کم شده، خروجی هنوز در انبار نیست).
+  final bool inWorkshop;
   final int orderId, colorKey;
   final double inKg, outKg;
   final List<LotCartexRow> items;
@@ -222,6 +224,7 @@ class LotCartexProcGroup {
     required this.outKg,
     required this.items,
     required this.outputs,
+    this.inWorkshop = false,
   });
   factory LotCartexProcGroup.fromJson(Map<String, dynamic> j) => LotCartexProcGroup(
         groupId: _s(j['group_id']),
@@ -234,6 +237,7 @@ class LotCartexProcGroup {
         outKg: _d(j['out_kg']),
         items: [for (final x in (j['items'] as List? ?? const [])) LotCartexRow.fromJson(Map<String, dynamic>.from(x as Map))],
         outputs: [for (final x in (j['outputs'] as List? ?? const [])) LotCartexOutput.fromJson(Map<String, dynamic>.from(x as Map))],
+        inWorkshop: j['in_workshop'] == true,
       );
 }
 
@@ -392,10 +396,11 @@ LotCartexReport lotCartexBuild(
     final crack = _s(p['op_type']) == 'crack' || isRun;
     final oid = _i(p['order_id']);
     final rk = '${crack && isRun ? 'r' : 'o'}$oid';
+    final open = !isRun && _s(p['status']) == 'open'; // فاز ۲ کارگاه
     final m = procOf.putIfAbsent(lid, () => {});
-    final e = m.putIfAbsent(rk, () => _Proc(_s(p['order_date']), crack, oid, isRun));
+    final e = m.putIfAbsent(rk, () => _Proc(_s(p['order_date']), crack, oid, isRun, open: open));
     e.g += g;
-    procGroups.putIfAbsent(rk, () => _Proc(_s(p['order_date']), crack, oid, isRun));
+    procGroups.putIfAbsent(rk, () => _Proc(_s(p['order_date']), crack, oid, isRun, open: open));
   }
   final outOf = <String, Map<int, int>>{}; // groupKey → {lotId → lotId} (بدون تکرار، با حفظ ترتیب)
   for (final o in procOutputs) {
@@ -446,7 +451,9 @@ LotCartexReport lotCartexBuild(
         );
 
     final hasKot = (kotOfLot[id] ?? const <int, int>{}).isNotEmpty;
-    final hasProc = (procOf[id] ?? const <String, _Proc>{}).isNotEmpty;
+    final procs = (procOf[id] ?? const <String, _Proc>{}).values;
+    final hasProc = procs.any((_Proc x) => !x.open); // فاز ۲: عملیات باز کارگاه = «در کارگاه»
+    final inWs = procs.any((_Proc x) => x.open);
     final sold = soldG[id] ?? 0;
 
     final isOutLot = outLots.contains(id);
@@ -459,6 +466,7 @@ LotCartexReport lotCartexBuild(
       if (isOutLot) 'ساخته‌شده از فراوری/شکست',
       if (hasKot) 'وارد کوت شده',
       if (hasProc) 'وارد فراوری/شکست شده',
+      if (inWs) 'در کارگاه',
       remG > 0 ? 'موجود در انبار' : (sold > 0 ? 'فروش رفته' : 'مانده ندارد'),
     ];
     sec.overview.add(mk(w: _kg(netG), et: 'overview', el: parts.join(' · '), rem: _kg(remG), sold: _kg(sold), partial: partialRow));
@@ -468,7 +476,7 @@ LotCartexReport lotCartexBuild(
       sec.normal.add(mk(w: _kg(netG), et: 'in_stock', rem: _kg(remG), sold: _kg(sold), partial: partialRow));
     }
     // «خارج‌شده»: کاملاً فروش رفته و نه کوت شده نه فراوری/شکست
-    if (remG == 0 && sold > 0 && !hasKot && !hasProc) {
+    if (remG == 0 && sold > 0 && !hasKot && !hasProc && !inWs) {
       sec.exited.add(mk(w: _kg(sold), et: 'sold', el: 'فروش رفته', ed: soldLast[id], rem: 0, sold: _kg(sold)));
     }
     for (final e in (kotOfLot[id] ?? const <int, int>{}).entries) {
@@ -540,7 +548,8 @@ LotCartexReport lotCartexBuild(
     });
     return LotCartexProcGroup(
         groupId: rk, kind: pg.crack ? 'crack' : 'proc', orderId: pg.orderId, date: pg.date,
-        label: pg.crack ? 'شکسته شده' : 'فراوری سفارش ${pg.orderId}',
+        label: pg.open ? 'در کارگاه — عملیات ${pg.orderId}' : (pg.crack ? 'شکسته شده' : 'فراوری سفارش ${pg.orderId}'),
+        inWorkshop: pg.open,
         colorKey: (pg.run ? 2000000 : 1000000) + pg.orderId, inKg: _kg(inG), outKg: _kg(outG),
         items: _stableSorted(rows, cmpRow), outputs: sortedOuts);
   }
@@ -587,10 +596,10 @@ double? _round3N(Object? v) {
 
 class _Proc {
   final String date;
-  final bool crack, run;
+  final bool crack, run, open;
   final int orderId;
   int g = 0;
-  _Proc(this.date, this.crack, this.orderId, this.run);
+  _Proc(this.date, this.crack, this.orderId, this.run, {this.open = false});
 }
 
 class _Sec {

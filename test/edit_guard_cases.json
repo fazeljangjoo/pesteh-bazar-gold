@@ -1,0 +1,194 @@
+{
+ "_doc": "کیس‌های مشترک «ویرایش امن» (فاز ۳ مجد): pb_eg_same / pb_eg_changed / pb_eg_decide / pb_eg_version_ok ↔ Dart editGuardSame / editGuardChanged / editGuardDecide / editGuardVersionOk. کپی بایت‌به‌بایت: backend/api/edit_guard_cases.json ↔ test/edit_guard_cases.json هر دو پروژه. PHP: php edit_guard_selftest.php · Dart: flutter test test/edit_guard_test.dart",
+ "conflict_message": "این سند در این فاصله تغییر کرده؛ دوباره باز کنید",
+ "same": [
+  [
+   1,
+   1.0,
+   true
+  ],
+  [
+   1.0000001,
+   1,
+   true
+  ],
+  [
+   1.1,
+   1,
+   false
+  ],
+  [
+   null,
+   "",
+   true
+  ],
+  [
+   null,
+   0,
+   true
+  ],
+  [
+   "",
+   0,
+   true
+  ],
+  [
+   null,
+   5,
+   false
+  ],
+  [
+   "  نام ",
+   "نام",
+   true
+  ],
+  [
+   "الف",
+   "ب",
+   false
+  ],
+  [
+   "12",
+   12,
+   true
+  ],
+  [
+   null,
+   null,
+   true
+  ],
+  [
+   0,
+   "0.0000",
+   true
+  ]
+ ],
+ "changed": [
+  {
+   "before": {
+    "price": 1000,
+    "net_weight": 50,
+    "note": "قدیم"
+   },
+   "after": {
+    "price": 1000,
+    "net_weight": 49.5,
+    "note": "جدید"
+   },
+   "fields": [
+    "price",
+    "net_weight",
+    "note"
+   ],
+   "want": [
+    "net_weight",
+    "note"
+   ]
+  },
+  {
+   "before": {
+    "price": 1000
+   },
+   "after": {},
+   "fields": [
+    "price"
+   ],
+   "want": []
+  },
+  {
+   "before": {
+    "labor_cost": null
+   },
+   "after": {
+    "labor_cost": 0
+   },
+   "fields": [
+    "labor_cost"
+   ],
+   "want": []
+  }
+ ],
+ "decide": [
+  {
+   "used": null,
+   "changed": [
+    "price"
+   ],
+   "neutral": [],
+   "labels": {},
+   "want": null
+  },
+  {
+   "used": "لات «KH12» در «فروش شمارهٔ ۷»",
+   "changed": [
+    "note",
+    "date"
+   ],
+   "neutral": [
+    "note",
+    "date"
+   ],
+   "labels": {},
+   "want": null
+  },
+  {
+   "used": "لات «KH12» در «فروش شمارهٔ ۷»",
+   "changed": [
+    "price",
+    "note",
+    "net_weight"
+   ],
+   "neutral": [
+    "note"
+   ],
+   "labels": {
+    "price": "فی",
+    "net_weight": "وزن"
+   },
+   "want": "چون «لات «KH12» در «فروش شمارهٔ ۷»» به این سند وابسته است، فقط توضیح، تاریخ (در همان سال مالی) و طرف‌حساب قابل ویرایش است؛ تغییر «فی، وزن» ممکن نیست"
+  },
+  {
+   "used": "تسهیم هزینهٔ فصل 1404",
+   "changed": [
+    "amount"
+   ],
+   "neutral": [
+    "note"
+   ],
+   "labels": {},
+   "want": "چون «تسهیم هزینهٔ فصل 1404» به این سند وابسته است، فقط توضیح، تاریخ (در همان سال مالی) و طرف‌حساب قابل ویرایش است؛ تغییر «amount» ممکن نیست"
+  }
+ ],
+ "version": [
+  [
+   null,
+   3,
+   true
+  ],
+  [
+   "",
+   3,
+   true
+  ],
+  [
+   3,
+   3,
+   true
+  ],
+  [
+   "3",
+   3,
+   true
+  ],
+  [
+   2,
+   3,
+   false
+  ],
+  [
+   4,
+   3,
+   false
+  ]
+ ]
+}

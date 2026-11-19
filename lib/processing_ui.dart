@@ -1,3 +1,4 @@
+import 'edit_guard_ui.dart'; // فاز ۳: ویرایش امن
 import 'dart:convert';
 import 'dart:io';
 
@@ -17,8 +18,9 @@ import 'sync_service.dart';
 import 'utils.dart';
 import 'widgets.dart' show JalaliDateField;
 import 'warehouse_ui.dart' show StockApi, StockApiException, StockLookup, WhOption;
-import 'workshop_calc.dart' show kWsGradeLabels, kWsOpLabels;
-import 'workshop_ui.dart' show WorkshopFormScreen, kWsCostFields, wsCanCost, wsParseNum;
+import 'workshop_calc.dart' show kWsGradeLabels, kWsOpLabels, kWsOpen;
+import 'workshop_flow_ui.dart' show WorkshopOpScreen, WorkshopOpenFormScreen, wsOpTile; // فاز ۲: کارگاه مرحله‌ای
+import 'workshop_ui.dart' show WorkshopFormScreen, kWsBuyLabel, kWsCostFields, kWsMissingInputCost, wsCanCost, wsParseNum, wsReadOnlyField;
 
 /// S09.T09.3 — processing screens (فراوری): paid (برون‌سپاری) and received (فراوری امانی).
 /// Server: processing.list/get/create/receive/deliver/delete, reports.* (api/processing.php).
@@ -77,6 +79,8 @@ String _statusLabel(String s) {
   switch (s) {
     case 'in_progress':
       return 'در جریان';
+    case 'open':
+      return 'در کارگاه (باز)';
     case 'done':
       return 'دریافت‌شده';
     case 'closed':
@@ -128,6 +132,42 @@ class ProcessingStore {
       return ReturnsHelp.maps(jsonDecode(raw));
     } catch (_) {
       return <Map<String, dynamic>>[];
+    }
+  }
+
+  // فاز ۲ کارگاه: کش جزئیات هر عملیات (کلید = uid یا id<n>) و فهرست workshop.list برای نمای آفلاین.
+  static const String _kDetail = 'ws_detail_v1:';
+  static const String _kWsList = 'ws_list_v1';
+
+  static Future<void> cacheDetail(String key, Map<String, dynamic> d) async {
+    final SharedPreferences sp = await SharedPreferences.getInstance();
+    await sp.setString('$_kDetail$key', jsonEncode(d));
+  }
+
+  static Future<Map<String, dynamic>?> cachedDetail(String key) async {
+    final SharedPreferences sp = await SharedPreferences.getInstance();
+    final String? raw = sp.getString('$_kDetail$key');
+    if (raw == null) return null;
+    try {
+      return Map<String, dynamic>.from(jsonDecode(raw) as Map);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<void> cacheWorkshopList(Map<String, dynamic> r) async {
+    final SharedPreferences sp = await SharedPreferences.getInstance();
+    await sp.setString(_kWsList, jsonEncode(r));
+  }
+
+  static Future<Map<String, dynamic>> cachedWorkshopList() async {
+    final SharedPreferences sp = await SharedPreferences.getInstance();
+    final String? raw = sp.getString(_kWsList);
+    if (raw == null) return <String, dynamic>{};
+    try {
+      return Map<String, dynamic>.from(jsonDecode(raw) as Map);
+    } catch (_) {
+      return <String, dynamic>{};
     }
   }
 
@@ -273,6 +313,7 @@ class ProcessingScreen extends StatefulWidget {
 
 class _ProcessingScreenState extends State<ProcessingScreen> {
   String _dir = kProcPaid;
+  bool _onlyOpen = false; // فاز ۲: فیلتر «عملیات باز» در تب کارگاه داخلی
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _items = <Map<String, dynamic>>[];
@@ -315,8 +356,10 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final List<Map<String, dynamic>> visible =
-        _items.where((Map<String, dynamic> o) => '${o['direction']}' == _dir).toList();
+    final List<Map<String, dynamic>> visible = _items
+        .where((Map<String, dynamic> o) => '${o['direction']}' == _dir && (!_onlyOpen || _dir != kProcInternal || '${o['status']}' == kWsOpen))
+        .toList();
+    final int openCount = _items.where((Map<String, dynamic> o) => '${o['direction']}' == kProcInternal && '${o['status']}' == kWsOpen).length;
     final List<Map<String, dynamic>> queued = _queued.where((Map<String, dynamic> o) => '${o['label']}'.isNotEmpty).toList();
 
     return Scaffold(
@@ -329,14 +372,20 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
               icon: const Icon(Icons.table_chart_outlined),
               onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const OutsideRawScreen())),
             ),
+          if (_dir == kProcInternal && _can('processing.create'))
+            IconButton(
+              tooltip: 'ثبت یک‌جای عملیات (ورودی و خروجی با هم)',
+              icon: const Icon(Icons.post_add),
+              onPressed: () => _open(const WorkshopFormScreen()),
+            ),
           IconButton(tooltip: 'به‌روزرسانی', icon: const Icon(Icons.refresh), onPressed: _load),
         ],
       ),
       floatingActionButton: _can('processing.create')
           ? FloatingActionButton.extended(
-              onPressed: () => _open(_dir == kProcInternal ? const WorkshopFormScreen() : ProcessingFormScreen(direction: _dir)),
-              icon: const Icon(Icons.add),
-              label: Text(_dir == kProcPaid ? 'سفارش برون‌سپاری' : (_dir == kProcInternal ? 'عملیات کارگاه داخلی' : 'سفارش فراوری امانی')),
+              onPressed: () => _open(_dir == kProcInternal ? const WorkshopOpenFormScreen() : ProcessingFormScreen(direction: _dir)),
+              icon: Icon(_dir == kProcInternal ? Icons.play_arrow : Icons.add),
+              label: Text(_dir == kProcPaid ? 'سفارش برون‌سپاری' : (_dir == kProcInternal ? 'شروع عملیات کارگاه' : 'سفارش فراوری امانی')),
             )
           : null,
       body: RefreshIndicator(
@@ -364,6 +413,19 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
                 ),
               ],
             ),
+            if (_dir == kProcInternal)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Align(
+                  alignment: AlignmentDirectional.centerStart,
+                  child: FilterChip(
+                    avatar: const Icon(Icons.pending_actions, size: 18),
+                    label: Text('عملیات باز (${faNum(openCount, dec: 0)})'),
+                    selected: _onlyOpen,
+                    onSelected: (bool v) => setState(() => _onlyOpen = v),
+                  ),
+                ),
+              ),
             const SizedBox(height: 10),
             if (_error != null)
               Card(
@@ -417,16 +479,14 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
 
   Widget _tile(Map<String, dynamic> o) {
     if ('${o['direction']}' == kProcInternal) {
-      final bool? ok = o['balance_ok'] is bool ? o['balance_ok'] as bool : null;
-      return Card(
-        child: ListTile(
-          leading: Icon(ok == false ? Icons.warning_amber_rounded : Icons.factory_outlined, color: ok == false ? Colors.orange : null),
-          title: Text('${kWsOpLabels['${o['op_type']}'] ?? o['op_type'] ?? 'کارگاه'}${(o['owner'] ?? '').toString().isEmpty ? '' : '  •  ${o['owner']}'}'),
-          subtitle: Text('${jalaliDate('${o['date']}')}  •  ${ok == null ? '' : (ok ? 'تراز صحیح' : 'نیاز به بررسی (اختلاف ${_kg(o['balance_diff_kg'])})')}\n'
-              'ورودی ${_kg(o['input_kg'])} · خروجی ${_kg(o['output_kg'])} · افت ${_kg(o['loss_kg'])} کیلو'),
-          isThreeLine: true,
-          onTap: () => _open(ProcessingDetailScreen(id: _n(o['id']).toInt())),
-        ),
+      // فاز ۲: عملیات باز ⇒ صفحهٔ کارگاه مرحله‌ای؛ بسته ⇒ جزئیات (با «بازکردن برای اصلاح»)
+      final bool open = '${o['status']}' == kWsOpen;
+      return wsOpTile(
+        context,
+        o,
+        () => _open(open
+            ? WorkshopOpScreen(orderUid: o['uid'] as String?, id: _n(o['id']).toInt())
+            : ProcessingDetailScreen(id: _n(o['id']).toInt())),
       );
     }
     final bool rec = '${o['direction']}' == kProcReceived;
@@ -468,7 +528,10 @@ class _ProcLine {
 
 class ProcessingFormScreen extends StatefulWidget {
   final String direction;
-  const ProcessingFormScreen({super.key, required this.direction});
+
+  /// فاز ۳: ویرایش کامل سفارش برون‌سپاری «در جریان» (پاسخ processing.get) ⇒ processing.update (اتمی، همان id و uid).
+  final Map<String, dynamic>? edit;
+  const ProcessingFormScreen({super.key, required this.direction, this.edit});
 
   @override
   State<ProcessingFormScreen> createState() => _ProcessingFormScreenState();
@@ -491,10 +554,31 @@ class _ProcessingFormScreenState extends State<ProcessingFormScreen> {
   bool _saving = false;
 
   bool get _paid => widget.direction == kProcPaid;
+  bool get _isEdit => widget.edit != null;
 
   @override
   void initState() {
     super.initState();
+    final Map<String, dynamic>? e = widget.edit;
+    if (e != null) {
+      _party.text = '${e['party'] ?? ''}';
+      _note.text = '${e['note'] ?? ''}';
+      _fee.text = '${e['fee_value'] ?? 0}';
+      _std.text = '${e['standard_yield_pct'] ?? 100}';
+      _date = DateTime.tryParse('${e['date'] ?? ''}') ?? _date;
+      _service = _services.containsKey('${e['service']}') ? '${e['service']}' : 'other';
+      _basis = _feeBasis.containsKey('${e['fee_basis']}') ? '${e['fee_basis']}' : 'per_kg';
+      _lines.clear();
+      for (final Map<String, dynamic> it in ReturnsHelp.maps(e['inputs'])) {
+        final _ProcLine l = _ProcLine()
+          ..lotLocalId = '${it['lot_id']}'
+          ..kg.text = '${it['kg']}'
+          ..small.text = '${it['small_sacks'] ?? 0}'
+          ..large.text = '${it['large_sacks'] ?? 0}';
+        _lines.add(l);
+      }
+      if (_lines.isEmpty) _lines.add(_ProcLine());
+    }
     _init();
   }
 
@@ -505,6 +589,10 @@ class _ProcessingFormScreenState extends State<ProcessingFormScreen> {
       for (final Map<String, dynamic> r in rows) {
         if (_n(r['is_mix']) != 0 || _n(r['remaining']) <= 0) continue;
         lots['${r['id']}'] = '${r['code'] ?? ''} · ${r['type_name'] ?? ''} · ${_kg(r['remaining'])} کیلو';
+      }
+      // فاز ۳: لات‌های ورودیِ همین سفارش (اکنون از موجودی کم شده‌اند) هم باید در فهرست باشند
+      for (final Map<String, dynamic> it in ReturnsHelp.maps(widget.edit?['inputs'])) {
+        lots.putIfAbsent('${it['lot_id']}', () => '${it['code'] ?? ''} · ${it['type_name'] ?? ''} · همین سفارش ${_kg(it['kg'])} کیلو');
       }
       if (mounted) setState(() => _lots = lots);
     } else {
@@ -579,8 +667,14 @@ class _ProcessingFormScreenState extends State<ProcessingFormScreen> {
         'items': items,
       };
       if (!_paid && _wh != null) payload['warehouse_uid'] = _wh;
-      if (_paid) payload.addAll(_rc.sentPayload(clearEmpty: false));
-      final bool queued = await ProcessingStore.write('processing.create', payload, '${_paid ? 'برون‌سپاری' : 'فراوری امانی'}: $party');
+      if (_paid && !_isEdit) payload.addAll(_rc.sentPayload(clearEmpty: false)); // ویرایش: قبض ذخیره‌شده را سرور نگه می‌دارد
+      if (_isEdit) {
+        payload.remove('uid');
+        payload['id'] = widget.edit!['id'];
+        if (widget.edit!['edit_version'] != null) payload['base_version'] = widget.edit!['edit_version'];
+      }
+      final bool queued = await ProcessingStore.write(_isEdit ? 'processing.update' : 'processing.create', payload,
+          '${_isEdit ? 'ویرایش ' : ''}${_paid ? 'برون‌سپاری' : 'فراوری امانی'}: $party');
       if (!mounted) return;
       _snack(queued ? 'آفلاین ذخیره شد؛ پس از اتصال ارسال می‌شود' : 'ثبت شد');
       Navigator.pop(context, true);
@@ -952,6 +1046,7 @@ class _ProcessingDetailScreenState extends State<ProcessingDetailScreen> {
           actions: <Widget>[
             if (_d.isNotEmpty) IconButton(tooltip: 'برگه کار', icon: const Icon(Icons.print_outlined), onPressed: () => _print(fee: false)),
             if (_d.isNotEmpty && !_int) IconButton(tooltip: 'پیش‌فاکتور کرایه', icon: const Icon(Icons.receipt_outlined), onPressed: () => _print(fee: true)),
+            if (_d.isNotEmpty && !_int && _can('processing.manage')) IconButton(tooltip: 'ویرایش', icon: const Icon(Icons.edit_outlined), onPressed: _editDoc), // فاز ۳
             if (_d['deletable'] == true && canManage) IconButton(tooltip: 'حذف', icon: const Icon(Icons.delete_outline), onPressed: _delete),
           ],
         ),
@@ -1010,8 +1105,9 @@ class _ProcessingDetailScreenState extends State<ProcessingDetailScreen> {
                         OutsideReceiptCard(order: _d, canEdit: canManage, onEdit: _editReceipt),
                         const SizedBox(height: 8),
                       ],
+                      if (_int) _flowCard(),
                       if (!_int) _massCard(),
-                      if (_int && wsCanCost()) _costCard(),
+                      if (_int && wsCanCost() && '${_d['status']}' != kWsOpen) _costCard(),
                       const SizedBox(height: 8),
                       Text('ورودی‌ها', style: Theme.of(context).textTheme.titleMedium),
                       for (final dynamic x in (_d['inputs'] is List ? _d['inputs'] as List<dynamic> : <dynamic>[]))
@@ -1089,6 +1185,81 @@ class _ProcessingDetailScreenState extends State<ProcessingDetailScreen> {
     await _run('processing.receipt_save', payload, 'قبض کارگاه بیرونی: ${_d['party'] ?? ''}');
   }
 
+  /// فاز ۳: ویرایش فراوری برون‌سپاری/امانی (processing.update). برون‌سپاری «در جریان» ⇒ فرم کامل (اقلام، کرایه، …)؛ بقیه ⇒ تاریخ و توضیح.
+  Future<void> _editDoc() async {
+    if ('${_d['direction']}' == kProcPaid && '${_d['status']}' == 'in_progress') {
+      final bool? ok = await Navigator.push<bool>(context, MaterialPageRoute<bool>(builder: (_) => ProcessingFormScreen(direction: kProcPaid, edit: _d)));
+      if (ok == true) {
+        _changed = true;
+        await _load();
+      }
+      return;
+    }
+    final Map<String, dynamic>? v = await showEditDocDialog(context, 'ویرایش سفارش فراوری', <EditField>[
+      EditField('date', 'تاریخ', _d['date'], kind: EditKind.date),
+      EditField('note', 'توضیح', _d['note']),
+    ]);
+    if (v == null || !mounted) return;
+    if (await submitDocEdit(context, 'processing.update', <String, dynamic>{'id': _d['id'], ...v}, baseVersion: _d['edit_version']) != null) {
+      _changed = true;
+      await _load();
+    }
+  }
+
+  /// فاز ۲: وضعیت چرخهٔ عمر عملیات داخلی + «بازکردن برای اصلاح» (فقط workshop.manage؛ پیام روشن اگر خروجی مصرف شده و در کدام سند).
+  Widget _flowCard() {
+    final bool open = '${_d['status']}' == kWsOpen;
+    final String? block = _d['reopen_block'] as String?;
+    final bool manage = _can('workshop.manage');
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Text(open ? 'وضعیت: در کارگاه (باز) — خروجی‌ها هنوز وارد موجودی نشده‌اند' : 'وضعیت: بسته${_d['closed_at'] == null ? '' : ' در ${jalaliDate('${_d['closed_at']}')}'}'),
+            const SizedBox(height: 8),
+            if (open)
+              FilledButton.icon(
+                onPressed: () async {
+                  await Navigator.pushReplacement(context, MaterialPageRoute<bool>(builder: (_) => WorkshopOpScreen(orderUid: _d['uid'] as String?, id: _n(_d['id']).toInt())));
+                },
+                icon: const Icon(Icons.edit_note),
+                label: const Text('ادامهٔ ثبت ورودی/خروجی'),
+              )
+            else if (manage) ...<Widget>[
+              OutlinedButton.icon(onPressed: block == null ? _reopen : null, icon: const Icon(Icons.lock_open), label: const Text('بازکردن برای اصلاح')),
+              if (block != null) Padding(padding: const EdgeInsets.only(top: 6), child: Text(block, style: const TextStyle(color: Colors.orange))),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _reopen() async {
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext c) => AlertDialog(
+        title: const Text('بازکردن برای اصلاح'),
+        content: const Text('لات‌های خروجی و بهای آن‌ها حذف می‌شوند تا عملیات دوباره بسته شود؛ ورودی‌ها از موجودی کم‌شده می‌مانند. ادامه می‌دهید؟'),
+        actions: <Widget>[
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('انصراف')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('بازکردن')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    try {
+      await StockApi.call('workshop.reopen', <String, dynamic>{'id': _d['id']});
+      _changed = true;
+      if (!mounted) return;
+      await Navigator.pushReplacement(context, MaterialPageRoute<bool>(builder: (_) => WorkshopOpScreen(orderUid: _d['uid'] as String?, id: _n(_d['id']).toInt())));
+    } on StockApiException catch (e) {
+      _snack(e.message);
+    }
+  }
+
   /// بهای کارگاه داخلی (مرحلهٔ ۲؛ مقادیر سرور). فقط با price.view + workshop.cost دیده می‌شود.
   Widget _costCard() {
     final bool has = _d['cost_sound'] != null;
@@ -1099,6 +1270,8 @@ class _ProcessingDetailScreenState extends State<ProcessingDetailScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Text('بها (${Fmt.unitLabel()})', style: Theme.of(context).textTheme.titleMedium),
+            Text('قیمت خرید هر کیلو (از بهای لات‌های ورودی): ${_d['buy_per_kg'] == null ? '—' : _money(_d['buy_per_kg'])}'),
+            if ('${_d['input_cost_warning'] ?? ''}' == 'missing_input_cost') const Text(kWsMissingInputCost, style: TextStyle(color: Colors.orange)),
             if (!has) const Text('بها هنوز ثبت نشده است.')
             else ...<Widget>[
               Text('ارزش ورودی (W): ${_money(_d['value_in'])}'),
@@ -1137,6 +1310,12 @@ class _ProcessingDetailScreenState extends State<ProcessingDetailScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: wsReadOnlyField(kWsBuyLabel, _d['buy_per_kg'] == null ? '—' : _money(_d['buy_per_kg']), helper: 'محاسبهٔ خودکار؛ قابل ویرایش نیست'),
+              ),
+              if ('${_d['input_cost_warning'] ?? ''}' == 'missing_input_cost')
+                const Padding(padding: EdgeInsets.only(bottom: 8), child: Text(kWsMissingInputCost, style: TextStyle(color: Colors.orange))),
               for (final List<String> f in kWsCostFields)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),

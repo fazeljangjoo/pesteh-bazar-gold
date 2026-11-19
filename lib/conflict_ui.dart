@@ -56,6 +56,9 @@ ConflictInfo classifyConflict(String err) {
 String conflictActionLabel(String a) => switch (a) {
       'categories.create' => 'افزودن دسته',
       'types.create' => 'افزودن نوع',
+      'categories.rename' => 'تغییر نام دسته', // فاز ۳
+      'types.rename' => 'تغییر نام نوع',
+      'loans.update' => 'ویرایش قرض/بازپرداخت',
       'purchases.create' => 'ثبت/ویرایش خرید',
       'purchases.delete' => 'حذف خرید',
       'mixes.create' => 'ثبت مخلوط/جداسازی',
