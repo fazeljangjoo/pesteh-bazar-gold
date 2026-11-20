@@ -21,7 +21,13 @@ class ReturnsHelp {
   static String iso(DateTime d) =>
       '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 
-  static String newUid(String p) => '$p${DateTime.now().microsecondsSinceEpoch}';
+  /// شناسهٔ یکتا: زمان (میکروثانیه) + شمارندهٔ داخلی. شمارنده لازم است چون چند uid در یک حلقه (مثلاً ورودی‌های workshop.open)
+  /// ممکن است در همان میکروثانیه ساخته شوند (ساعت ویندوز دقت کمتری دارد) و uid تکراری روی سرور خطای Duplicate entry می‌دهد.
+  static int _uidSeq = 0;
+  static String newUid(String p) {
+    _uidSeq = (_uidSeq + 1) % 1000;
+    return '$p${DateTime.now().microsecondsSinceEpoch}${_uidSeq.toString().padLeft(3, '0')}';
+  }
 
   /// Server id of a local row; throws a Persian message when it has not reached the server yet.
   static Future<int> serverId(String kind, int localId) async {
