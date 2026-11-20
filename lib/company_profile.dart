@@ -9,7 +9,7 @@ import 'entity_store.dart';
 /// S12.T12.1 — company identity printed on invoices + document numbering + chosen PDF template.
 
 /// Entities managed from the dedicated settings screen (hidden from the generic entity menu).
-const Set<String> kHiddenEntityMenu = <String>{'company_profile', 'doc_sequences'};
+const Set<String> kHiddenEntityMenu = <String>{'company_profile', 'doc_sequences', 'crack_lines'}; // crack_lines: آیتم جدای «خطوط شکست» در منو
 
 /// Paper/layout templates for invoices and documents.
 enum InvTemplate { a4, a5, roll80, roll58 }

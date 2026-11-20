@@ -7,7 +7,7 @@ import 'db.dart';
 
 /// Bump when [kEntityRegistry] changes in a way the server must know about (informational; the server
 /// stays the authority: only entities it exports/lists are shown, see [EntityStore.visibleNames]).
-const int kEntityRegistryVersion = 2; // S5.T1: lot_intakes / lot_intake_pcts / pct_defs (اتاق انس)
+const int kEntityRegistryVersion = 3; // S5.T1: lot_intakes / lot_intake_pcts / pct_defs (اتاق انس)؛ v79: crack_lines
 
 /// One field of an entity (mirrors a column spec of `server/backend/api/entities.php`).
 /// type: string | text | int | bigint | decimal | bool | date | datetime | enum | ref | json
@@ -94,6 +94,23 @@ class EntitySpec {
 /// Bundled static registry (same names/types as the server registry). Later stages append entries.
 /// Never rename/remove a released entry or field.
 const Map<String, EntitySpec> kEntityRegistry = <String, EntitySpec>{
+  // کارگاه داخلی — خطوط شکست (mirror of server `crack_lines`): نام خط + گرم پرتی؛ در شروع عملیات «شکست» انتخاب می‌شود.
+  'crack_lines': EntitySpec(
+    'crack_lines',
+    'خط شکست',
+    <EntityField>[
+      EntityField('name', 'نام خط', 'string', required: true, max: 100),
+      EntityField('loss_gram', 'گرم پرتی', 'decimal', required: true, vmin: 0, vmax: 1000, scale: 2),
+      EntityField('active', 'فعال', 'bool', defaultValue: true),
+    ],
+    search: <String>['name'],
+    listFields: <String>['name', 'loss_gram'],
+    orderCol: 'name',
+    orderDesc: false,
+    permCreate: 'workshop.manage',
+    permEdit: 'workshop.manage',
+    permDelete: 'workshop.manage',
+  ),
   // S01.T01.1 (mirror of server `warehouses`)
   'warehouses': EntitySpec(
     'warehouses',

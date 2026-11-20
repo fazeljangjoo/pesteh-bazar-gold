@@ -241,6 +241,17 @@ class _HomeShellState extends State<HomeShell> {
                   _push(context, MaterialPageRoute<void>(builder: (_) => const ProcessingScreen()));
                 },
               ),
+              // کارگاه داخلی: تعریف خطوط شکست (نام خط + گرم پرتی) برای عملیات «شکست»
+              if (StaffPerms.I.can('workshop.view') || StaffPerms.I.can('workshop.manage'))
+                ListTile(
+                  leading: const Icon(Icons.linear_scale),
+                  title: const Text('خطوط شکست'),
+                  subtitle: const Text('نام خط و گرم پرتی', style: TextStyle(fontSize: 11.5)),
+                  onTap: () {
+                    _closeMenu(context);
+                    _push(context, MaterialPageRoute<void>(builder: (_) => const EntityListScreen(entity: 'crack_lines')));
+                  },
+                ),
               const Divider(height: 1),
               if (StaffPerms.I.can('settings.manage'))
                 ListTile( // S35.T35.1

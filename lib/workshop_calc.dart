@@ -23,10 +23,14 @@ const Map<String, String> kWsGradeLabels = <String, String>{
   'chaft': 'چفت',
   'dombest': 'دهنبست',
   'custom': 'سایر',
+  'uncracked': 'نشکن',
 };
 
+/// v80: خروجی‌های مجاز عملیات «شکست». آینهٔ PB_WS_CRACK_GRADES.
+const List<String> kWsCrackGrades = <String>['kernel', 'hull', 'uncracked'];
+
 /// درجه‌های غیرسالم (جزو P). آینهٔ PB_WS_SUB_GRADES.
-const List<String> kWsSubGrades = <String>['deformed_fine', 'hull', 'kernel', 'soil', 'discolored', 'chaft', 'dombest', 'custom'];
+const List<String> kWsSubGrades = <String>['deformed_fine', 'hull', 'kernel', 'soil', 'discolored', 'chaft', 'dombest', 'custom', 'uncracked'];
 
 const List<String> kWsOpTypes = <String>['dehull', 'desoil', 'split', 'fines', 'crack'];
 
@@ -912,7 +916,7 @@ WsFlowStep wsFlowApply(Map<String, dynamic> s0, String action, Map<String, dynam
       for (final dynamic it in (p['items'] as List<dynamic>? ?? const <dynamic>[])) {
         ins.add(Map<String, dynamic>.from(it as Map));
       }
-      for (final String k in <String>['uid', 'op_type', 'owner', 'pistachio_type', 'defect_note', 'initial_kg', 'bale_count', 'note']) {
+      for (final String k in <String>['uid', 'op_type', 'owner', 'pistachio_type', 'defect_note', 'initial_kg', 'bale_count', 'note', 'crack_line_uid', 'crack_line_name', 'crack_loss_gram', 'input_gram']) {
         if (p.containsKey(k)) s[k] = p[k];
       }
       s['started_at'] = p['start_date'] ?? p['date'];
@@ -958,6 +962,10 @@ WsFlowStep wsFlowApply(Map<String, dynamic> s0, String action, Map<String, dynam
         if (p['end_date'] != null) s['closed_at'] = p['end_date'];
       }
       break;
+    case 'crack_cost': // v80: هزینهٔ شکست هر کیلو مغز (فقط عملیات باز)
+      err = wsFlowCheck(status, 'output_save');
+      if (err == null) s['crack_cost_per_kg'] = p['crack_cost_per_kg'];
+      break;
     case 'reopen':
       if (status == kWsOpen) break;
       err = wsFlowCheck(status, 'reopen', used: s['used'] == true);
@@ -968,4 +976,82 @@ WsFlowStep wsFlowApply(Map<String, dynamic> s0, String action, Map<String, dynam
       break;
   }
   return WsFlowStep(s, err);
+}
+
+// ---------------------------------------------------------------------------
+// عملیات «شکست» — برآورد خط شکست (فقط نمایش؛ آینهٔ input_gram سرور در pb_ws_refresh_tx)
+// ---------------------------------------------------------------------------
+
+/// برآوردهای ورودی خط شکست.
+///   [inKg]      وزن خالص ورودی به خط (Σ وزن ورودی‌ها)
+///   [sentGram]  گرم ارسالی = Σ(وزن × گرم لات) ÷ Σ وزن ورودی‌های دارای گرم
+///   [recvGram]  برآورد گرم دریافتی = گرم ارسالی − گرم پرتی خط
+///   [kernelKg]  برآورد مغز سالم دریافتی = گرم دریافتی ÷ ۱۰۰ × وزن خالص ورودی («گرم» = گرم مغز در ۱۰۰ گرم پسته)
+///   [lossPct]   برآورد درصد پرت = گرم پرتی × ۱۰۰ ÷ گرم دریافتی
+class WsCrackEstimate {
+  const WsCrackEstimate({required this.inKg, this.sentGram, this.lossGram, this.recvGram, this.kernelKg, this.lossPct});
+  final double inKg;
+  final double? sentGram;
+  final double? lossGram;
+  final double? recvGram;
+  final double? kernelKg;
+  final double? lossPct;
+}
+
+/// [inputs]: [{kg, gram}] (gram null/۰ ⇒ در میانگین گرم شرکت نمی‌کند). [lossGram]: گرم پرتی خط (null ⇒ خط انتخاب نشده).
+WsCrackEstimate wsCrackEstimate(List<Map<String, num?>> inputs, num? lossGram) {
+  double inKg = 0, gk = 0, gKg = 0;
+  for (final Map<String, num?> r in inputs) {
+    final double kg = (r['kg'] ?? 0).toDouble();
+    if (kg <= 0) continue;
+    inKg += kg;
+    final double g = (r['gram'] ?? 0).toDouble();
+    if (g > 0) {
+      gk += kg * g;
+      gKg += kg;
+    }
+  }
+  final double? sent = gKg > 0 ? gk / gKg : null;
+  final double? loss = lossGram?.toDouble();
+  final double? recv = (sent == null || loss == null) ? null : sent - loss;
+  return WsCrackEstimate(
+    inKg: inKg,
+    sentGram: sent,
+    lossGram: loss,
+    recvGram: recv,
+    kernelKg: recv == null ? null : recv / 100 * inKg,
+    lossPct: (recv == null || recv <= 0) ? null : loss! * 100 / recv,
+  );
+}
+
+/// v80 — اطلاعات خروجی عملیات «شکست» (آینهٔ `pb_ws_crack_result`):
+///   [initGram]   گرم اولیه (گرم ارسالی)
+///   [recvGram]   گرم دریافتی = وزن مغز × ۱۰۰ ÷ وزن خالص ورودی
+///   [lossGram]   افت گرم = گرم اولیه − گرم دریافتی
+///   [lossPct]    درصد پرتی = افت گرم × ۱۰۰ ÷ گرم اولیه
+///   [unitCost]   بهای تمام‌شدهٔ هر کیلو مغز (روش دقیق) = P × وزن ورودی ÷ وزن مغز + هزینهٔ شکست هر کیلو مغز (P = میانگین موزون قیمت ورودی)
+///   [expectedKernelKg] مغز مورد انتظار طبق گرم پرتی خط = (G − گرم پرتی) ÷ ۱۰۰ × وزن ورودی
+class WsCrackResult {
+  const WsCrackResult({this.initGram, this.recvGram, this.lossGram, this.lossPct, this.unitCost, this.expectedKernelKg});
+  final double? initGram;
+  final double? recvGram;
+  final double? lossGram;
+  final double? lossPct;
+  final double? unitCost;
+  final double? expectedKernelKg;
+}
+
+WsCrackResult wsCrackResult({required num inKg, num? gram, required num kernelKg, num? buyPerKg, num crackCost = 0, num? lineLoss}) {
+  final double? g = (gram != null && gram > 0) ? gram.toDouble() : null;
+  final double? recv = (inKg > 0 && kernelKg > 0) ? kernelKg * 100 / inKg : null;
+  final double? loss = (g != null && recv != null) ? g - recv : null;
+  final double? unit = (inKg > 0 && kernelKg > 0 && buyPerKg != null && buyPerKg > 0) ? buyPerKg * inKg / kernelKg + crackCost : null;
+  return WsCrackResult(
+    initGram: g,
+    recvGram: recv,
+    lossGram: loss,
+    lossPct: (g != null && loss != null) ? loss * 100 / g : null,
+    unitCost: unit == null ? null : (unit * 10000).round() / 10000,
+    expectedKernelKg: (g != null && lineLoss != null && inKg > 0) ? (g - lineLoss) / 100 * inKg : null,
+  );
 }
