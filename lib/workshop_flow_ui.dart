@@ -5,6 +5,7 @@ import 'entity_store.dart' show EntityStore;
 import 'fmt.dart' show Fmt;
 import 'form_settings.dart' show FormSettingsLocal;
 import 'perms.dart';
+import 'processing_flow_ui.dart' show ChainSortDialog, procChainCard, wsMoistureRows; // v85
 import 'processing_ui.dart' show ProcessingStore;
 import 'returns_ui.dart' show ReturnsHelp;
 import 'utils.dart';
@@ -687,6 +688,29 @@ class _WorkshopOpenFormScreenState extends State<WorkshopOpenFormScreen> {
     );
   }
 
+  /// v85: آبخندان چندلاتی ⇒ جمع وزن و میانگین موزون انس و گرم ارسالی لات‌های انتخاب‌شده.
+  Widget _abAvgCard() {
+    final List<Map<String, num?>> rows = <Map<String, num?>>[
+      for (final _LotRow r in _rows)
+        if (r.lot != null) <String, num?>{'kg': wsParseNum(r.kg.text), 'ounce': _info[r.lot]?.ounce, 'gram': _info[r.lot]?.gram},
+    ];
+    final double kg = rows.fold<double>(0, (double s, Map<String, num?> r) => s + (r['kg'] ?? 0).toDouble());
+    final double? o = wsWeightedAvg(rows, 'ounce'), g = wsWeightedAvg(rows, 'gram');
+    final ThemeData th = Theme.of(context);
+    return Card(
+      color: th.colorScheme.primaryContainer.withValues(alpha: 0.35),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Wrap(spacing: 22, runSpacing: 6, children: <Widget>[
+          Text('وزن ارسالی کل: ${_kg(kg)} کیلو', style: const TextStyle(fontWeight: FontWeight.bold)),
+          Text('میانگین انس ارسالی: ${o == null ? '—' : faNum(o, dec: 2)}'),
+          Text('میانگین گرم ارسالی: ${g == null ? '—' : _f2(g)}'),
+          if (rows.length > 1) Text('(${faNum(rows.length, dec: 0)} لات؛ میانگین به نسبت وزن)', style: TextStyle(fontSize: 12, color: th.hintColor)),
+        ]),
+      ),
+    );
+  }
+
   /// کادر کناری «شکست»: برآورد خط شکست (+ v81: برآورد وزن پرتی).
   Widget _estimateCard() {
     final WsCrackEstimate e = _estimate;
@@ -744,9 +768,7 @@ class _WorkshopOpenFormScreenState extends State<WorkshopOpenFormScreen> {
             ? _lineField()
             : op == 'production'
                 ? _kindField()
-                : op == 'abkhandan'
-                    ? _lotDropdown(_rows.first, 'لات (دهنبست)')
-                    : null;
+                : null; // v85: آبخندان چندلاتی ⇒ لات‌ها در کارت‌های پایین
         final List<Widget> headCells = <Widget>[_opField(), date, if (third != null) third];
         final Widget head = rowHead
             ? Row(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
@@ -762,15 +784,17 @@ class _WorkshopOpenFormScreenState extends State<WorkshopOpenFormScreen> {
                 padding: const EdgeInsets.only(top: 12),
                 child: Text(op == 'abkhandan' ? 'لات دهنبستی در انبار نیست.' : 'لات موجودی در انبار نیست.', style: const TextStyle(color: Colors.red))));
           }
-          if (op == 'crack') {
+          if (op == 'crack' || op == 'abkhandan') {
             form.addAll(<Widget>[
               const SizedBox(height: 14),
-              Text('ورودی از انبار (همین حالا از موجودی کم می‌شود)', style: Theme.of(context).textTheme.titleMedium),
+              Text(op == 'abkhandan' ? 'لات‌های دهنبست (یک یا چند لات؛ همین حالا از موجودی کم می‌شود)' : 'ورودی از انبار (همین حالا از موجودی کم می‌شود)',
+                  style: Theme.of(context).textTheme.titleMedium),
               for (int i = 0; i < _rows.length; i++) _lotCard(i),
               Align(
                 alignment: AlignmentDirectional.centerStart,
-                child: TextButton.icon(onPressed: () => setState(() => _rows.add(_LotRow())), icon: const Icon(Icons.add), label: const Text('لات دیگر')),
+                child: TextButton.icon(onPressed: () => setState(() => _rows.add(_LotRow())), icon: const Icon(Icons.add), label: Text(op == 'abkhandan' ? 'لات دهنبست دیگر' : 'لات دیگر')),
               ),
+              if (op == 'abkhandan') _abAvgCard(),
             ]);
           } else if (op == 'production') {
             form.addAll(<Widget>[
@@ -785,7 +809,7 @@ class _WorkshopOpenFormScreenState extends State<WorkshopOpenFormScreen> {
               _qtyFields(_rows.first),
             ]);
           }
-          if (op != 'crack' && _rowError(0) != null) form.add(Text(_rowError(0)!, style: const TextStyle(color: Colors.red, fontSize: 12.5)));
+          if (op == 'production' && _rowError(0) != null) form.add(Text(_rowError(0)!, style: const TextStyle(color: Colors.red, fontSize: 12.5)));
           form.addAll(<Widget>[
             gap,
             TextField(controller: _note, decoration: const InputDecoration(labelText: 'یادداشت (اختیاری)', border: OutlineInputBorder())),
@@ -938,7 +962,9 @@ class _WorkshopOpsScreenState extends State<WorkshopOpsScreen> {
 String wsOpTitle(Map<String, dynamic> o) {
   final String op = '${o['op_type'] ?? ''}';
   final String base = kWsOpLabels[op] ?? (op.isEmpty ? 'کارگاه' : op);
-  if (op == 'production' && '${o['prod_kind'] ?? ''}'.isNotEmpty) return '$base — ${o['prod_kind']}';
+  final String chain = ReturnsHelp.d(o['parent_id']) > 0 || o['parent'] is Map ? ' (فرایند شکست)' : ''; // v85
+  if (op == 'production' && '${o['prod_kind'] ?? ''}'.isNotEmpty) return '$base — ${o['prod_kind']}$chain';
+  if (op == 'production') return '$base$chain';
   if (op == 'crack' && '${o['crack_line_name'] ?? ''}'.isNotEmpty) return '$base — ${o['crack_line_name']}';
   return base;
 }
@@ -988,6 +1014,12 @@ class _WorkshopOpScreenState extends State<WorkshopOpScreen> {
   String get _op => '${_d['op_type'] ?? ''}';
   bool get _isCrack => _op == 'crack';
   bool get _single => kWsSingleLotTypes.contains(_op);
+  bool get _split => kWsSplitCostTypes.contains(_op); // v85: تولید و آبخندان (کادر بها و ضایعات)
+
+  /// v85: میانگین موزون انس/گرم ارسالی ورودی‌ها (آبخندان چندلاتی).
+  double? _avgIn(String key) => wsWeightedAvg(<Map<String, num?>>[
+        for (final Map<String, dynamic> r in _ins) <String, num?>{'kg': ReturnsHelp.d(r['kg']), key: _optD(r[key])},
+      ], key);
 
   /// شناسهٔ سفارش برای اکشن‌ها (هم id و هم order_uid اگر معلوم است).
   Map<String, dynamic> get _ref => <String, dynamic>{
@@ -1220,7 +1252,7 @@ class _WorkshopOpScreenState extends State<WorkshopOpScreen> {
 
   /// v81: کادر «اطلاعات خروجی» تولید و آبخندان: تراز وزنی + بهای هر کیلو (ارزش ورودی + اجرت + سایر هزینه ÷ وزن خروجی).
   Widget? _splitCard(WsBalance t) {
-    if (!_single || _outs.isEmpty) return null;
+    if (!_split || _outs.isEmpty) return null;
     final bool cost = wsCanCost();
     final double? buy = _optD(_d['buy_per_kg']);
     final double wage = ReturnsHelp.d(_d['wage_per_kg']);
@@ -1242,8 +1274,12 @@ class _WorkshopOpScreenState extends State<WorkshopOpScreen> {
         child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: <Widget>[
           Text(ab ? 'اطلاعات خروجی آبخندان' : 'اطلاعات خروجی تولید', style: Theme.of(context).textTheme.titleMedium),
           const Divider(),
-          ..._weightBalance(t.inputKg, 'وزن ورودی'),
-          if (ab) const Text('افت یا بالا رفتن وزن روی همهٔ پستهٔ خروجی پخش می‌شود.'),
+          if (ab) ...<Widget>[
+            // v85: وزن ارسالی/دریافتی، کم‌بود یا وزن اضافه‌شده، درصد رطوبت با علامت، میانگین انس و گرم ارسالی
+            ...wsMoistureRows(context, sentKg: t.inputKg, recvKg: _outKg, avgOunce: _avgIn('ounce'), avgGram: _avgIn('gram'), buyPerKg: cost ? buy : null),
+            const Text('افت یا بالا رفتن وزن روی همهٔ پستهٔ خروجی پخش می‌شود (فی کم‌بود روی بار اعمال می‌شود).'),
+          ] else
+            ..._weightBalance(t.inputKg, 'وزن ورودی'),
           if (cost) ...<Widget>[
             const Divider(),
             _kvRow(kWsBuyLabel, buy == null ? '—' : Fmt.money(buy, label: false)),
@@ -1417,6 +1453,71 @@ class _WorkshopOpScreenState extends State<WorkshopOpScreen> {
     );
   }
 
+  // ── v85: «تولید (سورت)» در همین فرایند شکست ──
+  Widget? _chainCard() {
+    if (_d.isEmpty) return null;
+    final bool chained = ReturnsHelp.d(_d['parent_id']) > 0 || _d['parent'] is Map;
+    if (!_isCrack && !chained) return null;
+    if (chained) {
+      final Map<String, dynamic>? par = _d['parent'] is Map ? Map<String, dynamic>.from(_d['parent'] as Map) : null;
+      return procChainCard(context, _d,
+          onOpen: (_) {},
+          onOpenParent: () => Navigator.push(context,
+              MaterialPageRoute<bool>(builder: (_) => WorkshopOpScreen(orderUid: par?['uid'] as String?, id: ReturnsHelp.d(par?['id'] ?? _d['parent_id']).toInt()))));
+    }
+    final bool canStart = _can('workshop.operate') || _can('processing.create');
+    final bool canClose = _can('workshop.manage');
+    String? hint;
+    if (_open && _outs.isEmpty) hint = 'پس از ثبت خروجی‌های شکست، می‌توانید آن‌ها را در همین فرایند به تولید (سورت) بفرستید.';
+    if (_open && _outs.isNotEmpty && !canClose) hint = 'برای ارسال به تولید، عملیات شکست باید بسته شود (مجوز مدیر کارگاه).';
+    final bool can = canStart && _outs.isNotEmpty && (_d['status'] == 'done' || (_open && canClose));
+    return procChainCard(context, _d,
+        onSend: can && !_busy ? _sendToSort : null,
+        hint: hint,
+        onOpen: (Map<String, dynamic> c) async {
+          await Navigator.push(context, MaterialPageRoute<bool>(builder: (_) => WorkshopOpScreen(orderUid: c['uid'] as String?, id: ReturnsHelp.d(c['id']).toInt())));
+          await _load();
+        });
+  }
+
+  /// خروجی‌های شکست ⇒ «تولید (سورت)» پیوسته (workshop.open با parent_id و لات‌های خروجی). شکستِ باز اول بسته می‌شود تا خروجی‌ها لات شوند.
+  Future<void> _sendToSort() async {
+    if (_open) {
+      if (!await confirm(context, 'برای ارسال خروجی‌ها به تولید (سورت)، ابتدا عملیات شکست بسته می‌شود تا خروجی‌ها لات شوند. ادامه می‌دهید؟')) return;
+      await _close();
+      if (!mounted || _d['status'] != 'done') return;
+    }
+    if (_id == null || _id! <= 0 || _outs.any((Map<String, dynamic> r) => r['lot_id'] == null)) {
+      return _snack(context, 'خروجی‌های شکست هنوز به سرور نرسیده‌اند؛ پس از اتصال و همگام‌سازی دوباره امتحان کنید');
+    }
+    final Map<String, dynamic>? r = await showDialog<Map<String, dynamic>>(context: context, builder: (_) => ChainSortDialog(outputs: _outs));
+    if (r == null || !mounted) return;
+    final String uid = ReturnsHelp.newUid('wo');
+    setState(() => _busy = true);
+    try {
+      await StockApi.call('workshop.open', <String, dynamic>{
+        'uid': uid,
+        'op_type': 'production',
+        'prod_kind': r['prod_kind'],
+        'start_date': r['date'],
+        'parent_id': _id,
+        if (_uid != null) 'parent_uid': _uid,
+        'note': 'فرایند ${wsOpTitle(_d)}',
+        'items': r['items'],
+      });
+      _changed = true;
+      if (!mounted) return;
+      _snack(context, 'تولید (سورت) در همین فرایند شروع شد؛ خروجی‌های تولید را ثبت کنید');
+      setState(() => _busy = false);
+      await Navigator.push(context, MaterialPageRoute<bool>(builder: (_) => WorkshopOpScreen(orderUid: uid)));
+      await _load();
+    } on StockApiException catch (e) {
+      if (mounted) _snack(context, e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   // ── بستن / بازکردن ──
   Future<void> _close() async {
     final WsBalance t = wsFlowTotals(_d);
@@ -1580,6 +1681,8 @@ class _WorkshopOpScreenState extends State<WorkshopOpScreen> {
                           if (_d['initial_kg'] != null) Text('وزن خالص اولیه: ${_kg(_d['initial_kg'])} کیلو'),
                           if (_d['bale_count'] != null) Text('تعداد عدل: ${faNum(ReturnsHelp.d(_d['bale_count']), dec: 0)}'),
                           ..._crackInfo(t.inputKg),
+                          if (_op == 'abkhandan' && _ins.isNotEmpty)
+                            Text('میانگین انس ارسالی: ${_avgIn('ounce') == null ? '—' : faNum(_avgIn('ounce')!, dec: 2)}  •  میانگین گرم ارسالی: ${_avgIn('gram') == null ? '—' : _f2(_avgIn('gram')!)}'),
                         ]),
                       ),
                     ),
@@ -1592,9 +1695,9 @@ class _WorkshopOpScreenState extends State<WorkshopOpScreen> {
                           child: Wrap(spacing: 16, runSpacing: 4, children: <Widget>[
                             Text('ورودی ${_kg(t.inputKg)}'),
                             Text('Σ خروجی ${_kg(t.inputKg - t.lossKg)}'),
-                            Text('${t.lossKg < 0 ? 'اضافه وزن' : (_single ? 'ضایعات' : 'افت')} ${_kg(t.lossKg.abs())}${t.lossPct == null ? '' : ' (${faNum(t.lossPct!.abs(), dec: 1)}٪)'}',
+                            Text('${t.lossKg < 0 ? 'اضافه وزن' : (_split ? 'ضایعات' : 'افت')} ${_kg(t.lossKg.abs())}${t.lossPct == null ? '' : ' (${faNum(t.lossPct!.abs(), dec: 1)}٪)'}',
                                 style: TextStyle(color: t.overOutput && _op != 'abkhandan' ? Colors.red : null, fontWeight: FontWeight.bold)),
-                            if (!_single) Text('سالم ${t.soundPct == null ? '—' : '${faNum(t.soundPct!, dec: 1)}٪'}'),
+                            if (!_split) Text('سالم ${t.soundPct == null ? '—' : '${faNum(t.soundPct!, dec: 1)}٪'}'),
                             if (t.overOutput && _op != 'abkhandan') const Text('جمع خروجی‌ها از ورودی بیشتر است', style: TextStyle(color: Colors.red)),
                           ]),
                         ),
@@ -1634,6 +1737,7 @@ class _WorkshopOpScreenState extends State<WorkshopOpScreen> {
                         ),
                     ], action: edit ? TextButton.icon(onPressed: () => _editOutput(), icon: const Icon(Icons.add), label: const Text('ثبت خروجی')) : null),
                     if (outCard != null) outCard,
+                    if (_chainCard() != null) _chainCard()!, // v85: تولید (سورت) در همین فرایند شکست
                     const SizedBox(height: 12),
                     if (_open && canManage)
                       FilledButton.icon(
@@ -2070,7 +2174,7 @@ class _CloseDialogState extends State<_CloseDialog> {
   late final String _op = '${widget.detail['op_type'] ?? ''}';
   /// v80: «شکست» ⇒ بهای مغز از فرمول شکست؛ نشکن = قیمت ورودی ⇒ فقط پوست قیمت فروش دارد. v81: آبخندان ⇒ همهٔ خروجی هم‌بها (بدون قیمت).
   late final bool _crack = _op == 'crack';
-  late final bool _single = kWsSingleLotTypes.contains(_op);
+  late final bool _single = kWsSplitCostTypes.contains(_op); // v85: تولید و آبخندان
   late final Map<String, TextEditingController> _cost = <String, TextEditingController>{
     for (final List<String> f in kWsCostFields) f[0]: TextEditingController(text: widget.detail[f[0]] == null ? '' : '${widget.detail[f[0]]}'),
   };

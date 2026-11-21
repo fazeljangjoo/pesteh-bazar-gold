@@ -5,7 +5,7 @@ import 'form_settings.dart' show FormSettingsLocal;
 import 'processing_ui.dart' show ProcessingStore;
 import 'returns_ui.dart' show ReturnsHelp;
 import 'utils.dart';
-import 'warehouse_ui.dart' show StockApiException, StockLookup, WhOption;
+import 'warehouse_ui.dart' show StockApi, StockApiException, StockLookup, WhOption;
 import 'widgets.dart' show JalaliDateField;
 import 'workshop_calc.dart';
 import 'workshop_flow_ui.dart' show WsCat, WsCats, WsCrackData, WsCrackLine, WsLotInfo, WsLotPicker, WsOutputDialog;
@@ -271,6 +271,14 @@ class _ProcOrderFormScreenState extends State<ProcOrderFormScreen> {
     }
     return k > 0 ? gk / k : null;
   }
+
+  /// v85: میانگین موزون انس ارسالی (آبخندان چندلاتی).
+  double? get _avgOunce => wsWeightedAvg(<Map<String, num?>>[
+        if (_paid)
+          for (final _PaidIn r in _paidIns) <String, num?>{'kg': wsParseNum(r.kg.text), 'ounce': _info[r.lot]?.ounce}
+        else
+          for (final _RecIn r in _recIns) <String, num?>{'kg': _netOf(r), 'ounce': r.ounce.text.trim().isEmpty ? null : wsParseNum(r.ounce.text)},
+      ], 'ounce');
 
   String? _paidRowError(int idx) {
     final _PaidIn r = _paidIns[idx];
@@ -680,7 +688,8 @@ class _ProcOrderFormScreenState extends State<ProcOrderFormScreen> {
                   label: Text(_paid ? 'لات دیگر' : 'ورودی دیگر'),
                 ),
               ),
-            Text('جمع ورودی: ${_kg(_inKg)} کیلو${sg == null ? '' : '  •  گرم ارسالی ${_f2(sg)}'}'),
+            Text('جمع ورودی: ${_kg(_inKg)} کیلو${sg == null ? '' : '  •  ${_op == 'abkhandan' ? 'میانگین گرم ارسالی' : 'گرم ارسالی'} ${_f2(sg)}'}'
+                '${_op == 'abkhandan' && _avgOunce != null ? '  •  میانگین انس ارسالی ${faNum(_avgOunce!, dec: 2)}' : ''}'),
             gap,
             Text(_paid ? 'اجرت و هزینه‌ها (بستانکار فراوری‌کننده؛ روی بهای خروجی‌ها)' : 'اجرت و هزینه‌ها (بدهکار مشتری)', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 6),
@@ -920,9 +929,22 @@ List<Widget> procOpInfo(BuildContext context, Map<String, dynamic> d, {bool show
     if ('${d['ext_party'] ?? ''}'.isNotEmpty) Text('فراوری‌کنندهٔ بیرونی: ${d['ext_party']}${showMoney && d['ext_fee'] != null ? ' — کرایه ${Fmt.money(ReturnsHelp.d(d['ext_fee']), label: false)}' : ''}'),
     if (showMoney && d['other_cost'] != null) Text('سایر هزینه‌ها: ${Fmt.money(ReturnsHelp.d(d['other_cost']), label: false)} (داخل ${rec ? 'مطالبه' : 'کرایه'})'),
     const Divider(),
-    kv('وزن ورودی', '${_kg(inKg)} کیلو'),
+    if (op != 'abkhandan') kv('وزن ورودی', '${_kg(inKg)} کیلو'),
   ];
-  if (outs.isNotEmpty) {
+  if (op == 'abkhandan') {
+    // v85: آبخندان ⇒ وزن ارسالی/دریافتی، کم‌بود یا وزن اضافه‌شده، درصد رطوبت با علامت، میانگین انس و گرم ارسالی (چند لات)
+    final List<Map<String, num?>> og = <Map<String, num?>>[
+      for (final Map<String, dynamic> r in ReturnsHelp.maps(d['inputs']))
+        <String, num?>{'kg': ReturnsHelp.d(r['kg']), 'ounce': r['ounce'] == null ? null : ReturnsHelp.d(r['ounce']), 'gram': r['gram'] == null ? null : ReturnsHelp.d(r['gram'])},
+    ];
+    final double inCost = ReturnsHelp.d(d['input_cost']);
+    rows.addAll(wsMoistureRows(context,
+        sentKg: inKg,
+        recvKg: outKg,
+        avgOunce: wsWeightedAvg(og, 'ounce'),
+        avgGram: wsWeightedAvg(og, 'gram'),
+        buyPerKg: showMoney && !rec && inKg > 0 && inCost > 0 ? inCost / inKg : null));
+  } else if (outs.isNotEmpty) {
     final double waste = ((inKg - outKg) * 1000).round() / 1000;
     rows.addAll(<Widget>[
       kv('وزن خروجی کل', '${_kg(outKg)} کیلو'),
@@ -958,5 +980,387 @@ List<Widget> procOpInfo(BuildContext context, Map<String, dynamic> d, {bool show
       color: Theme.of(context).colorScheme.secondaryContainer.withValues(alpha: 0.4),
       child: Padding(padding: const EdgeInsets.all(12), child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: rows)),
     ),
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// v85 — «تولید (سورت)» پیوسته به شکست (همان فرایند): کارگاه داخلی، برون‌سپاری، امانی
+// ---------------------------------------------------------------------------
+
+/// عنوان یک خروجی شکست (درجه + نوع).
+String procOutTitle(Map<String, dynamic> r) {
+  final String grade = kWsGradeLabels['${r['grade']}'] ?? '${r['type_name'] ?? ''}';
+  final String kind = '${r['kind_name'] ?? ''}';
+  return kind.isEmpty || kind == grade ? grade : '$grade — $kind';
+}
+
+/// انتخاب یک خروجی شکست برای ارسال به تولید.
+class _ChainPick {
+  _ChainPick(this.row, {required bool on})
+      : sel = on,
+        kg = TextEditingController(text: _numText(_left(row, 'lot_remaining', 'kg'))),
+        small = TextEditingController(text: _numText(_left(row, 'lot_small_left', 'small_sacks'))),
+        large = TextEditingController(text: _numText(_left(row, 'lot_large_left', 'large_sacks')));
+  final Map<String, dynamic> row;
+  bool sel;
+  final TextEditingController kg;
+  final TextEditingController small;
+  final TextEditingController large;
+  static double _left(Map<String, dynamic> r, String k, String fb) => r[k] == null ? ReturnsHelp.d(r[fb]) : ReturnsHelp.d(r[k]);
+  double get maxKg => _left(row, 'lot_remaining', 'kg');
+  void dispose() {
+    kg.dispose();
+    small.dispose();
+    large.dispose();
+  }
+}
+
+/// دیالوگ «ارسال خروجی‌های شکست به تولید (سورت)»: انتخاب خروجی‌ها (+ وزن و عدل)، نوع تولید، تاریخ و (برون‌سپاری/امانی) اجرت.
+/// خروجی: {prod_kind, date, items:[{uid, purchase_id, kg, small_sacks, large_sacks, code, type_name}], fee_basis?, fee_value?, other_cost?}.
+class ChainSortDialog extends StatefulWidget {
+  const ChainSortDialog({super.key, required this.outputs, this.withFee = false, this.feeHint});
+  final List<Map<String, dynamic>> outputs;
+  final bool withFee;
+  final String? feeHint;
+
+  @override
+  State<ChainSortDialog> createState() => _ChainSortDialogState();
+}
+
+class _ChainSortDialogState extends State<ChainSortDialog> {
+  static const String _newKind = '\u0000new';
+  late final List<_ChainPick> _picks = <_ChainPick>[
+    for (final Map<String, dynamic> r in widget.outputs)
+      if (r['lot_id'] != null && _ChainPick._left(r, 'lot_remaining', 'kg') > 0) _ChainPick(r, on: r['grade'] == 'kernel'),
+  ];
+  List<String> _kinds = <String>[...kWsProdKinds];
+  String? _kind;
+  int _rev = 0;
+  DateTime _date = DateTime.now();
+  String _basis = 'per_kg';
+  final TextEditingController _fee = TextEditingController();
+  final TextEditingController _other = TextEditingController();
+  String? _err;
+
+  @override
+  void initState() {
+    super.initState();
+    ProcessingStore.cachedWorkshopList().then((Map<String, dynamic> c) {
+      final List<String> k = <String>[...kWsProdKinds];
+      for (final Map<String, dynamic> o in ReturnsHelp.maps(c['items'])) {
+        final String v = '${o['prod_kind'] ?? ''}'.trim();
+        if (v.isNotEmpty && v != 'سورت' && !k.contains(v)) k.add(v);
+      }
+      if (mounted) setState(() => _kinds = k);
+    });
+  }
+
+  @override
+  void dispose() {
+    for (final _ChainPick p in _picks) {
+      p.dispose();
+    }
+    _fee.dispose();
+    _other.dispose();
+    super.dispose();
+  }
+
+  double get _sum => _picks.where((_ChainPick p) => p.sel).fold<double>(0, (double s, _ChainPick p) => s + wsParseNum(p.kg.text));
+
+  void _ok() {
+    if (_kind == null || _kind!.isEmpty) return setState(() => _err = 'نوع تولید را انتخاب کنید');
+    final List<Map<String, dynamic>> items = <Map<String, dynamic>>[];
+    for (final _ChainPick p in _picks) {
+      if (!p.sel) continue;
+      final double kg = wsParseNum(p.kg.text);
+      if (kg <= 0) return setState(() => _err = 'وزن «${procOutTitle(p.row)}» باید بیشتر از صفر باشد');
+      if (kg - p.maxKg > 1e-6) return setState(() => _err = 'وزن «${procOutTitle(p.row)}» از مانده (${_kg(p.maxKg)} کیلو) بیشتر است');
+      items.add(<String, dynamic>{
+        'uid': ReturnsHelp.newUid('wi'),
+        'purchase_id': ReturnsHelp.d(p.row['lot_id']).toInt(),
+        'kg': kg,
+        'small_sacks': wsParseNum(p.small.text),
+        'large_sacks': wsParseNum(p.large.text),
+        'code': p.row['code'],
+        'type_name': p.row['kind_name'] ?? p.row['type_name'],
+      });
+    }
+    if (items.isEmpty) return setState(() => _err = 'حداقل یک خروجی را برای ارسال به تولید انتخاب کنید');
+    if (wsParseNum(_fee.text) < 0 || wsParseNum(_other.text) < 0) return setState(() => _err = 'اجرت و هزینه نمی‌تواند منفی باشد');
+    Navigator.pop(context, <String, dynamic>{
+      'prod_kind': _kind,
+      'date': ReturnsHelp.iso(_date),
+      'items': items,
+      if (widget.withFee) ...<String, dynamic>{'fee_basis': _basis, 'fee_value': wsParseNum(_fee.text), 'other_cost': wsParseNum(_other.text)},
+    });
+  }
+
+  Future<void> _pickKind(String? v) async {
+    if (v != _newKind) return setState(() => _kind = v);
+    final TextEditingController c = TextEditingController();
+    final String? n = await showDialog<String>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('نوع تولید تازه'),
+        content: TextField(controller: c, autofocus: true, maxLength: 100, decoration: _dec('نام')),
+        actions: <Widget>[
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('انصراف')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, c.text.trim()), child: const Text('افزودن')),
+        ],
+      ),
+    );
+    c.dispose();
+    if (!mounted) return;
+    setState(() {
+      if (n != null && n.isNotEmpty && !_kinds.contains(n)) _kinds = <String>[..._kinds, n];
+      if (n != null && n.isNotEmpty) _kind = n;
+      _rev++;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    TextField f(TextEditingController c, String l) =>
+        TextField(controller: c, keyboardType: _numKb, decoration: _dec(l).copyWith(isDense: true), onChanged: (_) => setState(() {}));
+    return AlertDialog(
+      title: const Text('ارسال خروجی‌های شکست به تولید (سورت)'),
+      content: SizedBox(
+        width: 560,
+        child: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: <Widget>[
+            const Text('در همین فرایند شکست؛ نیازی به تعریف عملیات تازه نیست.', style: TextStyle(fontSize: 12.5)),
+            const SizedBox(height: 10),
+            DropdownButtonFormField<String>(
+              key: ValueKey<String>('ck-$_kind-$_rev'),
+              initialValue: _kinds.contains(_kind) ? _kind : null,
+              isExpanded: true,
+              hint: const Text('انتخاب کنید'),
+              decoration: _dec('نوع تولید'),
+              items: <DropdownMenuItem<String>>[
+                for (final String k in _kinds) DropdownMenuItem<String>(value: k, child: Text(k, overflow: TextOverflow.ellipsis)),
+                const DropdownMenuItem<String>(value: _newKind, child: Text('+ افزودن نوع تازه…', style: TextStyle(color: Colors.blue))),
+              ],
+              onChanged: _pickKind,
+            ),
+            const SizedBox(height: 10),
+            JalaliDateField(label: 'تاریخ شروع تولید', value: _date, onChanged: (DateTime d) => setState(() => _date = d)),
+            const SizedBox(height: 10),
+            Text('خروجی‌های شکست', style: Theme.of(context).textTheme.titleSmall),
+            if (_picks.isEmpty) const Padding(padding: EdgeInsets.all(8), child: Text('خروجیِ دارای مانده‌ای برای ارسال نیست.', style: TextStyle(color: Colors.red))),
+            for (final _ChainPick p in _picks)
+              Card(
+                margin: const EdgeInsets.only(top: 6),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(6, 4, 6, 8),
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: <Widget>[
+                    CheckboxListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      controlAffinity: ListTileControlAffinity.leading,
+                      value: p.sel,
+                      title: Text('${procOutTitle(p.row)}${'${p.row['code'] ?? ''}'.isEmpty ? '' : '  ·  ${p.row['code']}'}'),
+                      subtitle: Text('مانده ${_kg(p.maxKg)} کیلو'),
+                      onChanged: (bool? v) => setState(() => p.sel = v ?? false),
+                    ),
+                    if (p.sel)
+                      Row(children: <Widget>[
+                        Expanded(flex: 2, child: f(p.kg, 'وزن (کیلو)')),
+                        const SizedBox(width: 6),
+                        Expanded(child: f(p.large, 'عدل بزرگ')),
+                        const SizedBox(width: 6),
+                        Expanded(child: f(p.small, 'عدل کوچک')),
+                      ]),
+                  ]),
+                ),
+              ),
+            Padding(padding: const EdgeInsets.only(top: 8), child: Text('جمع ارسالی به تولید: ${_kg(_sum)} کیلو', style: const TextStyle(fontWeight: FontWeight.bold))),
+            if (widget.withFee) ...<Widget>[
+              const SizedBox(height: 10),
+              Text(widget.feeHint ?? 'اجرت تولید', style: Theme.of(context).textTheme.titleSmall),
+              const SizedBox(height: 6),
+              Wrap(spacing: 6, runSpacing: 6, children: <Widget>[
+                SizedBox(
+                  width: 150,
+                  child: DropdownButtonFormField<String>(
+                    initialValue: _basis,
+                    decoration: _dec('روش اجرت').copyWith(isDense: true),
+                    items: const <DropdownMenuItem<String>>[
+                      DropdownMenuItem<String>(value: 'per_kg', child: Text('هر کیلو')),
+                      DropdownMenuItem<String>(value: 'fixed', child: Text('مبلغ کل')),
+                    ],
+                    onChanged: (String? v) => setState(() => _basis = v ?? 'per_kg'),
+                  ),
+                ),
+                SizedBox(
+                  width: 170,
+                  child: TextField(
+                    controller: _fee,
+                    keyboardType: _numKb,
+                    inputFormatters: <ThousandsInputFormatter>[ThousandsInputFormatter()],
+                    decoration: _dec(_basis == 'per_kg' ? 'اجرت هر کیلو' : 'اجرت (کل)').copyWith(isDense: true),
+                  ),
+                ),
+                SizedBox(
+                  width: 170,
+                  child: TextField(
+                    controller: _other,
+                    keyboardType: _numKb,
+                    inputFormatters: <ThousandsInputFormatter>[ThousandsInputFormatter()],
+                    decoration: _dec('سایر هزینه‌ها').copyWith(isDense: true),
+                  ),
+                ),
+              ]),
+            ],
+            if (_err != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_err!, style: const TextStyle(color: Colors.red))),
+          ]),
+        ),
+      ),
+      actions: <Widget>[
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('انصراف')),
+        FilledButton.icon(onPressed: _picks.isEmpty ? null : _ok, icon: const Icon(Icons.send), label: const Text('ارسال به تولید')),
+      ],
+    );
+  }
+}
+
+/// کاشی یک «تولید (سورت)» پیوسته.
+Widget procChainChildTile(BuildContext context, Map<String, dynamic> c, VoidCallback onTap) {
+  final String st = '${c['status'] ?? ''}';
+  final String state = st == kWsOpen ? 'در کارگاه (باز)' : (st == 'in_progress' ? 'در جریان' : (st == 'closed' ? 'تحویل‌شده' : 'بسته / دریافت‌شده'));
+  return ListTile(
+    dense: true,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+    leading: const Icon(Icons.call_split),
+    title: Text('${kWsOpLabels['production']}${'${c['prod_kind'] ?? ''}'.isEmpty ? '' : ' — ${c['prod_kind']}'}  •  $state'),
+    subtitle: Text('${jalaliDate('${c['date'] ?? ''}')}  •  ورودی ${_kg(c['input_kg'])} · خروجی ${_kg(c['output_kg'])} کیلو'),
+    trailing: const Icon(Icons.chevron_left),
+    onTap: onTap,
+  );
+}
+
+/// v85: کادر «تولید (سورت) در همین فرایند» (هر سه حالت) یا «بخشی از فرایند شکست» برای تولید پیوسته.
+/// [onSend] null ⇒ دکمهٔ ارسال نمایش داده نمی‌شود. [hint] پیام وضعیتی که ارسال هنوز ممکن نیست.
+Widget procChainCard(BuildContext context, Map<String, dynamic> d, {VoidCallback? onSend, String? hint, required void Function(Map<String, dynamic> child) onOpen, VoidCallback? onOpenParent}) {
+  final Map<String, dynamic>? parent = d['parent'] is Map ? Map<String, dynamic>.from(d['parent'] as Map) : null;
+  if (parent != null || ReturnsHelp.d(d['parent_id']) > 0) {
+    return Card(
+      child: ListTile(
+        leading: const Icon(Icons.account_tree_outlined),
+        title: Text('بخشی از فرایند شکست${parent == null ? '' : ' ${jalaliDate('${parent['date'] ?? ''}')}'}${'${parent?['crack_line_name'] ?? ''}'.isEmpty ? '' : ' — ${parent!['crack_line_name']}'}'),
+        subtitle: const Text('ورودی‌های این تولید، خروجی‌های همان شکست‌اند.'),
+        trailing: onOpenParent == null ? null : const Icon(Icons.chevron_left),
+        onTap: onOpenParent,
+      ),
+    );
+  }
+  final List<Map<String, dynamic>> kids = ReturnsHelp.maps(d['children']);
+  return Card(
+    child: Padding(
+      padding: const EdgeInsets.all(8),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: <Widget>[
+        Row(children: <Widget>[
+          Expanded(child: Text('تولید (سورت) در همین فرایند', style: Theme.of(context).textTheme.titleMedium)),
+          if (onSend != null) TextButton.icon(onPressed: onSend, icon: const Icon(Icons.call_split), label: const Text('ارسال به تولید (سورت)')),
+        ]),
+        if (hint != null) Padding(padding: const EdgeInsets.all(6), child: Text(hint, style: TextStyle(fontSize: 12.5, color: Theme.of(context).hintColor))),
+        if (kids.isEmpty && hint == null) const Padding(padding: EdgeInsets.all(6), child: Text('هنوز خروجی‌ای به تولید فرستاده نشده.')),
+        for (final Map<String, dynamic> c in kids) procChainChildTile(context, c, () => onOpen(c)),
+      ]),
+    ),
+  );
+}
+
+/// v85: کادر زنجیرهٔ سفارش برون‌سپاری/امانی (صفحهٔ جزئیات فراوری). [openOrder] صفحهٔ سفارش با id سرور را باز می‌کند.
+List<Widget> procChainSection(BuildContext context, Map<String, dynamic> d,
+    {required bool canCreate, required Future<void> Function(int id) openOrder, required VoidCallback onChanged}) {
+  final String op = '${d['op_type'] ?? ''}';
+  final bool chained = d['parent'] is Map || ReturnsHelp.d(d['parent_id']) > 0;
+  if (op != 'crack' && !chained) return const <Widget>[];
+  final bool rec = d['direction'] == kProcReceivedDir;
+  final String status = '${d['status'] ?? ''}';
+  final bool ready = status == 'done';
+  Future<void> send() async {
+    final Map<String, dynamic>? r = await showDialog<Map<String, dynamic>>(
+      context: context,
+      builder: (_) => ChainSortDialog(
+        outputs: ReturnsHelp.maps(d['outputs']),
+        withFee: true,
+        feeHint: rec ? 'اجرت تولید (بدهکار مشتری)' : 'اجرت تولید (بستانکار فراوری‌کننده؛ روی بهای خروجی‌ها)',
+      ),
+    );
+    if (r == null || !context.mounted) return;
+    try {
+      final Map<String, dynamic> res = await StockApi.call('processing.create', <String, dynamic>{
+        'uid': ReturnsHelp.newUid('proc'),
+        'direction': d['direction'],
+        'party': d['party'],
+        'date': r['date'],
+        'service': 'other',
+        'op_type': 'production',
+        'prod_kind': r['prod_kind'],
+        'parent_id': ReturnsHelp.d(d['id']).toInt(),
+        'fee_basis': r['fee_basis'] ?? 'per_kg',
+        'fee_value': r['fee_value'] ?? 0,
+        'other_cost': r['other_cost'] ?? 0,
+        'standard_yield_pct': 100,
+        'waste_charge_per_kg': 0,
+        if (d['warehouse_uid'] != null) 'warehouse_uid': d['warehouse_uid'],
+        'items': <Map<String, dynamic>>[
+          for (final Map<String, dynamic> it in ReturnsHelp.maps(r['items']))
+            <String, dynamic>{'purchase_id': it['purchase_id'], 'kg': it['kg'], 'small_sacks': it['small_sacks'], 'large_sacks': it['large_sacks']},
+        ],
+      });
+      if (!context.mounted) return;
+      _snack(context, 'تولید (سورت) در همین فرایند ثبت شد');
+      onChanged();
+      final int id = ReturnsHelp.d(res['id']).toInt();
+      if (id > 0) await openOrder(id);
+    } on StockApiException catch (e) {
+      if (context.mounted) _snack(context, e.message);
+    }
+  }
+
+  String? hint;
+  if (status == 'in_progress') hint = 'پس از «دریافت خروجی» شکست، خروجی‌ها را در همین فرایند به تولید (سورت) بفرستید.';
+  if (status == 'closed') hint = 'خروجی‌های این شکست به مشتری تحویل شده است.';
+  return <Widget>[
+    procChainCard(
+      context,
+      d,
+      onSend: canCreate && ready ? send : null,
+      hint: hint ?? (rec && ready && ReturnsHelp.maps(d['children']).isNotEmpty ? '«تحویل به مشتری» در این شکست فقط ماندهٔ فرستاده‌نشده به تولید را تحویل می‌دهد.' : null),
+      onOpen: (Map<String, dynamic> c) => openOrder(ReturnsHelp.d(c['id']).toInt()),
+      onOpenParent: d['parent'] is Map ? () => openOrder(ReturnsHelp.d((d['parent'] as Map)['id']).toInt()) : null,
+    ),
+    const SizedBox(height: 8),
+  ];
+}
+
+/// v85: کادر رطوبت آبخندان (کم‌بود / وزن اضافه‌شده و درصد رطوبت با علامت) + میانگین انس و گرم ارسالی.
+/// [buyPerKg] فقط برای دارندهٔ مجوز بها: ارزش کم‌بود (= کم‌بود × فی ورودی) که روی بار می‌نشیند.
+List<Widget> wsMoistureRows(BuildContext context, {required double sentKg, required double recvKg, double? avgOunce, double? avgGram, double? buyPerKg}) {
+  Widget kv(String k, String v, {bool strong = false, Color? color}) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(children: <Widget>[
+          Expanded(child: Text(k)),
+          Flexible(child: Text(v, textAlign: TextAlign.end, style: TextStyle(fontWeight: strong ? FontWeight.bold : null, color: color))),
+        ]),
+      );
+  final WsMoisture? m = wsMoisture(sentKg, recvKg);
+  final String pct = m == null ? '—' : '${m.pct > 0 ? '+' : (m.pct < 0 ? '−' : '')}${_f2(m.pct.abs())}٪';
+  return <Widget>[
+    Text('اطلاعات خروجی آبخندان', style: Theme.of(context).textTheme.titleSmall),
+    kv('وزن ارسالی', '${_kg(sentKg)} کیلو'),
+    if (avgOunce != null) kv('میانگین انس ارسالی', faNum(avgOunce, dec: 2)),
+    if (avgGram != null) kv('میانگین گرم ارسالی', _f2(avgGram)),
+    kv('وزن دریافتی', recvKg > 0 ? '${_kg(recvKg)} کیلو' : '—'),
+    if (m != null && m.shortage) ...<Widget>[
+      kv('کم‌بود وزن', '${_kg(m.absKg)} کیلو', strong: true, color: Colors.red),
+      if (buyPerKg != null && buyPerKg > 0) kv('فی کم‌بود (روی بار اعمال می‌شود)', Fmt.money(m.absKg * buyPerKg, label: false)),
+    ],
+    if (m != null && m.added) kv('وزن اضافه‌شده', '${_kg(m.absKg)} کیلو', strong: true, color: Colors.green),
+    kv('درصد رطوبت', pct, strong: true, color: m == null || m.diffKg == 0 ? null : (m.shortage ? Colors.red : Colors.green)),
+    if (m != null && m.shortage) Text('کم‌بود وزن به این دلیل است که پستهٔ تحویلی رطوبت کمتری دارد (درصد منفی = کم‌بود × ۱۰۰ ÷ وزن ارسالی).', style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor)),
+    if (m != null && m.added) Text('پستهٔ تحویلی رطوبت بیشتری دارد (درصد مثبت = وزن اضافه‌شده × ۱۰۰ ÷ وزن ارسالی).', style: TextStyle(fontSize: 12, color: Theme.of(context).hintColor)),
   ];
 }

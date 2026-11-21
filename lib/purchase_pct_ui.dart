@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import 'buy_mode_ui.dart'; // v85: سه روش خرید
 import 'db.dart';
 import 'entity_store.dart' show EntityStore;
 import 'fmt.dart' show Fmt, MoneyField;
@@ -13,6 +14,8 @@ import 'warehouse_ui.dart' show StockApi;
 ///   برای هر درصد «قیمت جدا» + «خرید گرمی»؛ میانگین هر کیلو و مبلغ کل با همان موتور (pricing_engine = آینهٔ pb_price_blend).
 ///   ذخیره: چهار درصد اصلی ⇒ ستون‌های pct_*؛ بقیه و گرم‌های مغز ⇒ custom_specs (برچسب «…» با مقدار «x%» و «گرم مغز …»).
 ///   فی خرید = میانگین هر کیلوی محاسبه‌شده (اگر قیمت جدا دارد)، وگرنه قیمت پایه.
+/// v85: «خرید گرمی» قبلی ⇒ «فی پایه ۵۰ گرم» (فی ÷ ۵۰ × گرم)؛ «خرید گرمی» تازه = فی هر گرم (فی پایه ۵۰ گرم = فی × ۵۰؛ فی مؤثر = فی × گرم)؛
+///   «خرید با یک فی». پستهٔ اصلی و هر درصد یکی از این سه را دارد (buy_mode_ui.dart). گرم پستهٔ اصلی = گرم فرم خرید (یا مقدار جدا).
 
 const Map<String, String> kPctCoreCols = <String, String>{'tuchin': 'pct_tuchin', 'dombest': 'pct_dombest', 'crooked': 'pct_crooked', 'khandan': 'pct_khandan'};
 const List<Map<String, dynamic>> _kFallbackDefs = <Map<String, dynamic>>[
@@ -44,8 +47,9 @@ class PurchasePctRow {
   String? defKey;
   final TextEditingController pct;
   final TextEditingController kernel;
-  bool separate = false; // «قیمت جدا»
-  bool gram = false; // «خرید گرمی»
+  bool separate = false; // «قیمت جدا» (خاموش = فقط ثبت درصد)
+  BuyMode mode = BuyMode.fixed; // v85: یک فی / فی پایه ۵۰ گرم / خرید گرمی
+  bool get gram => buyModeIsGram(mode);
   final TextEditingController q = TextEditingController();
   final TextEditingController g = TextEditingController();
   void dispose() {
@@ -58,8 +62,11 @@ class PurchasePctRow {
 class PurchasePctCtl {
   final List<PurchasePctRow> rows = <PurchasePctRow>[];
   List<Map<String, dynamic>> defs = _kFallbackDefs;
-  bool baseGram = false;
-  final TextEditingController baseG = TextEditingController();
+  BuyMode baseMode = BuyMode.fixed; // v85: روش خرید پستهٔ اصلی
+  bool get baseGram => buyModeIsGram(baseMode);
+  final TextEditingController baseG = TextEditingController(); // خالی ⇒ گرم فرم خرید
+  /// گرم ثبت‌شده در فرم خرید (پیش‌فرض «گرم» پستهٔ اصلی در دو حالت گرمی).
+  double? Function()? gramSource;
   double refGram = 50;
   static double? _cachedRef;
 
@@ -140,7 +147,7 @@ class PurchasePctCtl {
       }
     }
     if (sum > 100.0001) return 'جمع درصدها از ۱۰۰ بیشتر است';
-    if (canPrice && baseGram && ((_num(baseG.text) ?? 0) <= 0 || (_num(baseG.text) ?? 0) > 100)) return '«گرم مغز پسته اصلی» را (۰ تا ۱۰۰) وارد کنید';
+    if (canPrice && baseGram && ((baseGram0 ?? 0) <= 0 || (baseGram0 ?? 0) > 100)) return '«گرم» پستهٔ اصلی را (بیشتر از ۰ تا ۱۰۰) در فرم یا قیمت‌گذاری وارد کنید';
     return null;
   }
 
@@ -165,11 +172,26 @@ class PurchasePctCtl {
 
   bool get pricing => canPrice && (baseGram || rows.any((PurchasePctRow r) => r.separate));
 
+  /// v85: گرم پستهٔ اصلی برای حالت‌های گرمی: مقدار جدا یا گرم فرم خرید.
+  double? get baseGram0 => _num(baseG.text) ?? gramSource?.call();
+
+  /// v85: برچسب فیلد قیمت فرم خرید بر اساس روش خرید پستهٔ اصلی.
+  String priceLabel({required bool pricedRows}) {
+    switch (baseMode) {
+      case BuyMode.base50:
+        return '${buyModeBaseName(refGram)} (پستهٔ اصلی) — فی خرید = فی ÷ ${_plain(refGram)} × گرم';
+      case BuyMode.perGram:
+        return 'فی هر گرم (پستهٔ اصلی) — فی خرید = فی × گرم';
+      case BuyMode.fixed:
+        return pricedRows ? 'قیمت پایه (هر کیلو) — فی خرید از قیمت‌گذاری درصدها' : 'فی خرید (به ازای هر کیلو)';
+    }
+  }
+
   /// قیمت‌گذاری با موتور اتاق انس. null ⇒ قیمت پایه یا وزن نامعتبر.
   PriceBlendResult? blend(num? basePrice, double netKg) {
     if (basePrice == null || basePrice <= 0 || netKg <= 0) return null;
     return priceBlend(<String, dynamic>{
-      'base_price': basePrice,
+      'base_price': buyModeEngineValue(baseMode, basePrice.toDouble(), refGram), // v85
       'weight_kg': netKg,
       'ref_gram': refGram,
       'items': <Map<String, dynamic>>[
@@ -177,14 +199,14 @@ class PurchasePctCtl {
           if (r.separate && canPrice)
             <String, dynamic>{
               'pct': _num(r.pct.text) ?? 0,
-              'q': MoneyField.stored(r.q),
+              'q': MoneyField.stored(r.q) == null ? null : buyModeEngineValue(r.mode, MoneyField.stored(r.q)!.toDouble(), refGram), // v85
               'gram_mode': r.gram,
               'g': _num(r.g.text) ?? _num(r.kernel.text),
             }
           else
             <String, dynamic>{'pct': _num(r.pct.text) ?? 0, 'q': null},
       ],
-      if (baseGram) ...<String, dynamic>{'base_gram_mode': true, 'base_g': _num(baseG.text)},
+      if (baseGram) ...<String, dynamic>{'base_gram_mode': true, 'base_g': baseGram0},
     });
   }
 
@@ -243,20 +265,27 @@ class PurchasePctSection extends StatelessWidget {
             ),
           if (price) ...<Widget>[
             const Divider(),
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              dense: true,
-              controlAffinity: ListTileControlAffinity.leading,
-              title: const Text('خرید گرمی (پستهٔ اصلی)'),
-              value: ctl.baseGram,
-              onChanged: readOnly
-                  ? null
-                  : (bool? v) {
-                      ctl.baseGram = v == true;
-                      onChanged();
-                    },
+            // v85: روش خرید پستهٔ اصلی (فیلد «فی» فرم خرید طبق همین روش خوانده می‌شود)
+            BuyModeChips(
+              label: 'روش خرید پستهٔ اصلی:',
+              value: ctl.baseMode,
+              enabled: !readOnly,
+              onChanged: (BuyMode m) {
+                ctl.baseMode = m;
+                onChanged();
+              },
             ),
-            if (ctl.baseGram) num(ctl.baseG, 'گرم مغز پستهٔ اصلی در ۱۰۰ گرم'),
+            if (ctl.baseGram) ...<Widget>[
+              TextField(
+                controller: ctl.baseG,
+                enabled: !readOnly,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: dec('گرم پستهٔ اصلی (خالی = گرم فرم خرید)',
+                    helper: ctl.gramSource?.call() == null ? 'گرم فرم خرید وارد نشده' : 'گرم فرم خرید: ${_plain(ctl.gramSource!.call()!)}'),
+                onChanged: (_) => onChanged(),
+              ),
+              buyModeInfo(context, ctl.baseMode, input: basePrice?.toDouble(), gram: ctl.baseGram0, ref: ctl.refGram),
+            ],
             if (ctl.pricing)
               Container(
                 margin: const EdgeInsets.only(top: 8),
@@ -264,7 +293,7 @@ class PurchasePctSection extends StatelessWidget {
                 decoration: BoxDecoration(color: Theme.of(context).colorScheme.primaryContainer.withValues(alpha: 0.35), borderRadius: BorderRadius.circular(8)),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
                   const Text('نتیجهٔ قیمت‌گذاری', style: TextStyle(fontWeight: FontWeight.bold)),
-                  Text('وزن خالص: ${Fmt.kg(netKg)}  •  گرم مرجع (R): ${_plain(ctl.refGram)}'),
+                  Text('وزن خالص: ${Fmt.kg(netKg)}  •  روش خرید پستهٔ اصلی: ${kBuyModeLabels[ctl.baseMode]}'),
                   if (res == null)
                     const Text('قیمت پایه و وزن را وارد کنید', style: TextStyle(color: Colors.black54))
                   else if (!res.ok)
@@ -332,32 +361,33 @@ class PurchasePctSection extends StatelessWidget {
                 ? null
                 : (bool? v) {
                     r.separate = v == true;
-                    if (!r.separate) r.gram = false;
+                    if (!r.separate) r.mode = BuyMode.fixed;
                     final double? k = _num(r.kernel.text);
                     if (r.separate && k != null) {
-                      r.gram = true; // مثل اتاق انس: گرم ثبت‌شده خودکار اعمال می‌شود
+                      r.mode = BuyMode.base50; // مثل اتاق انس: گرم ثبت‌شده خودکار اعمال می‌شود
                       if (r.g.text.trim().isEmpty) r.g.text = _plain(k);
                     }
                     onChanged();
                   },
           ),
           if (r.separate) ...<Widget>[
-            MoneyField(controller: r.q, label: 'قیمت کیلویی «${ctl.labelOf(r.defKey)}»', onChanged: onChanged),
-            CheckboxListTile(
-              contentPadding: EdgeInsets.zero,
-              dense: true,
-              controlAffinity: ListTileControlAffinity.leading,
-              title: const Text('خرید گرمی'),
-              value: r.gram,
-              onChanged: readOnly
-                  ? null
-                  : (bool? v) {
-                      r.gram = v == true;
-                      onChanged();
-                    },
+            // v85: سه روش خرید برای هر درصد
+            BuyModeChips(
+              value: r.mode,
+              enabled: !readOnly,
+              onChanged: (BuyMode m) {
+                r.mode = m;
+                final double? k = _num(r.kernel.text);
+                if (m != BuyMode.fixed && r.g.text.trim().isEmpty && k != null) r.g.text = _plain(k);
+                onChanged();
+              },
             ),
+            MoneyField(controller: r.q, label: buyModeInputLabel(r.mode, of: ctl.labelOf(r.defKey), ref: ctl.refGram), onChanged: onChanged),
             if (r.gram) num(r.g, 'گرم مغز در ۱۰۰ گرم'),
-            if (eff != null) Text('قیمت مؤثر کیلویی: ${Fmt.money(eff.round())}', style: const TextStyle(color: Colors.black54)),
+            if (r.gram)
+              buyModeInfo(context, r.mode, input: MoneyField.stored(r.q)?.toDouble(), gram: _num(r.g.text) ?? _num(r.kernel.text), ref: ctl.refGram, effective: eff)
+            else if (eff != null)
+              Text('فی مؤثر کیلویی: ${Fmt.money(eff.round())}', style: const TextStyle(color: Colors.black54)),
           ],
         ],
       ]),

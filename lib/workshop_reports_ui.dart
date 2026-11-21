@@ -191,7 +191,7 @@ Future<void> wsPrintOp(BuildContext context, Map<String, dynamic> d, {required S
       ...extra,
       if (cost && d['buy_per_kg'] != null) <String>['میانگین قیمت هر کیلو ورودی', Fmt.money(ReturnsHelp.d(d['buy_per_kg']), label: false)],
       if (cost && d['kernel_cost_per_kg'] != null) <String>['بهای تمام‌شدهٔ هر کیلو مغز', Fmt.money(ReturnsHelp.d(d['kernel_cost_per_kg']), label: false), 'b'],
-      if (cost && d['op_type'] != 'crack' && kWsSingleLotTypes.contains(d['op_type']) && d['cost_per_kg_sound'] != null)
+      if (cost && d['op_type'] != 'crack' && kWsSplitCostTypes.contains(d['op_type']) && d['cost_per_kg_sound'] != null)
         <String>['بهای تمام‌شدهٔ هر کیلو خروجی', Fmt.money(ReturnsHelp.d(d['cost_per_kg_sound']), label: false), 'b'],
       if ('${d['note'] ?? ''}'.isNotEmpty) <String>['یادداشت', '${d['note']}'],
     ],

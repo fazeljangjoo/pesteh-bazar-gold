@@ -40,18 +40,21 @@ const Map<String, String> kWsOpLabels = <String, String>{
   'split': 'جداسازی پوست و مغز',
   'fines': 'ریزبرداری و بدشکل',
   'crack': 'شکست',
-  'production': 'تولید',
+  'production': 'تولید (سورت)', // v85
   'abkhandan': 'آبخندان',
 };
 
 /// v81: انواعی که فرم «شروع عملیات» نشان می‌دهد (آینهٔ PB_WS_OPEN_TYPES). انواع قدیمی فقط برای نمایش داده‌های قدیمی.
 const List<String> kWsOpenTypes = <String>['crack', 'production', 'abkhandan'];
 
-/// v81: عملیات تک‌لاتی (آینهٔ PB_WS_SINGLE_LOT_TYPES).
-const List<String> kWsSingleLotTypes = <String>['production', 'abkhandan'];
+/// v81: عملیات تک‌لاتی (آینهٔ PB_WS_SINGLE_LOT_TYPES). v85: آبخندان چندلاتی (چند لات دهنبست)؛ تولیدِ پیوسته به شکست هم چندلاتی.
+const List<String> kWsSingleLotTypes = <String>['production'];
+
+/// v85: عملیاتی که بهای کل روی خروجی‌ها پخش می‌شود (آینهٔ PB_WS_SPLIT_COST_TYPES).
+const List<String> kWsSplitCostTypes = <String>['production', 'abkhandan'];
 
 /// v81: انواع پیش‌فرض «تولید» (آینهٔ PB_WS_PROD_KINDS)؛ کاربر می‌تواند نوع تازه اضافه کند.
-const List<String> kWsProdKinds = <String>['ریزبرداری و بدشکل', 'بدرنگ‌گیری', 'پوست‌گیری', 'چفت‌گیری', 'خاک‌گیری', 'جمع‌آوری مغز', 'سورت', 'درجه‌بندی'];
+const List<String> kWsProdKinds = <String>['ریزبرداری و بدشکل', 'بدرنگ‌گیری', 'پوست‌گیری', 'چفت‌گیری', 'خاک‌گیری', 'جمع‌آوری مغز', 'درجه‌بندی']; // v85: «سورت» در نام عملیات است
 
 /// v81: درجهٔ تراز یک خروجی از روی preset دستهٔ کالا و نام نوع (آینهٔ `pb_ws_grade_for`).
 String wsGradeFor(String? preset, String? kind) {
@@ -1179,4 +1182,42 @@ WsCrackResult wsCrackResult({
     wasteKg: outKg == null ? null : ((inKg - outKg) * 1000).round() / 1000,
     uncrackedCost: (buyPerKg != null && buyPerKg > 0) ? (buyPerKg * 10000).round() / 10000 : null,
   );
+}
+
+// ---------------------------------------------------------------------------
+// v85 — آبخندان: کم‌بود / اضافه وزن و درصد رطوبت؛ میانگین انس و گرم ارسالی چند لات
+// ---------------------------------------------------------------------------
+
+/// تراز رطوبت آبخندان. [diffKg] = دریافتی − ارسالی (منفی = کم‌بود وزن، مثبت = وزن اضافه‌شده).
+/// [pct] = درصد رطوبت با علامت: کم‌بود ⇒ −(کم‌بود × ۱۰۰ ÷ ارسالی) (پستهٔ تحویلی رطوبت کمتری دارد)؛
+/// اضافه ⇒ +(وزن اضافه‌شده × ۱۰۰ ÷ ارسالی) (رطوبت بیشتر).
+class WsMoisture {
+  const WsMoisture({required this.sentKg, required this.recvKg, required this.diffKg, required this.pct});
+  final double sentKg;
+  final double recvKg;
+  final double diffKg;
+  final double pct;
+  bool get shortage => diffKg < 0;
+  bool get added => diffKg > 0;
+  double get absKg => diffKg.abs();
+}
+
+WsMoisture? wsMoisture(num? sentKg, num? recvKg) {
+  final double s = (sentKg ?? 0).toDouble(), r = (recvKg ?? 0).toDouble();
+  if (s <= 0 || r <= 0) return null;
+  final double d = ((r - s) * 1000).round() / 1000;
+  return WsMoisture(sentKg: s, recvKg: r, diffKg: d, pct: d * 100 / s);
+}
+
+/// میانگین موزون (به وزن) یک مشخصه (انس/گرم) روی چند ورودی؛ ورودی بی‌مقدار شرکت نمی‌کند. null = هیچ ورودی مقدار ندارد.
+double? wsWeightedAvg(List<Map<String, num?>> rows, String key) {
+  double vk = 0, k = 0;
+  for (final Map<String, num?> r in rows) {
+    final double kg = (r['kg'] ?? 0).toDouble();
+    final num? v = r[key];
+    if (v == null || v <= 0 || kg <= 0) continue;
+    vk += v * kg;
+    k += kg;
+  }
+  return k > 0 ? vk / k : null;
 }

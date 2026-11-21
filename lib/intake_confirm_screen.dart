@@ -1,3 +1,4 @@
+import 'buy_mode_ui.dart'; // v85: سه روش خرید
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -82,7 +83,9 @@ class _PctRow {
   final double? kernelG;
   final bool allowed;
   bool separate = false; // «قیمت جدا»
-  bool gram = false; // «خرید گرمی»
+  BuyMode mode = BuyMode.fixed; // v85: یک فی / فی پایه ۵۰ گرم / خرید گرمی
+  bool get gram => buyModeIsGram(mode);
+  set gram(bool v) => mode = v ? (mode == BuyMode.fixed ? BuyMode.base50 : mode) : BuyMode.fixed;
   final TextEditingController q;
   final TextEditingController g;
   void dispose() {
@@ -101,7 +104,9 @@ class IntakeConfirmScreen extends StatefulWidget {
 
 class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
   final TextEditingController _base = TextEditingController();
-  bool _baseGram = false; // «خرید گرمی» برای پسته اصلی
+  BuyMode _baseMode = BuyMode.fixed; // v85: روش خرید پستهٔ اصلی
+  bool get _baseGram => buyModeIsGram(_baseMode);
+  double get _ref => _srvRef ?? 50; // گرم مرجع (پیش‌فرض ۵۰)
   final TextEditingController _baseG = TextEditingController(); // پیش‌فرض: «گرم» ثبت‌شدهٔ اتاق انس
   final List<_PctRow> _rows = <_PctRow>[];
   Map<String, dynamic>? _intake;
@@ -187,7 +192,7 @@ class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
         _formErr = 'قیمت «${r.label}» را وارد کنید';
         return null;
       }
-      final it = <String, dynamic>{'def_key': r.defKey, 'q': q};
+      final it = <String, dynamic>{'def_key': r.defKey, 'q': buyModeEngineValue(r.mode, q.toDouble(), _ref)}; // v85
       if (r.gram) {
         it['gram_mode'] = true;
         final g = parseIntakeNum(r.g.text) ?? r.kernelG;
@@ -199,7 +204,7 @@ class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
       }
       items.add(it);
     }
-    final out = <String, dynamic>{'uid': widget.uid, 'base_price': base, 'items': items};
+    final out = <String, dynamic>{'uid': widget.uid, 'base_price': buyModeEngineValue(_baseMode, base.toDouble(), _ref), 'items': items}; // v85
     if (_baseGram) {
       final bg = parseIntakeNum(_baseG.text) ?? (_intake?['gram'] as num?)?.toDouble();
       if (bg == null || bg <= 0 || bg > 100) {
@@ -494,18 +499,17 @@ class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
             ),
             if (r.separate) ...[
               const SizedBox(height: 4),
-              MoneyField(controller: r.q, label: 'قیمت کیلویی «${r.label}»', onChanged: _changed),
-              CheckboxListTile(
-                contentPadding: EdgeInsets.zero,
-                dense: true,
-                controlAffinity: ListTileControlAffinity.leading,
-                title: const Text('خرید گرمی'),
-                value: r.gram,
-                onChanged: (v) {
-                  r.gram = v == true;
+              MoneyField(controller: r.q, label: buyModeInputLabel(r.mode, of: r.label, ref: _ref), onChanged: _changed),
+              BuyModeChips( // v85
+                value: r.mode,
+                onChanged: (BuyMode v) {
+                  r.mode = v;
+                  if (v != BuyMode.fixed && r.g.text.trim().isEmpty && r.kernelG != null) r.g.text = _plainNum(r.kernelG!);
                   _changed();
                 },
               ),
+              if (r.mode == BuyMode.perGram)
+                buyModeInfo(context, r.mode, input: MoneyField.stored(r.q)?.toDouble(), gram: parseIntakeNum(r.g.text) ?? r.kernelG, ref: _ref),
               if (r.gram)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
@@ -597,18 +601,17 @@ class _IntakeConfirmScreenState extends State<IntakeConfirmScreen> {
 
     final bool wide = kWideForm(context);
     final Widget baseFields = Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      MoneyField(controller: _base, label: 'قیمت پایه (هر کیلو)', gap: kFormGap, onChanged: _changed),
-      CheckboxListTile(
-        contentPadding: EdgeInsets.zero,
-        dense: true,
-        controlAffinity: ListTileControlAffinity.leading,
-        title: const Text('خرید گرمی (پسته اصلی)'),
-        value: _baseGram,
-        onChanged: (v) {
-          _baseGram = v == true;
+      MoneyField(controller: _base, label: _baseMode == BuyMode.fixed ? 'قیمت پایه (هر کیلو)' : buyModeInputLabel(_baseMode, of: 'پستهٔ اصلی', ref: _ref), gap: kFormGap, onChanged: _changed),
+      BuyModeChips( // v85
+        label: 'روش خرید پستهٔ اصلی:',
+        value: _baseMode,
+        onChanged: (BuyMode v) {
+          _baseMode = v;
           _changed();
         },
       ),
+      if (_baseGram)
+        buyModeInfo(context, _baseMode, input: MoneyField.stored(_base)?.toDouble(), gram: parseIntakeNum(_baseG.text) ?? (_intake?['gram'] as num?)?.toDouble(), ref: _ref),
       if (_baseGram)
         Padding(
           padding: const EdgeInsets.only(bottom: 8),

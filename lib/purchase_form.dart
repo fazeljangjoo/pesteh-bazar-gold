@@ -166,6 +166,7 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
     if (LicenseService.I.isFx.value) _initFx();
     _loadWeighSettings();
     final e = widget.existing;
+    _pp.gramSource = () => parseNum(_gram.text); // v85: گرم پستهٔ اصلی در «فی پایه ۵۰ گرم» / «خرید گرمی»
     _pp.init().then((_) { // v84: تعریف درصدها و گرم مرجع ⇒ ردیف‌های ذخیره‌شده؛ مشخصه‌های درصدی از «مشخصات دلخواه» بیرون می‌روند
       if (!mounted) return;
       setState(() {
@@ -734,7 +735,7 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
             locked(WarehousePicker(
                 value: _warehouseUid, useLast: !_isEdit, onChanged: (String? v) => _warehouseUid = v)),
             locked(numField(_ounce, 'انس پسته (اختیاری)', gap: g)),
-            locked(numField(_gram, 'گرم (اختیاری)', gap: g)), // مثل پذیرش اتاق انس: برای همهٔ انواع
+            locked(numField(_gram, 'گرم (اختیاری)', gap: g, onChanged: () => setState(() {}))), // مثل پذیرش اتاق انس: برای همهٔ انواع
             FormSpan(child: locked(PurchasePctSection(ctl: _pp, basePrice: MoneyField.stored(_price), netKg: _net, onChanged: () => setState(() {})))),
             if (preset != 'dombest' && preset != 'khandan') ...[
               FormSpan(
@@ -827,7 +828,7 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
             locked(FxDocFields(c: _fxc, priceLabel: 'فی خرید ارزی (هر کیلو)', onChanged: () => setState(() {}))),
           FormGrid(gap: 12, children: [
             if (!_fxc.active && !_useGrades)
-              locked(MoneyField(controller: _price, label: _pp.pricing ? 'قیمت پایه (هر کیلو) — فی خرید از قیمت‌گذاری درصدها' : 'فی خرید (به ازای هر کیلو)', required: true, gap: g, onChanged: () => setState(() {}))),
+              locked(MoneyField(controller: _price, label: _pp.priceLabel(pricedRows: _pp.pricing) /* v85 */, required: true, gap: g, onChanged: () => setState(() {}))),
             MoneyField(controller: _laborCost, label: 'هزینه کارگر — اختیاری', hint: 'اگر وارد شود از سود این پسته کم می‌شود', gap: g),
             MoneyField(controller: _transportCost, label: 'هزینه حمل‌ونقل / باسکول — اختیاری', hint: 'اگر وارد شود از سود این پسته کم می‌شود', gap: g),
             if (_finOn) ...[

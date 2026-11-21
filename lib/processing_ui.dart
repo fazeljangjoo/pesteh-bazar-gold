@@ -19,7 +19,7 @@ import 'utils.dart';
 import 'widgets.dart' show JalaliDateField;
 import 'warehouse_ui.dart' show StockApi, StockApiException, StockLookup, WhOption;
 import 'workshop_calc.dart' show kWsGradeLabels, kWsOpLabels, kWsOpen;
-import 'processing_flow_ui.dart' show ProcOrderFormScreen, ProcReceiveScreen, procOpInfo; // v82
+import 'processing_flow_ui.dart' show ProcOrderFormScreen, ProcReceiveScreen, procChainSection, procOpInfo; // v82 + v85
 import 'workshop_reports_ui.dart' show CrackLineReportScreen; // v81
 import 'workshop_flow_ui.dart' show WorkshopOpScreen, WorkshopOpenFormScreen, wsOpTile; // فاز ۲: کارگاه مرحله‌ای
 import 'workshop_ui.dart' show WorkshopFormScreen, kWsBuyLabel, kWsCostFields, kWsMissingInputCost, wsCanCost, wsParseNum, wsReadOnlyField;
@@ -966,6 +966,14 @@ class _ProcessingDetailScreenState extends State<ProcessingDetailScreen> {
     }
   }
 
+  /// v85: باز کردن سفارش دیگرِ همین فرایند (شکست مادر / تولید پیوسته).
+  Future<void> _openOrder(int id) async {
+    if (id <= 0 || id == widget.id) return;
+    await Navigator.push<bool>(context, MaterialPageRoute<bool>(builder: (_) => ProcessingDetailScreen(id: id)));
+    _changed = true;
+    await _load();
+  }
+
   Future<void> _deliver() async {
     await _run('processing.deliver', <String, dynamic>{
       'id': widget.id,
@@ -1110,6 +1118,14 @@ class _ProcessingDetailScreenState extends State<ProcessingDetailScreen> {
                       ),
                       const SizedBox(height: 8),
                       if (!_int) ...procOpInfo(context, _d), // v82: نوع عملیات، تراز وزنی، گرم و پرتی شکست
+                      if (!_int) // v85: «تولید (سورت)» در همین فرایند شکست / «بخشی از فرایند شکست»
+                        ...procChainSection(context, _d,
+                            canCreate: _can('processing.create') || _can('processing.manage'),
+                            openOrder: _openOrder,
+                            onChanged: () {
+                              _changed = true;
+                              _load();
+                            }),
                       if (!_int && !_rec) ...<Widget>[
                         OutsideReceiptCard(order: _d, canEdit: canManage, onEdit: _editReceipt),
                         const SizedBox(height: 8),
