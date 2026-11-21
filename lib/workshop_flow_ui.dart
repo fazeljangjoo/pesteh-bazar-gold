@@ -1427,6 +1427,104 @@ class _WorkshopOpScreenState extends State<WorkshopOpScreen> {
     await _send('close', res, 'بستن عملیات کارگاه');
   }
 
+  /// v83: حذف کامل عملیات (ورودی‌ها به موجودی برمی‌گردند، لات‌های خروجی حذف می‌شوند). فقط اگر خروجی‌ها فروخته/مصرف نشده‌اند.
+  Future<void> _delete() async {
+    final String? block = _d['status'] == 'done' ? _d['reopen_block'] as String? : null;
+    if (block != null) return _snack(context, block);
+    if (!await confirm(context, 'این عملیات کامل حذف شود؟ ورودی‌ها به موجودی لات‌ها برمی‌گردند${_d['status'] == 'done' ? ' و لات‌های خروجی حذف می‌شوند' : ''}. قابل برگشت نیست.')) return;
+    if (!mounted) return;
+    if (_id == null || _id! <= 0) return _snack(context, 'این عملیات هنوز به سرور نرسیده؛ پس از همگام‌سازی حذف کنید');
+    setState(() => _busy = true);
+    try {
+      await StockApi.call('workshop.delete', <String, dynamic>{'id': _id});
+      if (!mounted) return;
+      _snack(context, 'عملیات حذف شد');
+      Navigator.pop(context, true);
+    } on StockApiException catch (e) {
+      if (mounted) _snack(context, e.message);
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  /// v83: ویرایش سربرگ عملیات باز: تاریخ شروع، خط شکست / نوع تولید، یادداشت.
+  Future<void> _editHeader() async {
+    DateTime date = DateTime.tryParse('${_d['started_at'] ?? _d['date'] ?? ''}') ?? DateTime.now();
+    final TextEditingController note = TextEditingController(text: '${_d['note'] ?? ''}');
+    final TextEditingController kind = TextEditingController(text: '${_d['prod_kind'] ?? ''}');
+    String? line = _d['crack_line_uid'] as String?;
+    List<WsCrackLine> lines = <WsCrackLine>[];
+    if (_isCrack) {
+      try {
+        lines = (await WsLotPicker.loadCrack()).lines;
+      } on StockApiException catch (_) {}
+    }
+    if (!mounted) return;
+    final bool? ok = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext c) => StatefulBuilder(
+        builder: (BuildContext c, StateSetter set) => AlertDialog(
+          title: const Text('ویرایش سربرگ عملیات'),
+          content: SingleChildScrollView(
+            child: Column(mainAxisSize: MainAxisSize.min, children: <Widget>[
+              JalaliDateField(label: 'تاریخ شروع', value: date, onChanged: (DateTime d) => set(() => date = d)),
+              if (_isCrack) ...<Widget>[
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String>(
+                  initialValue: lines.any((WsCrackLine l) => l.uid == line) ? line : null,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'خط شکست', border: OutlineInputBorder()),
+                  items: <DropdownMenuItem<String>>[
+                    for (final WsCrackLine l in lines) DropdownMenuItem<String>(value: l.uid, child: Text('${l.name} (پرتی ${faNum(l.lossGram, dec: 2)})')),
+                  ],
+                  onChanged: (String? v) => set(() => line = v),
+                ),
+              ],
+              if (_op == 'production') ...<Widget>[
+                const SizedBox(height: 8),
+                DropdownButtonFormField<String>(
+                  initialValue: <String>{...kWsProdKinds, if (kind.text.isNotEmpty) kind.text}.contains(kind.text) && kind.text.isNotEmpty ? kind.text : null,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'نوع تولید', border: OutlineInputBorder()),
+                  items: <DropdownMenuItem<String>>[
+                    for (final String k in <String>{...kWsProdKinds, if (kind.text.isNotEmpty) kind.text}) DropdownMenuItem<String>(value: k, child: Text(k)),
+                  ],
+                  onChanged: (String? v) => kind.text = v ?? kind.text,
+                ),
+              ],
+              const SizedBox(height: 8),
+              TextField(controller: note, decoration: const InputDecoration(labelText: 'یادداشت', border: OutlineInputBorder())),
+            ]),
+          ),
+          actions: <Widget>[
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('انصراف')),
+            FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('ذخیره')),
+          ],
+        ),
+      ),
+    );
+    final String n = note.text.trim(), k = kind.text.trim();
+    note.dispose();
+    kind.dispose();
+    if (ok != true || !mounted) return;
+    if (_op == 'production' && k.isEmpty) return _snack(context, 'نوع تولید را وارد کنید');
+    WsCrackLine? lo;
+    for (final WsCrackLine l in lines) {
+      if (l.uid == line) lo = l;
+    }
+    await _send(
+      'header_save',
+      <String, dynamic>{
+        'start_date': ReturnsHelp.iso(date),
+        'note': n,
+        if (_op == 'production') 'prod_kind': k,
+        if (_isCrack && lo != null) ...<String, dynamic>{'crack_line_uid': lo.uid, 'crack_line_name': lo.name, 'crack_loss_gram': lo.lossGram},
+      },
+      'ویرایش سربرگ عملیات کارگاه',
+      localError: wsFlowCheck(_d['status'] as String?, 'output_save'),
+    );
+  }
+
   Future<void> _reopen() async {
     final String? block = _d['reopen_block'] as String?;
     if (block != null) return _snack(context, block);
@@ -1446,6 +1544,10 @@ class _WorkshopOpScreenState extends State<WorkshopOpScreen> {
           title: Text('${_d.isEmpty ? 'عملیات کارگاه' : wsOpTitle(_d)}${_open ? ' — در کارگاه' : (_d['status'] == 'done' ? ' — بسته' : '')}'),
           leading: BackButton(onPressed: () => Navigator.pop(context, _changed)),
           actions: <Widget>[
+            if (_open && (_can('workshop.operate') || _can('workshop.manage')) && _d.isNotEmpty)
+              IconButton(tooltip: 'ویرایش سربرگ (تاریخ، خط/نوع، یادداشت)', icon: const Icon(Icons.edit_note), onPressed: _busy ? null : _editHeader),
+            if (_can('workshop.manage') && _d.isNotEmpty)
+              IconButton(tooltip: 'حذف عملیات', icon: const Icon(Icons.delete_outline), onPressed: _busy ? null : _delete),
             IconButton(
               tooltip: 'چاپ برگهٔ عملیات',
               icon: const Icon(Icons.print_outlined),

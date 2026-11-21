@@ -1040,6 +1040,15 @@ WsFlowStep wsFlowApply(Map<String, dynamic> s0, String action, Map<String, dynam
         if (p['end_date'] != null) s['closed_at'] = p['end_date'];
       }
       break;
+    case 'header_save': // v83: ویرایش سربرگ عملیات باز (کلید غایب = بدون تغییر)
+      err = wsFlowCheck(status, 'output_save');
+      if (err == null) {
+        if ((p['start_date'] ?? '') != '') s['started_at'] = p['start_date'];
+        for (final String k in <String>['note', 'prod_kind', 'crack_line_uid', 'crack_line_name', 'crack_loss_gram']) {
+          if (p.containsKey(k)) s[k] = p[k];
+        }
+      }
+      break;
     case 'crack_cost': // v80: هزینهٔ شکست هر کیلو مغز؛ v81: + اجرت هر کیلو و سایر هزینه‌ها (فقط عملیات باز؛ کلید غایب = بدون تغییر)
       err = wsFlowCheck(status, 'output_save');
       if (err == null) {

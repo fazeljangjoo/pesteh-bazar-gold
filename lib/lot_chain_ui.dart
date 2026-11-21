@@ -1,7 +1,11 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import 'code_kind.dart';
 import 'lot_chain_calc.dart';
+import 'pdf_output.dart' show PdfOutput; // v83: چاپ ردیابی
+import 'pdf_service.dart' show PdfService;
 import 'scan_entry.dart';
 import 'utils.dart';
 import 'warehouse_ui.dart' show StockApi, StockApiException;
@@ -23,6 +27,7 @@ String _latin(String s) {
 }
 
 String _kg(num v) => '${faNum(v, dec: 1)} کیلو';
+double _d(dynamic v) => v is num ? v.toDouble() : (double.tryParse('${v ?? ''}') ?? 0);
 
 String _date(String? iso) {
   if (iso == null || iso.isEmpty) return '';
@@ -45,6 +50,7 @@ class LotChainScreen extends StatefulWidget {
 class _LotChainScreenState extends State<LotChainScreen> {
   final TextEditingController _c = TextEditingController();
   ChainTimeline? _t;
+  Map<String, dynamic> _raw = <String, dynamic>{}; // v83: پاسخ خام (منشأ/محصول مستقیم)
   String? _error;
   bool _loading = false;
 
@@ -76,6 +82,7 @@ class _LotChainScreenState extends State<LotChainScreen> {
       if (!mounted) return;
       setState(() {
         _t = chainToTimeline(r);
+        _raw = r;
         _loading = false;
       });
     } on StockApiException catch (e) {
@@ -99,6 +106,84 @@ class _LotChainScreenState extends State<LotChainScreen> {
     final int? id = s.lotId;
     if (id == null) return;
     Navigator.push<void>(context, MaterialPageRoute<void>(builder: (_) => LotChainScreen(lotId: id)));
+  }
+
+  List<Map<String, dynamic>> _list(String k) => <Map<String, dynamic>>[
+        for (final dynamic x in (_raw[k] as List<dynamic>? ?? const <dynamic>[]))
+          if (x is Map) Map<String, dynamic>.from(x),
+      ];
+
+  String _lotLine(Map<String, dynamic> x) => <String>[
+        if ('${x['category'] ?? ''}'.isNotEmpty || '${x['type_name'] ?? ''}'.isNotEmpty) '${x['category'] ?? ''} ${x['type_name'] ?? ''}'.trim(),
+        if ('${x['seller'] ?? ''}'.isNotEmpty && x['seller'] != '—') 'طرف: ${x['seller']}',
+        if (_date(x['date'] as String?).isNotEmpty) _date(x['date'] as String?),
+      ].join(' · ');
+
+  /// v83: «از چه پسته‌ای آمده» (لات‌های ورودی عملیاتی که این لات را ساخت) و «به چه پسته‌ای تبدیل شده».
+  Widget _directCard(String title, List<Map<String, dynamic>> rows, {List<Map<String, dynamic>> origin = const <Map<String, dynamic>>[]}) {
+    return Card(
+      margin: const EdgeInsets.only(top: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(10),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+          Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+          for (final Map<String, dynamic> o in origin)
+            Text('${chainKindLabel('${o['kind']}')} · ${o['label']}${_date(o['date'] as String?).isNotEmpty ? ' · ${_date(o['date'] as String?)}' : ''} · ${_kg(_d(o['kg']))}'),
+          for (final Map<String, dynamic> x in rows)
+            InkWell(
+              onTap: x['lot_id'] == null ? null : () => Navigator.push<void>(context, MaterialPageRoute<void>(builder: (_) => LotChainScreen(lotId: (x['lot_id'] as num).toInt()))),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 4),
+                child: Row(children: <Widget>[
+                  CodeChip(code: '${x['code'] ?? '#${x['lot_id']}'}', isMix: ((x['is_mix'] as num?) ?? 0).toInt(), fontSize: 12),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: <Widget>[
+                      Text('${_kg(_d(x['kg']))} — ${x['via'] ?? ''}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                      Text(_lotLine(x), style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                    ]),
+                  ),
+                  const Icon(Icons.chevron_left, size: 18),
+                ]),
+              ),
+            ),
+          if (rows.isEmpty && origin.isEmpty) const Text('—', style: TextStyle(color: Colors.grey)),
+        ]),
+      ),
+    );
+  }
+
+  /// v83: برگهٔ چاپی ردیابی: مشخصات لات، منشأ مستقیم، محصولات، مراحل قبل و بعد، مقصد.
+  Future<void> _print() async {
+    final ChainTimeline? t = _t;
+    if (t == null) return;
+    final Map<String, dynamic> lot = _raw['lot'] is Map ? Map<String, dynamic>.from(_raw['lot'] as Map) : <String, dynamic>{};
+    String step(ChainStep s) => s.isLot ? '${s.code} ${s.label}'.trim() : '${chainKindLabel(s.kind)} ${s.label}';
+    final File file = await PdfService.buildTableReport(
+      title: 'ردیابی پسته — ${lot['code'] ?? ''}',
+      subtitle: '${lot['category'] ?? ''} ${lot['type_name'] ?? ''}  •  ورود ${_date(lot['date'] as String?)}',
+      kv: <List<String>>[
+        <String>['وزن خالص / مانده', '${_kg(_d(lot['net_weight']))} / ${_kg(_d(lot['remaining']))}'],
+        <String>['مبدأ', t.origins.isEmpty ? '—' : t.origins.map((ChainOrigin o) => '${chainOriginLabel(o.kind)} ${o.name} (${faNum(o.pct, dec: 1)}٪)').join('، ')],
+        <String>['فروخته / باقی / ضایعات / برگشتی', '${_kg(t.soldKg)} / ${_kg(t.remainingKg)} / ${_kg(t.wasteKg)} / ${_kg(t.returnedKg)}', 'b'],
+      ],
+      headers: const <String>['بخش', 'لات / مرحله', 'شرح', 'وزن', 'تاریخ'],
+      rows: <List<String>>[
+        for (final Map<String, dynamic> o in _list('direct_origin')) <String>['منشأ', chainKindLabel('${o['kind']}'), '${o['label']}', _kg(_d(o['kg'])), _date(o['date'] as String?)],
+        for (final Map<String, dynamic> x in _list('sources'))
+          <String>['ساخته‌شده از', '${x['code'] ?? '#${x['lot_id']}'}', '${x['via'] ?? ''} — ${_lotLine(x)}', _kg(_d(x['kg'])), _date(x['date'] as String?)],
+        for (final ChainStep s in t.before) <String>['مسیر قبل', step(s), chainKindLabel(s.kind), s.kg > 0 ? _kg(s.kg) : '', _date(s.date)],
+        for (final ChainStep s in t.after) <String>['مسیر بعد', step(s), chainKindLabel(s.kind), s.kg > 0 ? _kg(s.kg) : '', _date(s.date)],
+        for (final Map<String, dynamic> x in _list('products'))
+          <String>['تبدیل‌شده به', '${x['code'] ?? '#${x['lot_id']}'}', '${x['via'] ?? ''} — ${_lotLine(x)}', _kg(_d(x['kg'])), _date(x['date'] as String?)],
+        for (final ChainStep s in t.sales) <String>['فروش', step(s), '', s.kg > 0 ? _kg(s.kg) : '', _date(s.date)],
+        for (final ChainStep s in t.waste) <String>['ضایعات/افت', step(s), '', s.kg > 0 ? _kg(s.kg) : '', _date(s.date)],
+      ],
+      filePrefix: 'lot_trace',
+      pageNumbers: true,
+    );
+    if (!mounted) return;
+    await PdfOutput.show(context, file);
   }
 
   // ───── اجزای خط زمانی ─────
@@ -237,7 +322,9 @@ class _LotChainScreenState extends State<LotChainScreen> {
     return Directionality(
       textDirection: TextDirection.rtl,
       child: Scaffold(
-        appBar: AppBar(title: const Text('مسیر پسته')),
+        appBar: AppBar(title: const Text('مسیر پسته'), actions: <Widget>[
+          IconButton(tooltip: 'چاپ / PDF ردیابی', icon: const Icon(Icons.print_outlined), onPressed: t == null ? null : _print),
+        ]),
         body: ListView(padding: const EdgeInsets.all(12), children: <Widget>[
           TextField(
             controller: _c,
@@ -252,7 +339,12 @@ class _LotChainScreenState extends State<LotChainScreen> {
           ),
           if (_loading) const Padding(padding: EdgeInsets.only(top: 8), child: LinearProgressIndicator()),
           if (_error != null) Padding(padding: const EdgeInsets.all(8), child: Text(_error!, style: const TextStyle(color: Colors.red))),
-          if (t != null) ...<Widget>[const SizedBox(height: 12), _timeline(t)],
+          if (t != null) ...<Widget>[
+            _directCard('ساخته‌شده از (منشأ مستقیم)', _list('sources'), origin: _list('direct_origin')),
+            if (_list('products').isNotEmpty) _directCard('تبدیل‌شده به (محصولات مستقیم)', _list('products')),
+            const SizedBox(height: 12),
+            _timeline(t),
+          ],
         ]),
       ),
     );

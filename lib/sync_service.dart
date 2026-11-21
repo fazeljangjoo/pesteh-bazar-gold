@@ -507,9 +507,11 @@ class SyncService {
     switch (action) {
       case 'types.create':
       case 'types.rename': // فاز ۳
+      case 'types.delete': // v83
         await one('category_id', 'cat');
         break;
       case 'categories.rename': // فاز ۳
+      case 'categories.delete': // v83
         await one('id', 'cat');
         break;
       case 'sale_returns.update': // فاز ۳ (سرور آماده؛ ثبت از اپ در فاز بعد)

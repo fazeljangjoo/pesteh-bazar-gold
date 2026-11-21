@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'barcode_utils.dart';
+import 'catalog_manage_ui.dart' show CatalogManageScreen; // v83
 import 'charts.dart';
 import 'code_kind.dart';
 import 'consignment_ui.dart';
@@ -52,7 +53,39 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
   }
 
   String _query = '';
-  bool _showSold = false; // false = موجود | true = فروش رفته (مثل وب)
+  // v83: موجود | فروش رفته (واقعاً فروخته) | کوت‌ریزی‌شده | فراوری‌شده (و سایر خروج‌ها) — بر اساس سند واقعی خروج هر لات
+  String _seg = 'avail';
+  bool get _showSold => _seg != 'avail';
+  static const Map<String, String> _segLabels = <String, String>{'sold': 'فروش رفته', 'kout': 'کوت‌ریزی‌شده', 'proc': 'فراوری‌شده'};
+
+  /// خروج غالب لات تمام‌شده: فروش (sale_items) / کوت (mix_sources) / بقیه = فراوری، شکست، برگشت و سایر.
+  static String _exitOf(Map<String, dynamic> p) {
+    final double net = ((p['net_weight'] as num?) ?? 0).toDouble();
+    final double sold = ((p['sold_kg'] as num?) ?? 0).toDouble();
+    final double kout = ((p['kout_kg'] as num?) ?? 0).toDouble();
+    final double rest = net - sold - kout;
+    if (sold >= kout && sold >= rest && sold > 1e-6) return 'sold';
+    if (kout >= rest && kout > 1e-6) return 'kout';
+    return 'proc';
+  }
+
+  /// موجودی + کیلوی فروخته و کوت‌شدهٔ هر لات (برای تفکیک خروج‌ها).
+  Future<List<Map<String, dynamic>>> _loadInv() async {
+    final List<Map<String, dynamic>> rows = await AppDb.I.inventoryAll();
+    final d = await AppDb.I.db;
+    final Map<int, double> sold = <int, double>{
+      for (final Map<String, Object?> r in await d.rawQuery('SELECT purchase_id AS id, SUM(weight) AS kg FROM sale_items GROUP BY purchase_id'))
+        if (r['id'] is num) (r['id'] as num).toInt(): ((r['kg'] as num?) ?? 0).toDouble(),
+    };
+    final Map<int, double> kout = <int, double>{
+      for (final Map<String, Object?> r in await d.rawQuery('SELECT source_purchase_id AS id, SUM(weight) AS kg FROM mix_sources GROUP BY source_purchase_id'))
+        if (r['id'] is num) (r['id'] as num).toInt(): ((r['kg'] as num?) ?? 0).toDouble(),
+    };
+    return <Map<String, dynamic>>[
+      for (final Map<String, dynamic> r in rows)
+        <String, dynamic>{...r, 'sold_kg': sold[(r['id'] as num).toInt()] ?? 0.0, 'kout_kg': kout[(r['id'] as num).toInt()] ?? 0.0},
+    ];
+  }
   bool _showMixed = false; // false = پسته‌های خریداری‌شده | true = مخلوط/جداسازی (ساخته‌شده از انبار خودمان)
   bool _showCons = false; // v82: «موجودی انبار امانی» (is_mix=3، مال دیگران) — جدا از موجودی و ارزش انبار خودمان
   int? _groupFilter; // T3b: کلید گروه مخلوطِ انتخاب‌شده (null = همه)
@@ -230,6 +263,11 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
               ),
             ),
           IconButton(
+            tooltip: 'دسته‌ها و انواع پسته (افزودن، تغییر نام، حذف)',
+            icon: const Icon(Icons.category_outlined),
+            onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const CatalogManageScreen())),
+          ),
+          IconButton(
             tooltip: 'امانی (دریافتی و ارسالی)',
             icon: const Icon(Icons.swap_horiz),
             onPressed: () => Navigator.push(
@@ -258,7 +296,7 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
       body: TabBarView(controller: _subTabs, physics: const NeverScrollableScrollPhysics(), children: [
         LiveQuery<List<Map<String, dynamic>>>(
         tab: 3,
-        load: AppDb.I.inventoryAll,
+        load: _loadInv,
         builder: (context, s) {
             if (!s.hasData) return const Center(child: CircularProgressIndicator());
             final all = s.data!;
@@ -276,8 +314,11 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
             final bool canCost = StaffPerms.I.can('price.view');
 
             // «موجود» مثل وب: هنوز وزنی از خودش مانده، یا مقداری از آن داخل مخلوطِ فروش‌نرفته است
-            final available = kindItems.where(AppDb.isAvailable).toList();
-            final soldOut = kindItems.where((p) => !AppDb.isAvailable(p)).toList();
+            bool avail(Map<String, dynamic> p) => ((p['remaining'] as num?) ?? 0).toDouble() > 1e-6;
+            final available = kindItems.where(avail).toList();
+            final gone = kindItems.where((p) => !avail(p)).toList();
+            final Map<String, int> segCount = <String, int>{for (final String k in _segLabels.keys) k: gone.where((p) => _exitOf(p) == k).length};
+            final soldOut = gone.where((p) => _exitOf(p) == (_seg == 'avail' ? 'sold' : _seg)).toList();
             final q = _norm(_query);
             bool match(Map<String, dynamic> p) =>
                 q.isEmpty ||
@@ -327,16 +368,18 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
                 onSelectionChanged: (v) => setState(() => _showMixed = v.first),
               ),
               const SizedBox(height: 8),
-              SegmentedButton<bool>(
-                segments: <ButtonSegment<bool>>[
-                  ButtonSegment<bool>(
-                      value: false, label: Text('موجود (${faNum(available.length, dec: 0)})')),
-                  ButtonSegment<bool>(
-                      value: true, label: Text('فروش رفته (${faNum(soldOut.length, dec: 0)})')),
-                ],
-                selected: <bool>{_showSold},
-                showSelectedIcon: false,
-                onSelectionChanged: (v) => setState(() => _showSold = v.first),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SegmentedButton<String>(
+                  segments: <ButtonSegment<String>>[
+                    ButtonSegment<String>(value: 'avail', label: Text('موجود (${faNum(available.length, dec: 0)})')),
+                    for (final MapEntry<String, String> e in _segLabels.entries)
+                      ButtonSegment<String>(value: e.key, label: Text('${e.value} (${faNum(segCount[e.key] ?? 0, dec: 0)})')),
+                  ],
+                  selected: <String>{_seg},
+                  showSelectedIcon: false,
+                  onSelectionChanged: (v) => setState(() => _seg = v.first),
+                ),
               ),
               const SizedBox(height: 8),
             ];
@@ -379,8 +422,8 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
                 child: Padding(
                   padding: const EdgeInsets.all(12),
                   child: Column(children: [
-                    infoRow('تعداد خریدهای فروش‌رفته', '${faNum(soldOut.length, dec: 0)} بار'),
-                    infoRow('مجموع وزن فروش‌رفته (خالص)', '${faNum(soldKg)} کیلو'),
+                    infoRow('تعداد لات‌های ${_segLabels[_seg] ?? ''}', '${faNum(soldOut.length, dec: 0)} لات'),
+                    infoRow('مجموع وزن (خالص)', '${faNum(soldKg)} کیلو'),
                     if (!_showCons && canCost) infoRow('بهای تمام‌شدهٔ آن‌ها', Fmt.money(soldValue)),
                     if (_showMixed && totalWaste > 0.0005)
                       infoRow('مجموع ضایعات ثبت‌شده', '${faNum(totalWaste)} کیلو'),
@@ -421,7 +464,7 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
               ));
               if (otherHits > 0) {
                 children.add(OutlinedButton(
-                  onPressed: () => setState(() => _showSold = !_showSold),
+                  onPressed: () => setState(() => _seg = _showSold ? 'avail' : 'sold'),
                   child: Text(
                       '${faNum(otherHits, dec: 0)} مورد در بخش «${_showSold ? 'موجود' : 'فروش رفته'}» پیدا شد — نمایش'),
                 ));
@@ -536,7 +579,9 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
     final rem = (l['remaining'] as num).toDouble();
     final soldW = net - rem < 0 ? 0.0 : net - rem;
     final codes = ((l['in_mix_codes'] as List?) ?? const []).cast<String>();
-    final sold = !AppDb.isAvailable(l);
+    final sold = ((l['remaining'] as num?) ?? 0).toDouble() <= 1e-6; // v83: تمام‌شده (خروج واقعی در خط بعد)
+    final double soldKg = ((l['sold_kg'] as num?) ?? 0).toDouble(), koutKg = ((l['kout_kg'] as num?) ?? 0).toDouble();
+    final double otherKg = (net - rem - soldKg - koutKg) > 1e-3 ? net - rem - soldKg - koutKg : 0; // فراوری، شکست، برگشت، امانی و…
     final lines = <String>[
       'کد پسته: ${l['code'] ?? '-'}',
       if (mixKind == 3)
@@ -546,7 +591,12 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
             '${rem > 1e-6 ? '  •  ارزش مانده ${Fmt.money(rem * (l['price'] as num).toDouble(), label: false)}' : ''}'
       else
         '${mixKind == 0 ? 'خرید' : 'ساخت'} ${jalaliDate(l['date'] as String)}',
-      if (!sold && soldW > 1e-6) 'از ${faNum(net)} کیلو (خالص) خریداری‌شده، ${faNum(soldW)} کیلو (خالص) فروخته/مصرف شده',
+      if (soldW > 1e-6)
+        'خروج از ${faNum(net)} کیلو: ${<String>[
+          if (soldKg > 1e-6) 'فروش ${faNum(soldKg)}',
+          if (koutKg > 1e-6) 'کوت ${faNum(koutKg)}',
+          if (otherKg > 1e-6) 'فراوری/سایر ${faNum(otherKg)}',
+        ].join('  •  ')} کیلو',
       if (codes.isNotEmpty)
         '🔀 ${rem <= 1e-6 ? 'کل موجودی آن' : 'بخشی از آن'} داخل مخلوط/جداسازی ${codes.join('، ')} است (هنوز کامل فروش نرفته)',
       if (isMix && ((l['waste'] as num?) ?? 0) > 0.0005) 'ضایعات/خاک: ${faNum(l['waste'] as num)} کیلو',
@@ -564,7 +614,7 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
               child: Icon(isSep ? Icons.call_split : Icons.merge_type))
           : null,
       title: Text(sold
-          ? '${faNum(net)} کیلو (خالص)  •  فروش رفت${isMix ? (isSep ? '  •  محصول جداسازی' : '  •  مخلوط/جداسازی') : ''}'
+          ? '${faNum(net)} کیلو (خالص)  •  ${_segLabels[_exitOf(l)]}${isMix ? (isSep ? '  •  محصول جداسازی' : '  •  مخلوط/جداسازی') : ''}'
           : '${faNum(rem)} کیلو (خالص) مانده${isMix ? (isSep ? '  •  محصول جداسازی' : '  •  مخلوط/جداسازی') : ''}'),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

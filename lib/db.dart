@@ -1504,6 +1504,32 @@ class AppDb {
     version.value++;
   }
 
+  /// v83: حذف دسته (فقط غیرپیش‌فرض و بدون لات)؛ انواعش هم حذف می‌شوند. سرور: categories.delete (همان قاعده).
+  Future<void> deleteCategory(int id) async {
+    final d = await db;
+    final c = await d.query('categories', where: 'id=?', whereArgs: [id], limit: 1);
+    if (c.isEmpty) return;
+    if (c.first['preset_key'] != null) throw Exception('دستهٔ پیش‌فرض قابل حذف نیست؛ می‌توانید نامش را عوض کنید');
+    final n = Sqflite.firstIntValue(await d.rawQuery('SELECT COUNT(*) FROM purchases WHERE category_id=?', [id])) ?? 0;
+    if (n > 0) throw Exception('این دسته در $n لات استفاده شده و قابل حذف نیست');
+    await d.transaction((t) async {
+      await t.delete('types', where: 'category_id=?', whereArgs: [id]);
+      await t.delete('categories', where: 'id=?', whereArgs: [id]);
+      await _enqueue(t, 'categories.delete', {'id': id});
+    });
+    version.value++;
+  }
+
+  /// v83: حذف نوع از فهرست انتخاب (نام روی لات‌های ثبت‌شده می‌ماند). سرور: types.delete با «دسته + نام».
+  Future<void> deleteType(int categoryId, String name) async {
+    final d = await db;
+    await d.transaction((t) async {
+      await t.delete('types', where: 'category_id=? AND name=?', whereArgs: [categoryId, name]);
+      await _enqueue(t, 'types.delete', {'category_id': categoryId, 'name': name});
+    });
+    version.value++;
+  }
+
   // ======================= خرید =======================
   /// فقط خریدهای واقعی (بارهای مخلوط/کوت‌ریزی اینجا نمایش داده نمی‌شوند)
   Future<List<Map<String, dynamic>>> purchases() async {

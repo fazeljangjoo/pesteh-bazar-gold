@@ -1,3 +1,4 @@
+import 'catalog_manage_ui.dart' show CatalogManageScreen; // v83
 import 'dart:convert';
 import 'dart:io' show Platform;
 import 'dart:typed_data';
@@ -675,6 +676,15 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
                 ),
                 const SizedBox(width: 8),
                 IconButton.filledTonal(onPressed: _addCategory, icon: const Icon(Icons.add), tooltip: 'افزودن دسته'),
+                const SizedBox(width: 4),
+                IconButton(
+                  tooltip: 'مدیریت دسته‌ها و انواع (تغییر نام، حذف)',
+                  icon: const Icon(Icons.edit_note),
+                  onPressed: () async {
+                    await Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const CatalogManageScreen()));
+                    if (mounted) await _loadCategories(select: _categoryId);
+                  },
+                ),
               ]),
             )),
             locked(!_freeType
