@@ -1,0 +1,312 @@
+{
+    "crack": [
+        {
+            "name": "user example",
+            "input": {
+                "name": "user example",
+                "in": 75,
+                "gram": 47.3,
+                "kernel": 34.95,
+                "buy": 306.6666666666667,
+                "crack": 8,
+                "line": 0.5,
+                "uncr": 0,
+                "hull": 0,
+                "out": 75
+            },
+            "expect": {
+                "init_gram": 47.3,
+                "recv_gram": 46.60000000000001,
+                "loss_gram": 0.6999999999999886,
+                "loss_pct": 1.4799154334037816,
+                "unit_cost": 666.083,
+                "expected_kernel_kg": 35.099999999999994,
+                "cracked_kg": 75.0,
+                "loss_kg": 0.5249999999999915,
+                "expected_loss_kg": 0.375,
+                "gram_vs_line": 0.19999999999998863,
+                "waste_kg": 0.0,
+                "uncracked_cost": 306.6667
+            }
+        },
+        {
+            "name": "uncracked + hull value + waste",
+            "input": {
+                "name": "uncracked + hull value + waste",
+                "in": 75,
+                "gram": 47.3,
+                "kernel": 30,
+                "buy": 306.6666666666667,
+                "crack": 8,
+                "line": 0.5,
+                "uncr": 10,
+                "hull": 500,
+                "out": 72
+            },
+            "expect": {
+                "init_gram": 47.3,
+                "recv_gram": 46.15384615384615,
+                "loss_gram": 1.1461538461538439,
+                "loss_pct": 2.423158237111721,
+                "unit_cost": 655.7778,
+                "expected_kernel_kg": 30.419999999999998,
+                "cracked_kg": 65.0,
+                "loss_kg": 0.7449999999999984,
+                "expected_loss_kg": 0.325,
+                "gram_vs_line": 0.6461538461538439,
+                "waste_kg": 3.0,
+                "uncracked_cost": 306.6667
+            }
+        },
+        {
+            "name": "no gram",
+            "input": {
+                "name": "no gram",
+                "in": 100,
+                "gram": null,
+                "kernel": 40,
+                "buy": 200,
+                "crack": 0,
+                "line": null,
+                "uncr": 0,
+                "hull": 0,
+                "out": null
+            },
+            "expect": {
+                "init_gram": null,
+                "recv_gram": 40.0,
+                "loss_gram": null,
+                "loss_pct": null,
+                "unit_cost": 500.0,
+                "expected_kernel_kg": null,
+                "cracked_kg": 100.0,
+                "loss_kg": null,
+                "expected_loss_kg": null,
+                "gram_vs_line": null,
+                "waste_kg": null,
+                "uncracked_cost": 200.0
+            }
+        },
+        {
+            "name": "no price",
+            "input": {
+                "name": "no price",
+                "in": 100,
+                "gram": 45,
+                "kernel": 44,
+                "buy": null,
+                "crack": 5,
+                "line": 0.7,
+                "uncr": 0,
+                "hull": 0,
+                "out": 99.5
+            },
+            "expect": {
+                "init_gram": 45.0,
+                "recv_gram": 44.0,
+                "loss_gram": 1.0,
+                "loss_pct": 2.2222222222222223,
+                "unit_cost": null,
+                "expected_kernel_kg": 44.3,
+                "cracked_kg": 100.0,
+                "loss_kg": 1.0,
+                "expected_loss_kg": 0.7,
+                "gram_vs_line": 0.30000000000000004,
+                "waste_kg": 0.5,
+                "uncracked_cost": null
+            }
+        },
+        {
+            "name": "no kernel",
+            "input": {
+                "name": "no kernel",
+                "in": 100,
+                "gram": 45,
+                "kernel": 0,
+                "buy": 200,
+                "crack": 5,
+                "line": 0.7,
+                "uncr": 0,
+                "hull": 0,
+                "out": 0
+            },
+            "expect": {
+                "init_gram": 45.0,
+                "recv_gram": null,
+                "loss_gram": null,
+                "loss_pct": null,
+                "unit_cost": null,
+                "expected_kernel_kg": 44.3,
+                "cracked_kg": 100.0,
+                "loss_kg": null,
+                "expected_loss_kg": 0.7,
+                "gram_vs_line": null,
+                "waste_kg": 100.0,
+                "uncracked_cost": 200.0
+            }
+        }
+    ],
+    "split": [
+        {
+            "name": "priced by-product",
+            "input": {
+                "name": "priced by-product",
+                "rows": [
+                    {
+                        "kg": 60,
+                        "price": null
+                    },
+                    {
+                        "kg": 10,
+                        "price": 50
+                    },
+                    {
+                        "kg": 20,
+                        "price": null
+                    }
+                ],
+                "total": 30000
+            },
+            "expect": {
+                "lots": [
+                    22125.0,
+                    500.0,
+                    7375.0
+                ],
+                "residual": 29500.0,
+                "priced": 500.0,
+                "unit": 368.75
+            }
+        },
+        {
+            "name": "rounding thirds",
+            "input": {
+                "name": "rounding thirds",
+                "rows": [
+                    {
+                        "kg": 33.333,
+                        "price": null
+                    },
+                    {
+                        "kg": 33.333,
+                        "price": null
+                    },
+                    {
+                        "kg": 33.334,
+                        "price": null
+                    }
+                ],
+                "total": 10000
+            },
+            "expect": {
+                "lots": [
+                    3333.3,
+                    3333.3,
+                    3333.4
+                ],
+                "residual": 10000.0,
+                "priced": 0.0,
+                "unit": 100.0
+            }
+        },
+        {
+            "name": "all priced",
+            "input": {
+                "name": "all priced",
+                "rows": [
+                    {
+                        "kg": 10,
+                        "price": 100
+                    },
+                    {
+                        "kg": 30,
+                        "price": 20
+                    }
+                ],
+                "total": 5000
+            },
+            "expect": {
+                "lots": [
+                    1850.0,
+                    3150.0
+                ],
+                "residual": 3400.0,
+                "priced": 1600.0,
+                "unit": 85.0
+            }
+        },
+        {
+            "name": "negative residual",
+            "input": {
+                "name": "negative residual",
+                "rows": [
+                    {
+                        "kg": 10,
+                        "price": null
+                    },
+                    {
+                        "kg": 50,
+                        "price": 100
+                    }
+                ],
+                "total": 1000
+            },
+            "expect": {
+                "lots": [
+                    -4000.0,
+                    5000.0
+                ],
+                "residual": -4000.0,
+                "priced": 5000.0,
+                "unit": -400.0
+            }
+        }
+    ],
+    "grades": [
+        {
+            "preset": "waste",
+            "kind": "پوست",
+            "expect": "hull"
+        },
+        {
+            "preset": "waste",
+            "kind": "بدشکل و ریز",
+            "expect": "deformed_fine"
+        },
+        {
+            "preset": "waste",
+            "kind": "خاك",
+            "expect": "soil"
+        },
+        {
+            "preset": "waste",
+            "kind": "بدرنگ",
+            "expect": "discolored"
+        },
+        {
+            "preset": "waste",
+            "kind": "چفت",
+            "expect": "chaft"
+        },
+        {
+            "preset": "waste",
+            "kind": "چیز دیگر",
+            "expect": "custom"
+        },
+        {
+            "preset": "kernel",
+            "kind": "مغز سوپر",
+            "expect": "kernel"
+        },
+        {
+            "preset": "khandan",
+            "kind": "اکبری",
+            "expect": "sound"
+        },
+        {
+            "preset": null,
+            "kind": "هر چیز",
+            "expect": "sound"
+        }
+    ]
+}

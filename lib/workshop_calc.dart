@@ -32,7 +32,7 @@ const List<String> kWsCrackGrades = <String>['kernel', 'hull', 'uncracked'];
 /// درجه‌های غیرسالم (جزو P). آینهٔ PB_WS_SUB_GRADES.
 const List<String> kWsSubGrades = <String>['deformed_fine', 'hull', 'kernel', 'soil', 'discolored', 'chaft', 'dombest', 'custom', 'uncracked'];
 
-const List<String> kWsOpTypes = <String>['dehull', 'desoil', 'split', 'fines', 'crack'];
+const List<String> kWsOpTypes = <String>['dehull', 'desoil', 'split', 'fines', 'crack', 'production', 'abkhandan'];
 
 const Map<String, String> kWsOpLabels = <String, String>{
   'dehull': 'پوست‌گیری',
@@ -40,7 +40,85 @@ const Map<String, String> kWsOpLabels = <String, String>{
   'split': 'جداسازی پوست و مغز',
   'fines': 'ریزبرداری و بدشکل',
   'crack': 'شکست',
+  'production': 'تولید',
+  'abkhandan': 'آبخندان',
 };
+
+/// v81: انواعی که فرم «شروع عملیات» نشان می‌دهد (آینهٔ PB_WS_OPEN_TYPES). انواع قدیمی فقط برای نمایش داده‌های قدیمی.
+const List<String> kWsOpenTypes = <String>['crack', 'production', 'abkhandan'];
+
+/// v81: عملیات تک‌لاتی (آینهٔ PB_WS_SINGLE_LOT_TYPES).
+const List<String> kWsSingleLotTypes = <String>['production', 'abkhandan'];
+
+/// v81: انواع پیش‌فرض «تولید» (آینهٔ PB_WS_PROD_KINDS)؛ کاربر می‌تواند نوع تازه اضافه کند.
+const List<String> kWsProdKinds = <String>['ریزبرداری و بدشکل', 'بدرنگ‌گیری', 'پوست‌گیری', 'چفت‌گیری', 'خاک‌گیری', 'جمع‌آوری مغز', 'سورت', 'درجه‌بندی'];
+
+/// v81: درجهٔ تراز یک خروجی از روی preset دستهٔ کالا و نام نوع (آینهٔ `pb_ws_grade_for`).
+String wsGradeFor(String? preset, String? kind) {
+  if (preset == 'kernel') return 'kernel';
+  if (preset == 'waste') {
+    final String k = (kind ?? '').replaceAll('ي', 'ی').replaceAll('ك', 'ک').replaceAll('‌', '').replaceAll(' ', '');
+    const List<List<String>> map = <List<String>>[
+      <String>['پوست', 'hull'], <String>['خاک', 'soil'], <String>['بدرنگ', 'discolored'], <String>['چفت', 'chaft'],
+      <String>['بدشکل', 'deformed_fine'], <String>['ریز', 'deformed_fine'],
+    ];
+    for (final List<String> m in map) {
+      if (k.contains(m[0])) return m[1];
+    }
+    return 'custom';
+  }
+  return 'sound';
+}
+
+/// v81: نتیجهٔ تقسیم بها (آینهٔ `pb_ws_split_cost`).
+class WsSplit {
+  const WsSplit(this.lots, this.residual, this.priced, this.unit);
+  final List<double> lots;
+  final double residual;
+  final double priced;
+  final double? unit;
+}
+
+double _r2(num v) {
+  final double r = (v * 100).round() / 100;
+  return r == 0 ? 0.0 : r;
+}
+
+/// v81: تقسیم بهای کل بین خروجی‌ها (تولید/آبخندان): ردیف قیمت‌دار = وزن × قیمت؛ باقی به نسبت وزن روی ردیف‌های بی‌قیمت
+/// (همه قیمت‌دار ⇒ روی همه). ضایعات/افت بها ندارد ⇒ روی خروجی‌ها پخش می‌شود. آینهٔ `pb_ws_split_cost`.
+WsSplit wsSplitCost(List<Map<String, num?>> rows, num total) {
+  final double t = _r2(total);
+  final List<double> lots = List<double>.filled(rows.length, 0);
+  double priced = 0;
+  final List<int> free = <int>[];
+  for (int i = 0; i < rows.length; i++) {
+    final num? p = rows[i]['price'];
+    if (p != null) {
+      lots[i] = _r2(wsGrams(rows[i]['kg']) / 1000 * p);
+      priced += lots[i];
+    } else {
+      free.add(i);
+    }
+  }
+  priced = _r2(priced);
+  final double residual = _r2(t - priced);
+  final List<int> group = free.isNotEmpty ? free : List<int>.generate(rows.length, (int i) => i);
+  int gKg = 0;
+  for (final int i in group) {
+    gKg += wsGrams(rows[i]['kg']);
+  }
+  final double? unit = gKg > 0 ? (residual / (gKg / 1000) * 10000).round() / 10000 : null;
+  if (gKg > 0) {
+    double left = residual;
+    for (int j = 0; j < group.length; j++) {
+      final int i = group[j];
+      final double share = j == group.length - 1 ? _r2(left) : _r2(residual * wsGrams(rows[i]['kg']) / gKg);
+      lots[i] = _r2(lots[i] + share);
+      left = _r2(left - share);
+    }
+  }
+  return WsSplit(lots, residual, priced, unit);
+}
 
 int wsGrams(num? kg) => ((kg ?? 0) * 1000).round();
 
@@ -853,7 +931,7 @@ const Map<String, String> kWsFlowErrors = <String, String>{
 };
 
 /// کد خطای قاعده (کلید kWsFlowErrors) یا null. [inputs]/[outputs] = تعداد ردیف‌ها، [lossG] = افت خودکار به گرم.
-String? wsFlowCheck(String? status, String action, {int inputs = 0, int outputs = 0, int lossG = 0, bool allowEmpty = false, bool used = false}) {
+String? wsFlowCheck(String? status, String action, {int inputs = 0, int outputs = 0, int lossG = 0, bool allowEmpty = false, bool used = false, bool allowOver = false}) {
   switch (action) {
     case 'input_add':
     case 'output_save':
@@ -866,7 +944,7 @@ String? wsFlowCheck(String? status, String action, {int inputs = 0, int outputs 
       if (status != kWsOpen) return 'not_open';
       if (inputs < 1) return 'no_input';
       if (outputs < 1 && !allowEmpty) return 'no_output';
-      return lossG < 0 ? 'over_output' : null;
+      return (lossG < 0 && !allowOver) ? 'over_output' : null; // v81: آبخندان وزن می‌گیرد
     case 'reopen':
       if (status != 'done') return 'not_done';
       return used ? 'outputs_used' : null;
@@ -916,7 +994,7 @@ WsFlowStep wsFlowApply(Map<String, dynamic> s0, String action, Map<String, dynam
       for (final dynamic it in (p['items'] as List<dynamic>? ?? const <dynamic>[])) {
         ins.add(Map<String, dynamic>.from(it as Map));
       }
-      for (final String k in <String>['uid', 'op_type', 'owner', 'pistachio_type', 'defect_note', 'initial_kg', 'bale_count', 'note', 'crack_line_uid', 'crack_line_name', 'crack_loss_gram', 'input_gram']) {
+      for (final String k in <String>['uid', 'op_type', 'owner', 'pistachio_type', 'defect_note', 'initial_kg', 'bale_count', 'note', 'crack_line_uid', 'crack_line_name', 'crack_loss_gram', 'input_gram', 'prod_kind']) {
         if (p.containsKey(k)) s[k] = p[k];
       }
       s['started_at'] = p['start_date'] ?? p['date'];
@@ -956,15 +1034,19 @@ WsFlowStep wsFlowApply(Map<String, dynamic> s0, String action, Map<String, dynam
     case 'close':
       if (status == 'done') break;
       final WsBalance t = wsFlowTotals(s);
-      err = wsFlowCheck(status, 'close', inputs: ins.length, outputs: outs.length, lossG: wsGrams(t.lossKg));
+      err = wsFlowCheck(status, 'close', inputs: ins.length, outputs: outs.length, lossG: wsGrams(t.lossKg), allowOver: s['op_type'] == 'abkhandan');
       if (err == null) {
         s['status'] = 'done';
         if (p['end_date'] != null) s['closed_at'] = p['end_date'];
       }
       break;
-    case 'crack_cost': // v80: هزینهٔ شکست هر کیلو مغز (فقط عملیات باز)
+    case 'crack_cost': // v80: هزینهٔ شکست هر کیلو مغز؛ v81: + اجرت هر کیلو و سایر هزینه‌ها (فقط عملیات باز؛ کلید غایب = بدون تغییر)
       err = wsFlowCheck(status, 'output_save');
-      if (err == null) s['crack_cost_per_kg'] = p['crack_cost_per_kg'];
+      if (err == null) {
+        for (final String k in <String>['crack_cost_per_kg', 'wage_per_kg', 'other_cost']) {
+          if (p.containsKey(k)) s[k] = p[k];
+        }
+      }
       break;
     case 'reopen':
       if (status == kWsOpen) break;
@@ -1024,34 +1106,68 @@ WsCrackEstimate wsCrackEstimate(List<Map<String, num?>> inputs, num? lossGram) {
   );
 }
 
-/// v80 — اطلاعات خروجی عملیات «شکست» (آینهٔ `pb_ws_crack_result`):
-///   [initGram]   گرم اولیه (گرم ارسالی)
-///   [recvGram]   گرم دریافتی = وزن مغز × ۱۰۰ ÷ وزن خالص ورودی
-///   [lossGram]   افت گرم = گرم اولیه − گرم دریافتی
-///   [lossPct]    درصد پرتی = افت گرم × ۱۰۰ ÷ گرم اولیه
-///   [unitCost]   بهای تمام‌شدهٔ هر کیلو مغز (روش دقیق) = P × وزن ورودی ÷ وزن مغز + هزینهٔ شکست هر کیلو مغز (P = میانگین موزون قیمت ورودی)
-///   [expectedKernelKg] مغز مورد انتظار طبق گرم پرتی خط = (G − گرم پرتی) ÷ ۱۰۰ × وزن ورودی
+/// v80/v81 — اطلاعات خروجی عملیات «شکست» (آینهٔ `pb_ws_crack_result`؛ توضیح کامل فرمول‌ها در workshop_calc.php):
+///   وزن شکسته‌شده = ورودی − نشکن · گرم دریافتی = مغز × ۱۰۰ ÷ وزن شکسته‌شده · افت گرم = G − گرم دریافتی
+///   وزن پرتی = افت گرم ÷ ۱۰۰ × وزن شکسته‌شده · برآورد وزن پرتی = گرم پرتی خط ÷ ۱۰۰ × وزن شکسته‌شده · اختلاف با خط = افت گرم − گرم پرتی خط
+///   ضایعات = ورودی − Σ خروجی‌ها · بهای هر کیلو مغز = (P × وزن شکسته‌شده − ارزش پوست) ÷ مغز + هزینهٔ شکست · بهای نشکن = P
 class WsCrackResult {
-  const WsCrackResult({this.initGram, this.recvGram, this.lossGram, this.lossPct, this.unitCost, this.expectedKernelKg});
+  const WsCrackResult({
+    this.initGram,
+    this.recvGram,
+    this.lossGram,
+    this.lossPct,
+    this.unitCost,
+    this.expectedKernelKg,
+    this.crackedKg = 0,
+    this.lossKg,
+    this.expectedLossKg,
+    this.gramVsLine,
+    this.wasteKg,
+    this.uncrackedCost,
+  });
   final double? initGram;
   final double? recvGram;
   final double? lossGram;
   final double? lossPct;
   final double? unitCost;
   final double? expectedKernelKg;
+  final double crackedKg;
+  final double? lossKg;
+  final double? expectedLossKg;
+  final double? gramVsLine;
+  final double? wasteKg;
+  final double? uncrackedCost;
 }
 
-WsCrackResult wsCrackResult({required num inKg, num? gram, required num kernelKg, num? buyPerKg, num crackCost = 0, num? lineLoss}) {
+WsCrackResult wsCrackResult({
+  required num inKg,
+  num? gram,
+  required num kernelKg,
+  num? buyPerKg,
+  num crackCost = 0,
+  num? lineLoss,
+  num uncrackedKg = 0,
+  num hullValue = 0,
+  num? outKg,
+}) {
   final double? g = (gram != null && gram > 0) ? gram.toDouble() : null;
-  final double? recv = (inKg > 0 && kernelKg > 0) ? kernelKg * 100 / inKg : null;
+  final double cracked = (inKg - (uncrackedKg > 0 ? uncrackedKg : 0)).toDouble().clamp(0, double.infinity).toDouble();
+  final double? recv = (cracked > 0 && kernelKg > 0) ? kernelKg * 100 / cracked : null;
   final double? loss = (g != null && recv != null) ? g - recv : null;
-  final double? unit = (inKg > 0 && kernelKg > 0 && buyPerKg != null && buyPerKg > 0) ? buyPerKg * inKg / kernelKg + crackCost : null;
+  final double? unit = (cracked > 0 && kernelKg > 0 && buyPerKg != null && buyPerKg > 0) ? (buyPerKg * cracked - hullValue) / kernelKg + crackCost : null;
+  final double? line = (lineLoss != null && lineLoss >= 0) ? lineLoss.toDouble() : null;
   return WsCrackResult(
     initGram: g,
     recvGram: recv,
     lossGram: loss,
     lossPct: (g != null && loss != null) ? loss * 100 / g : null,
     unitCost: unit == null ? null : (unit * 10000).round() / 10000,
-    expectedKernelKg: (g != null && lineLoss != null && inKg > 0) ? (g - lineLoss) / 100 * inKg : null,
+    expectedKernelKg: (g != null && line != null && cracked > 0) ? (g - line) / 100 * cracked : null,
+    crackedKg: cracked,
+    lossKg: loss == null ? null : loss / 100 * cracked,
+    expectedLossKg: (line != null && cracked > 0) ? line / 100 * cracked : null,
+    gramVsLine: (loss != null && line != null) ? loss - line : null,
+    wasteKg: outKg == null ? null : ((inKg - outKg) * 1000).round() / 1000,
+    uncrackedCost: (buyPerKg != null && buyPerKg > 0) ? (buyPerKg * 10000).round() / 10000 : null,
   );
 }

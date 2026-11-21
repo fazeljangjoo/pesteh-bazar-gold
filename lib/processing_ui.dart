@@ -19,6 +19,7 @@ import 'utils.dart';
 import 'widgets.dart' show JalaliDateField;
 import 'warehouse_ui.dart' show StockApi, StockApiException, StockLookup, WhOption;
 import 'workshop_calc.dart' show kWsGradeLabels, kWsOpLabels, kWsOpen;
+import 'workshop_reports_ui.dart' show CrackLineReportScreen; // v81
 import 'workshop_flow_ui.dart' show WorkshopOpScreen, WorkshopOpenFormScreen, wsOpTile; // فاز ۲: کارگاه مرحله‌ای
 import 'workshop_ui.dart' show WorkshopFormScreen, kWsBuyLabel, kWsCostFields, kWsMissingInputCost, wsCanCost, wsParseNum, wsReadOnlyField;
 
@@ -377,6 +378,12 @@ class _ProcessingScreenState extends State<ProcessingScreen> {
               tooltip: 'ثبت یک‌جای عملیات (ورودی و خروجی با هم)',
               icon: const Icon(Icons.post_add),
               onPressed: () => _open(const WorkshopFormScreen()),
+            ),
+          if (_dir == kProcInternal)
+            IconButton(
+              tooltip: 'گزارش خطوط شکست (گرم پرتی واقعی در برابر اعلامی)',
+              icon: const Icon(Icons.query_stats),
+              onPressed: () => Navigator.push(context, MaterialPageRoute<void>(builder: (_) => const CrackLineReportScreen())),
             ),
           IconButton(tooltip: 'به‌روزرسانی', icon: const Icon(Icons.refresh), onPressed: _load),
         ],

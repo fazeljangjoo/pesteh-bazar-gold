@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -6,6 +7,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'crack_lots.dart';
 import 'crack_profit_ui.dart' show CrackProfitCard, cpPoolInfoCard, cpPoolInfoLine; // CP4
 import 'db.dart' show AppDb;
+import 'pdf_output.dart' show PdfOutput; // v81
+import 'pdf_service.dart' show PdfService; // v81
 import 'form_layout.dart' show kWideForm;
 import 'perms.dart' show StaffPerms;
 import 'processing_ui.dart' show ProcessingStore, ProcWriteResult;
@@ -1256,7 +1259,10 @@ class _CrackListScreenState extends State<CrackListScreen> {
       appBar: AppBar(
         title: Text(widget.pushed ? 'گزارش‌های خط شکست' : 'گزارش‌های خط شکست من'),
         automaticallyImplyLeading: widget.pushed,
-        actions: <Widget>[IconButton(tooltip: 'بازخوانی', icon: const Icon(Icons.refresh), onPressed: _load)],
+        actions: <Widget>[
+          IconButton(tooltip: 'چاپ / PDF', icon: const Icon(Icons.print_outlined), onPressed: _items.isEmpty ? null : _print), // v81
+          IconButton(tooltip: 'بازخوانی', icon: const Icon(Icons.refresh), onPressed: _load),
+        ],
       ),
       body: Directionality(
         textDirection: TextDirection.rtl,
@@ -1307,6 +1313,31 @@ class _CrackListScreenState extends State<CrackListScreen> {
         ),
       ),
     );
+  }
+
+  /// v81: چاپ فهرست گزارش‌های خط شکست (همان ستون‌های کاشی‌ها).
+  Future<void> _print() async {
+    String n(dynamic v, int dec) => v == null ? '—' : faNum(ReturnsHelp.d(v), dec: dec);
+    final File file = await PdfService.buildTableReport(
+      title: 'گزارش‌های خط شکست (نوبت کار دستگاه)',
+      subtitle: '${_from == null ? '' : 'از ${jalaliDateFromDt(_from!)} '}${_to == null ? '' : 'تا ${jalaliDateFromDt(_to!)}'}',
+      headers: const <String>['تاریخ', 'خط', 'نوع پسته', 'ورودی (کیلو)', 'مغز (کیلو)', 'ظرفیت (کیلو/ساعت)', 'مغزِ نشده ٪', 'توقف', 'لات‌ها'],
+      rows: <List<String>>[
+        for (final Map<String, dynamic> it in _items)
+          () {
+            final Map<String, dynamic> calc = it['calc'] is Map ? Map<String, dynamic>.from(it['calc'] as Map) : <String, dynamic>{};
+            return <String>[
+              jalaliDate('${it['run_date']}'), '${it['line_code'] ?? ''}', '${it['pistachio_type'] ?? ''}', n(calc['input_kg'], 3), n(it['kernel_kg'], 3),
+              n(calc['capacity_kgh'], 1), n(calc['loss_pct'], 2), n(calc['stop_count'], 0),
+              it['lots'] is List ? ReturnsHelp.maps(it['lots']).map((Map<String, dynamic> l) => '${l['code'] ?? ''}').join('، ') : '',
+            ];
+          }(),
+      ],
+      filePrefix: 'crack_runs',
+      pageNumbers: true,
+    );
+    if (!mounted) return;
+    await PdfOutput.show(context, file);
   }
 
   Widget _tile(Map<String, dynamic> it) {

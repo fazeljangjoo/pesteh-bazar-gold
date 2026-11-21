@@ -102,7 +102,7 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
 
   /// فی خرید (واحد ذخیره، تومان تا S29): در سند ارزی = فی ارزی × نرخ ÷ ۱۰
   String get _suggestTypeName {
-    if (_isPreset) {
+    if (!_freeType) {
       for (final Map<String, dynamic> t in _types) {
         if (t['id'] == _typeId) return '${t['name']}';
       }
@@ -206,7 +206,6 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
   }
 
   String? get _presetKey => _selectedCategory?['preset_key'] as String?;
-  bool get _isPreset => _presetKey != null;
 
   Future<void> _loadCategories({int? select}) async {
     final list = await AppDb.I.categories();
@@ -219,28 +218,37 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
     if (_categoryId != null) await _loadTypes();
   }
 
+  /// v81: نوع برای *همهٔ* دسته‌ها از فهرست مشترک انواع (با «+» نوع تازه در همهٔ فهرست‌ها).
+  /// فقط ویرایش خریدی که نوعش متن آزاد و خارج از فهرست است، متن آزاد می‌ماند (دادهٔ قدیمی دست نمی‌خورد).
+  bool _freeType = false;
+
   Future<void> _loadTypes({int? select}) async {
-    if (_categoryId == null || !_isPreset) {
+    if (_categoryId == null) {
       setState(() {
         _types = [];
         _typeId = null;
+        _freeType = false;
       });
       return;
     }
     final list = await AppDb.I.typesOf(_categoryId!);
     if (!mounted) return;
     int? resolved = select;
-    if (resolved == null && widget.existing != null) {
-      final wantName = widget.existing!['type_name'] as String?;
+    bool free = false;
+    final Map<String, dynamic>? ex = widget.existing;
+    if (resolved == null && ex != null && ex['category_id'] == _categoryId) {
+      final wantName = ex['type_name'] as String?;
       for (final t in list) {
         if (t['name'] == wantName) {
           resolved = t['id'] as int;
           break;
         }
       }
+      free = resolved == null && (wantName ?? '').trim().isNotEmpty;
     }
     setState(() {
       _types = list;
+      _freeType = free;
       _typeId = resolved ?? (list.isNotEmpty ? list.first['id'] as int : null);
     });
   }
@@ -442,9 +450,9 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
       return;
     }
     String typeName;
-    if (_isPreset) {
+    if (!_freeType) {
       if (_typeId == null) {
-        snack(context, 'نوع پسته را انتخاب کنید');
+        snack(context, _types.isEmpty ? 'برای این دسته نوعی تعریف نشده؛ با «+» نوع تازه اضافه کنید' : 'نوع پسته را انتخاب کنید');
         return;
       }
       typeName = (_types.firstWhere((t) => t['id'] == _typeId)['name']) as String;
@@ -669,7 +677,7 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
                 IconButton.filledTonal(onPressed: _addCategory, icon: const Icon(Icons.add), tooltip: 'افزودن دسته'),
               ]),
             )),
-            locked(_isPreset
+            locked(!_freeType
                 ? Padding(
                     padding: EdgeInsets.only(bottom: g),
                     child: Row(children: [
@@ -677,7 +685,8 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
                         child: DropdownButtonFormField<int>(
                           key: ValueKey('$_categoryId-$_typeId'),
                           value: _typeId,
-                          decoration: const InputDecoration(labelText: 'نوع', border: OutlineInputBorder()),
+                          decoration: InputDecoration(
+                              labelText: 'نوع', border: const OutlineInputBorder(), helperText: _types.isEmpty ? 'نوعی تعریف نشده؛ با «+» اضافه کنید' : null),
                           items: _types
                               .map((t) => DropdownMenuItem(value: t['id'] as int, child: Text(t['name'] as String)))
                               .toList(),

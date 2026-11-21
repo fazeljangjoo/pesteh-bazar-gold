@@ -20,7 +20,7 @@ import 'return_calc.dart' show settleDueRow, DueSettle; // S36: return-credit se
 
 
 const List<String> kPresetTypesNormal = ['اکبری', 'احمدآقایی', 'فندقی', 'کله‌قوچی'];
-const List<String> kPresetTypesKernel = ['مغز کال', 'مغز درجه یک', 'مغز درجه دو'];
+const List<String> kPresetTypesKernel = ['مغز سوپر', 'مغز درجه یک', 'مغز درجه دو']; // v81: آینهٔ PB_CAT_PRESETS
 
 const int kMaxCustomSpecs = 4;
 const int kMaxLumpTx = 10;

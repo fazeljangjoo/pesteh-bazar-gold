@@ -1,6 +1,10 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 
 import 'form_layout.dart' show kWideForm;
+import 'pdf_output.dart' show PdfOutput;
+import 'pdf_service.dart' show PdfService;
 import 'returns_ui.dart' show ReturnsHelp;
 import 'utils.dart';
 import 'warehouse_ui.dart' show StockApi, StockApiException;
@@ -34,6 +38,8 @@ class OutsideReceiptCtl {
   final TextEditingController nonCompany = TextEditingController();
   final TextEditingController recvKernel = TextEditingController();
   final TextEditingController recvGram = TextEditingController();
+  /// v81: گرم پرتی اعلامی فراوری‌کننده (proc_orders.crack_loss_gram) برای مقایسه با افت واقعی.
+  final TextEditingController declaredLoss = TextEditingController();
 
   OutsideReceiptCtl([Map<String, dynamic>? o]) {
     if (o == null) return;
@@ -45,6 +51,7 @@ class OutsideReceiptCtl {
     nonCompany.text = o['non_company_note'] == null ? '' : '${o['non_company_note']}';
     recvKernel.text = _onum(o['recv_kernel_kg']);
     recvGram.text = _onum(o['recv_gram_pct']);
+    declaredLoss.text = _onum(o['crack_loss_gram'] ?? o['declared_loss']);
   }
 
   void dispose() {
@@ -56,6 +63,7 @@ class OutsideReceiptCtl {
     nonCompany.dispose();
     recvKernel.dispose();
     recvGram.dispose();
+    declaredLoss.dispose();
   }
 
   static double? opt(TextEditingController c) => c.text.trim().isEmpty ? null : wsParseNum(c.text);
@@ -63,6 +71,7 @@ class OutsideReceiptCtl {
   double? get sentGramV => opt(sentGram);
   double? get recvKernelV => opt(recvKernel);
   double? get recvGramV => opt(recvGram);
+  double? get declaredLossV => opt(declaredLoss);
 
   /// [clearEmpty] = true ⇒ فیلد خالی هم با null فرستاده می‌شود (پاک‌کردن در ویرایش)؛ false ⇒ فیلد خالی ارسال نمی‌شود (ثبت اولیه).
   Map<String, dynamic> sentPayload({required bool clearEmpty}) {
@@ -81,6 +90,7 @@ class OutsideReceiptCtl {
     put('sent_gram_pct', sentGramV);
     put('cash_note', cash.text.trim());
     put('non_company_note', nonCompany.text.trim());
+    put('crack_loss_gram', declaredLossV);
     return p;
   }
 
@@ -137,6 +147,9 @@ class OutsideReceiptFields extends StatelessWidget {
             TextField(controller: ctl.sentGram, keyboardType: _numKb, onChanged: (_) => onChanged(), decoration: _dec('گرم پستهٔ ارسالی (٪)')),
           ],
           const SizedBox(height: 8),
+          TextField(
+              controller: ctl.declaredLoss, keyboardType: _numKb, onChanged: (_) => onChanged(), decoration: _dec('گرم پرتی اعلامی فراوری‌کننده (اختیاری)')),
+          const SizedBox(height: 8),
           Row(children: <Widget>[
             Expanded(child: TextField(controller: ctl.cash, decoration: _dec('کش (اختیاری)'))),
             const SizedBox(width: 8),
@@ -155,7 +168,7 @@ class OutsideReceiptFields extends StatelessWidget {
         Card(
           child: Padding(
             padding: const EdgeInsets.all(10),
-            child: OutsideCalcLines(calc: c, sentKg: sentKg),
+            child: OutsideCalcLines(calc: c, sentKg: sentKg, declaredLoss: ctl.declaredLossV),
           ),
         ),
       ],
@@ -167,7 +180,8 @@ class OutsideReceiptFields extends StatelessWidget {
 class OutsideCalcLines extends StatelessWidget {
   final OutsideCalc calc;
   final double sentKg;
-  const OutsideCalcLines({super.key, required this.calc, required this.sentKg});
+  final double? declaredLoss;
+  const OutsideCalcLines({super.key, required this.calc, required this.sentKg, this.declaredLoss});
 
   @override
   Widget build(BuildContext context) {
@@ -178,6 +192,15 @@ class OutsideCalcLines extends StatelessWidget {
         Text('وزن مغز برآوردی: ${_optKg(calc.estKernelKg)} کیلو'),
         Text('تخمین مغز باقی‌مانده: ${_optKg(calc.remainingKernelKg)} کیلو'),
         Text('افت (اختلاف گرم ارسالی و دریافتی): ${calc.lossGram == null ? '—' : faNum(calc.lossGram!, dec: 2)}'),
+        if (declaredLoss != null) Text('گرم پرتی اعلامی فراوری‌کننده: ${faNum(declaredLoss!, dec: 2)}'),
+        if (declaredLoss != null && calc.lossGram != null)
+          Text(
+            (calc.lossGram! - declaredLoss!).abs() < 0.005
+                ? 'افت واقعی برابر گرم پرتی اعلامی است'
+                : 'افت واقعی ${faNum((calc.lossGram! - declaredLoss!).abs(), dec: 2)} گرم ${calc.lossGram! > declaredLoss! ? 'بیشتر' : 'کمتر'} از اعلامی است',
+            style: TextStyle(fontWeight: FontWeight.bold, color: calc.lossGram! > declaredLoss! + 0.005 ? Colors.red : Colors.green),
+          ),
+        if (calc.lossGram != null && sentKg > 0) Text('وزن پرتی (مغز): ${_okg(calc.lossGram! / 100 * sentKg)} کیلو'),
       ],
     );
   }
@@ -215,7 +238,7 @@ class OutsideReceiptCard extends StatelessWidget {
             Text('مغز دریافتی: ${order['recv_kernel_kg'] == null ? '—' : '${_okg(order['recv_kernel_kg'])} کیلو'}'),
             Text('گرم دریافتی: ${order['recv_gram_pct'] == null ? '—' : _optPct(_od(order['recv_gram_pct']))}'),
             const Divider(),
-            OutsideCalcLines(calc: c, sentKg: _od(order['input_kg'])),
+            OutsideCalcLines(calc: c, sentKg: _od(order['input_kg']), declaredLoss: order['crack_loss_gram'] == null ? null : _od(order['crack_loss_gram'])),
             if (canEdit)
               Align(
                 alignment: AlignmentDirectional.centerEnd,
@@ -281,6 +304,35 @@ class _OutsideRawScreenState extends State<OutsideRawScreen> {
   }
 
   String _txt(dynamic v) => v == null || '$v'.isEmpty ? '—' : '$v';
+
+  /// v81: چاپ «فایل خام شکست کارگاه‌ها».
+  Future<void> _print(List<String> heads) async {
+    String c(dynamic m, String k) => m is Map ? (m[k] == null ? '—' : faNum(_od(m[k]), dec: k.endsWith('_kg') ? 3 : 2)) : '—';
+    final File file = await PdfService.buildTableReport(
+      title: 'فایل خام شکست کارگاه‌ها',
+      subtitle: _owner.text.trim().isEmpty ? '' : 'مالک: ${_owner.text.trim()}',
+      kv: <List<String>>[
+        <String>['وزن پستهٔ ارسالی (جمع)', '${_okg(_tot['sent_kg'])} کیلو'],
+        <String>['مغز دریافتی (جمع)', '${_okg(_tot['recv_kernel_kg'])} کیلو'],
+        <String>['میانگین گرم ارسالی / دریافتی', '${_pctOrDash(_tot['sent_gram_avg'])} / ${_pctOrDash(_tot['recv_gram_avg'])}'],
+        <String>['افت (میانگین)', _pctOrDash(_tot['loss_gram']), 'b'],
+      ],
+      headers: heads,
+      rows: <List<String>>[
+        for (final Map<String, dynamic> r in _items)
+          <String>[
+            jalaliDate('${r['date']}'), _txt(r['party']), _txt(r['cash_note']), _txt(r['receipt_no']),
+            r['bale_count'] == null ? '—' : faNum(_od(r['bale_count']), dec: 0), _txt(r['owner']), _okg(r['sent_kg']), _pctOrDash(r['sent_gram_pct']),
+            c(r['calc'], 'est_kernel_kg'), _kgOrDash(r['recv_kernel_kg']), _pctOrDash(r['recv_gram_pct']), c(r['calc'], 'remaining_kernel_kg'),
+            c(r['calc'], 'loss_gram'), _pctOrDash(r['crack_loss_gram']), _pctOrDash(r['gram_vs_declared']),
+          ],
+      ],
+      filePrefix: 'outside_crack_raw',
+      pageNumbers: true,
+    );
+    if (!mounted) return;
+    await PdfOutput.show(context, file);
+  }
   String _kgOrDash(dynamic v) => v == null ? '—' : _okg(v);
   String _pctOrDash(dynamic v) => v == null ? '—' : faNum(_od(v), dec: 2);
 
@@ -288,7 +340,7 @@ class _OutsideRawScreenState extends State<OutsideRawScreen> {
   Widget build(BuildContext context) {
     const List<String> heads = <String>[
       'تاریخ', 'کارگاه', 'کش', 'شمارهٔ قبض', 'عدل', 'نام مالک', 'وزن پستهٔ ارسالی', 'گرم ارسالی', 'وزن مغز برآوردی',
-      'مغز دریافتی', 'گرم دریافتی', 'تخمین مغز باقی‌مانده', 'افت',
+      'مغز دریافتی', 'گرم دریافتی', 'تخمین مغز باقی‌مانده', 'افت', 'پرتی اعلامی', 'اختلاف با اعلامی',
     ];
     DataCell cell(String s, {bool bold = false}) => DataCell(Text(s, style: bold ? const TextStyle(fontWeight: FontWeight.bold) : null));
     final List<DataRow> rows = <DataRow>[
@@ -307,6 +359,8 @@ class _OutsideRawScreenState extends State<OutsideRawScreen> {
           cell(_pctOrDash(r['recv_gram_pct'])),
           cell(_kgOrDash(r['calc'] is Map ? (r['calc'] as Map)['remaining_kernel_kg'] : null)),
           cell(_pctOrDash(r['calc'] is Map ? (r['calc'] as Map)['loss_gram'] : null)),
+          cell(_pctOrDash(r['crack_loss_gram'])),
+          cell(_pctOrDash(r['gram_vs_declared'])),
         ]),
       if (_items.isNotEmpty)
         DataRow(cells: <DataCell>[
@@ -323,12 +377,17 @@ class _OutsideRawScreenState extends State<OutsideRawScreen> {
           cell(_pctOrDash(_tot['recv_gram_avg']), bold: true),
           cell(_okg(_tot['remaining_kernel_kg']), bold: true),
           cell(_pctOrDash(_tot['loss_gram']), bold: true),
+          cell(''),
+          cell(''),
         ]),
     ];
     return Scaffold(
       appBar: AppBar(
         title: const Text('فایل خام شکست کارگاه‌ها'),
-        actions: <Widget>[IconButton(tooltip: 'به‌روزرسانی', icon: const Icon(Icons.refresh), onPressed: _load)],
+        actions: <Widget>[
+          IconButton(tooltip: 'چاپ / PDF', icon: const Icon(Icons.print_outlined), onPressed: _items.isEmpty ? null : () => _print(heads)),
+          IconButton(tooltip: 'به‌روزرسانی', icon: const Icon(Icons.refresh), onPressed: _load),
+        ],
       ),
       body: ListView(
         padding: const EdgeInsets.all(12),
