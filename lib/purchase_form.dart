@@ -1,3 +1,4 @@
+import 'purchase_pct_ui.dart' show PurchasePctCtl, PurchasePctSection; // v84: درصدها و قیمت‌گذاری مثل اتاق انس
 import 'catalog_manage_ui.dart' show CatalogManageScreen; // v83
 import 'dart:convert';
 import 'dart:io' show Platform;
@@ -89,6 +90,7 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
   final _pctCrooked = TextEditingController();
 
   final List<_CustomSpecRow> _customSpecs = [];
+  final PurchasePctCtl _pp = PurchasePctCtl(); // v84
 
   final _seller = TextEditingController();
   final _note = TextEditingController();
@@ -113,7 +115,15 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
   }
 
   bool get _useGrades => _gradesOn && _gc.hasRows && !_fxc.active; // S35.T35.3b: price = weighted average of the grade lines
-  double get _priceVal => _fxc.active ? (_fxc.priceStored ?? 0) : (_useGrades ? _gc.weightedPrice : (MoneyField.stored(_price) ?? 0).toDouble());
+  double get _priceVal => _fxc.active ? (_fxc.priceStored ?? 0) : (_useGrades ? _gc.weightedPrice : _pctPrice);
+
+  /// v84: فی خرید = میانگین هر کیلوی قیمت‌گذاری درصدها (مثل قطعی‌سازی اتاق انس) اگر «قیمت جدا»/«خرید گرمی» دارد؛ وگرنه قیمت پایه.
+  double get _pctPrice {
+    final double base = (MoneyField.stored(_price) ?? 0).toDouble();
+    if (!_pp.pricing) return base;
+    final r = _pp.blend(base, _net);
+    return (r != null && r.ok) ? r.avgPerKg.toDouble() : base;
+  }
 
   /// ارزهای فعال از کش دستگاه؛ سپس تازه‌سازی بی‌صدای کش (آنلاین) و دوباره‌خوانی نرخ.
   Future<void> _initFx() async {
@@ -128,6 +138,7 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
 
   @override
   void dispose() {
+    _pp.dispose();
     _fxc.dispose();
     _finDisc.dispose();
     _finWb.dispose();
@@ -155,6 +166,15 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
     if (LicenseService.I.isFx.value) _initFx();
     _loadWeighSettings();
     final e = widget.existing;
+    _pp.init().then((_) { // v84: تعریف درصدها و گرم مرجع ⇒ ردیف‌های ذخیره‌شده؛ مشخصه‌های درصدی از «مشخصات دلخواه» بیرون می‌روند
+      if (!mounted) return;
+      setState(() {
+        if (e != null) {
+          _pp.loadFrom(e);
+          _customSpecs.removeWhere((r) => _pp.ownsSpec(r.label.text, r.value.text));
+        }
+      });
+    });
     if (e != null) {
       if (e['gross_kg'] != null) { // S35.T35.2
         _tareManual.text = e['tare_kg'] == null ? '' : plain(e['tare_kg'] as num);
@@ -468,6 +488,11 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
       snack(context, 'وزن (خالص) باید بیشتر از صفر باشد');
       return;
     }
+    final String? pctErr = _pp.validate(); // v84
+    if (pctErr != null) {
+      snack(context, pctErr);
+      return;
+    }
     final String? fxErr = _fxc.validate();
     if (fxErr != null) {
       snack(context, fxErr);
@@ -500,6 +525,7 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
           .map((r) => {'label': r.label.text.trim(), 'value': r.value.text.trim()})
           .toList();
     }
+    customSpecs = <Map<String, String>>[...?customSpecs, ..._pp.specRows()]; // v84: درصدهای غیراصلی و گرم‌های مغز
 
     final Map<String, dynamic> data = <String, dynamic>{
       'category_id': _categoryId,
@@ -528,11 +554,8 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
         'side_cost_payer': _finPayer,
       },
       'gram': parseNum(_gram.text), // مثل پذیرش اتاق انس: برای همهٔ انواع
-      'pct_khandan': preset == 'dombest' ? parseNum(_pctKhandan.text) : null,
-      'pct_dombest': preset == 'khandan' ? parseNum(_pctDombest.text) : null,
-      'pct_tuchin': preset == 'khandan' ? parseNum(_pctTuchin.text) : null,
-      'pct_crooked': (preset == 'dombest' || preset == 'khandan') ? parseNum(_pctCrooked.text) : null,
-      'custom_specs': customSpecs != null && customSpecs.isNotEmpty
+      ..._pp.fields(), // v84: چهار درصد اصلی (pct_tuchin/dombest/crooked/khandan) برای همهٔ دسته‌ها، مثل اتاق انس
+      'custom_specs': customSpecs.isNotEmpty
           ? AppDb.encodeCustomSpecs(customSpecs)
           : null,
       'seller': _seller.text.trim().isEmpty ? null : _seller.text.trim(),
@@ -712,14 +735,8 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
                 value: _warehouseUid, useLast: !_isEdit, onChanged: (String? v) => _warehouseUid = v)),
             locked(numField(_ounce, 'انس پسته (اختیاری)', gap: g)),
             locked(numField(_gram, 'گرم (اختیاری)', gap: g)), // مثل پذیرش اتاق انس: برای همهٔ انواع
-            if (preset == 'dombest') ...[
-              locked(numField(_pctKhandan, 'درصد پسته خندان در دنبست', suffix: '٪', max: 100, gap: g)),
-              locked(numField(_pctCrooked, 'درصد پسته کج / ناخالص', suffix: '٪', max: 100, gap: g)),
-            ] else if (preset == 'khandan') ...[
-              locked(numField(_pctDombest, 'درصد دنبست در پسته خندان', suffix: '٪', max: 100, gap: g)),
-              locked(numField(_pctTuchin, 'درصد توچین', suffix: '٪', max: 100, gap: g)),
-              locked(numField(_pctCrooked, 'درصد پسته کج / ناخالص', suffix: '٪', max: 100, gap: g)),
-            ] else ...[
+            FormSpan(child: locked(PurchasePctSection(ctl: _pp, basePrice: MoneyField.stored(_price), netKg: _net, onChanged: () => setState(() {})))),
+            if (preset != 'dombest' && preset != 'khandan') ...[
               FormSpan(
                 child: locked(Row(children: [
                   Expanded(child: sectionTitle(context, 'مشخصات (حداکثر ۴ مورد دلخواه)')),
@@ -810,7 +827,7 @@ class _PurchaseFormState extends State<PurchaseForm> with EditGuard<PurchaseForm
             locked(FxDocFields(c: _fxc, priceLabel: 'فی خرید ارزی (هر کیلو)', onChanged: () => setState(() {}))),
           FormGrid(gap: 12, children: [
             if (!_fxc.active && !_useGrades)
-              locked(MoneyField(controller: _price, label: 'فی خرید (به ازای هر کیلو)', required: true, gap: g, onChanged: () => setState(() {}))),
+              locked(MoneyField(controller: _price, label: _pp.pricing ? 'قیمت پایه (هر کیلو) — فی خرید از قیمت‌گذاری درصدها' : 'فی خرید (به ازای هر کیلو)', required: true, gap: g, onChanged: () => setState(() {}))),
             MoneyField(controller: _laborCost, label: 'هزینه کارگر — اختیاری', hint: 'اگر وارد شود از سود این پسته کم می‌شود', gap: g),
             MoneyField(controller: _transportCost, label: 'هزینه حمل‌ونقل / باسکول — اختیاری', hint: 'اگر وارد شود از سود این پسته کم می‌شود', gap: g),
             if (_finOn) ...[
