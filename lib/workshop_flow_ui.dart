@@ -66,12 +66,24 @@ class WsLotPicker {
       }
       return lots;
     }
-    for (final Map<String, dynamic> r in await AppDb.I.inventoryAll()) {
-      final double rem = ReturnsHelp.d(r['remaining']);
-      if (rem <= 0 || ReturnsHelp.d(r['is_mix']) == 3) continue;
-      lots['${r['id']}'] = '${r['code'] ?? ''} · ${r['type_name'] ?? ''} · ${faNum(rem, dec: 3)} کیلو';
+    for (final Map<String, dynamic> r in await localLots()) {
+      lots['${r['id']}'] = '${r['code'] ?? ''} · ${r['type_name'] ?? ''} · ${faNum(ReturnsHelp.d(r['remaining']), dec: 3)} کیلو';
     }
     return lots;
+  }
+
+  /// v82: همهٔ لات‌های دارای موجودی (به‌جز امانی) از دیتابیس محلی. LEFT JOIN دسته ⇒ لاتی که دسته‌اش هنوز در فهرست محلی نیست
+  /// (مثلاً مغز/دستهٔ تازهٔ اتاق انس یا خروجی کارگاه) هم نمایش داده می‌شود؛ inventoryAll با JOIN آن‌ها را حذف می‌کرد.
+  static Future<List<Map<String, dynamic>>> localLots() async {
+    final db = await AppDb.I.db;
+    final List<Map<String, Object?>> rows = await db.rawQuery('''
+        SELECT p.id, p.code, p.type_name, p.seller, p.is_mix, p.remaining, p.net_weight, p.gram, p.ounce, p.category_id, p.date,
+               COALESCE(p.small_sacks_remaining, 0) AS small_left, COALESCE(p.large_sacks_remaining, 0) AS large_left,
+               c.name AS category_name, c.preset_key AS category_preset
+        FROM purchases p LEFT JOIN categories c ON c.id = p.category_id
+        WHERE p.remaining > 0.000001 AND COALESCE(p.is_mix, 0) <> 3
+        ORDER BY p.date DESC, p.id DESC''');
+    return <Map<String, dynamic>>[for (final Map<String, Object?> r in rows) Map<String, dynamic>.from(r)];
   }
 
   static Future<int> serverId(String key) async {
@@ -92,8 +104,7 @@ class WsLotPicker {
         if (i.remaining > 0) lots.add(i);
       }
     } else {
-      for (final Map<String, dynamic> r in await AppDb.I.inventoryAll()) {
-        if (ReturnsHelp.d(r['remaining']) <= 0 || ReturnsHelp.d(r['is_mix']) == 3) continue;
+      for (final Map<String, dynamic> r in await localLots()) {
         lots.add(WsLotInfo.fromRow('${r['id']}', r, smallLeft: r['small_left'], largeLeft: r['large_left']));
       }
     }
@@ -1380,7 +1391,7 @@ class _WorkshopOpScreenState extends State<WorkshopOpScreen> {
     if (!mounted) return;
     final Map<String, dynamic>? res = await showDialog<Map<String, dynamic>>(
       context: context,
-      builder: (_) => _OutputDialog(row: r, defaultOwner: '${_d['owner'] ?? ''}', op: _op, cats: _cats, inputType: _ins.isEmpty ? null : '${_ins.first['type_name'] ?? ''}'),
+      builder: (_) => WsOutputDialog(row: r, defaultOwner: '${_d['owner'] ?? ''}', op: _op, cats: _cats, inputType: _ins.isEmpty ? null : '${_ins.first['type_name'] ?? ''}'),
     );
     await _loadCats(); // دسته/نوع تازه در دیالوگ
     if (res == null) return;
@@ -1591,19 +1602,21 @@ class _TypePicker extends StatelessWidget {
 ///   v81 شکست: مغز/پوست/نشکن؛ مغز ⇒ «نوع مغز» (انواع دستهٔ مغز + افزودن)؛ «نام لات» به‌جای مالک.
 ///   v81 تولید: دستهٔ خروجی (همهٔ دسته‌ها + افزودن) و نوع خروجی (+ افزودن)، وزن ناخالص و عدل ⇒ وزن خالص، انبار، نام لات، قیمت فروش (محصول فرعی).
 ///   v81 آبخندان: دسته ثابت «خندان»؛ نوع، وزن ناخالص، عدل، انس، گرم، درصدهای اتاق انس، انبار، نام لات.
-class _OutputDialog extends StatefulWidget {
-  const _OutputDialog({this.row, required this.defaultOwner, required this.op, required this.cats, this.inputType});
+class WsOutputDialog extends StatefulWidget {
+  const WsOutputDialog({super.key, this.row, required this.defaultOwner, required this.op, required this.cats, this.inputType, this.noPrice = false});
   final Map<String, dynamic>? row;
+  /// v82: فراوری امانی ⇒ قیمت فروش نمایش داده نمی‌شود (کالا مال ما نیست).
+  final bool noPrice;
   final String defaultOwner;
   final String op;
   final List<WsCat> cats;
   final String? inputType;
 
   @override
-  State<_OutputDialog> createState() => _OutputDialogState();
+  State<WsOutputDialog> createState() => WsOutputDialogState();
 }
 
-class _OutputDialogState extends State<_OutputDialog> {
+class WsOutputDialogState extends State<WsOutputDialog> {
   bool get _crack => widget.op == 'crack';
   bool get _prod => widget.op == 'production';
   bool get _ab => widget.op == 'abkhandan';
@@ -1618,6 +1631,7 @@ class _OutputDialogState extends State<_OutputDialog> {
   late String? _kind = (widget.row?['kind_name'] as String?) ?? (_ab && (widget.inputType ?? '').isNotEmpty ? widget.inputType : null);
 
   bool get _priced {
+    if (widget.noPrice) return false;
     if (_crack) return _grade == 'hull';
     if (_ab) return false;
     if (_prod) return wsGradeFor(_cat?.preset, _kind) != 'sound';

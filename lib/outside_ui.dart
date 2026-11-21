@@ -88,8 +88,6 @@ class OutsideReceiptCtl {
     put('owner', owner.text.trim());
     put('bale_count', opt(bale));
     put('sent_gram_pct', sentGramV);
-    put('cash_note', cash.text.trim());
-    put('non_company_note', nonCompany.text.trim());
     put('crack_loss_gram', declaredLossV);
     return p;
   }
@@ -149,12 +147,6 @@ class OutsideReceiptFields extends StatelessWidget {
           const SizedBox(height: 8),
           TextField(
               controller: ctl.declaredLoss, keyboardType: _numKb, onChanged: (_) => onChanged(), decoration: _dec('گرم پرتی اعلامی فراوری‌کننده (اختیاری)')),
-          const SizedBox(height: 8),
-          Row(children: <Widget>[
-            Expanded(child: TextField(controller: ctl.cash, decoration: _dec('کش (اختیاری)'))),
-            const SizedBox(width: 8),
-            Expanded(child: TextField(controller: ctl.nonCompany, decoration: _dec('غیر شرکتی (اختیاری)'))),
-          ]),
         ],
         if (showRecv) ...<Widget>[
           if (showSent) const SizedBox(height: 8),
@@ -233,8 +225,6 @@ class OutsideReceiptCard extends StatelessWidget {
             Text('نام مالک: ${t('owner').isEmpty ? '—' : t('owner')}'),
             Text('تعداد عدل: ${order['bale_count'] == null ? '—' : faNum(_od(order['bale_count']), dec: 0)}'),
             Text('گرم پستهٔ ارسالی: ${order['sent_gram_pct'] == null ? '—' : _optPct(_od(order['sent_gram_pct']))}'),
-            if (t('cash_note').isNotEmpty) Text('کش: ${t('cash_note')}'),
-            if (t('non_company_note').isNotEmpty) Text('غیر شرکتی: ${t('non_company_note')}'),
             Text('مغز دریافتی: ${order['recv_kernel_kg'] == null ? '—' : '${_okg(order['recv_kernel_kg'])} کیلو'}'),
             Text('گرم دریافتی: ${order['recv_gram_pct'] == null ? '—' : _optPct(_od(order['recv_gram_pct']))}'),
             const Divider(),
@@ -321,7 +311,7 @@ class _OutsideRawScreenState extends State<OutsideRawScreen> {
       rows: <List<String>>[
         for (final Map<String, dynamic> r in _items)
           <String>[
-            jalaliDate('${r['date']}'), _txt(r['party']), _txt(r['cash_note']), _txt(r['receipt_no']),
+            jalaliDate('${r['date']}'), _txt(r['party']), _txt(r['receipt_no']),
             r['bale_count'] == null ? '—' : faNum(_od(r['bale_count']), dec: 0), _txt(r['owner']), _okg(r['sent_kg']), _pctOrDash(r['sent_gram_pct']),
             c(r['calc'], 'est_kernel_kg'), _kgOrDash(r['recv_kernel_kg']), _pctOrDash(r['recv_gram_pct']), c(r['calc'], 'remaining_kernel_kg'),
             c(r['calc'], 'loss_gram'), _pctOrDash(r['crack_loss_gram']), _pctOrDash(r['gram_vs_declared']),
@@ -339,7 +329,7 @@ class _OutsideRawScreenState extends State<OutsideRawScreen> {
   @override
   Widget build(BuildContext context) {
     const List<String> heads = <String>[
-      'تاریخ', 'کارگاه', 'کش', 'شمارهٔ قبض', 'عدل', 'نام مالک', 'وزن پستهٔ ارسالی', 'گرم ارسالی', 'وزن مغز برآوردی',
+      'تاریخ', 'کارگاه', 'شمارهٔ قبض', 'عدل', 'نام مالک', 'وزن پستهٔ ارسالی', 'گرم ارسالی', 'وزن مغز برآوردی',
       'مغز دریافتی', 'گرم دریافتی', 'تخمین مغز باقی‌مانده', 'افت', 'پرتی اعلامی', 'اختلاف با اعلامی',
     ];
     DataCell cell(String s, {bool bold = false}) => DataCell(Text(s, style: bold ? const TextStyle(fontWeight: FontWeight.bold) : null));
@@ -348,7 +338,6 @@ class _OutsideRawScreenState extends State<OutsideRawScreen> {
         DataRow(cells: <DataCell>[
           cell(jalaliDate('${r['date']}')),
           cell(_txt(r['party'])),
-          cell(_txt(r['cash_note'])),
           cell(_txt(r['receipt_no'])),
           cell(r['bale_count'] == null ? '—' : faNum(_od(r['bale_count']), dec: 0)),
           cell(_txt(r['owner'])),
@@ -365,7 +354,6 @@ class _OutsideRawScreenState extends State<OutsideRawScreen> {
       if (_items.isNotEmpty)
         DataRow(cells: <DataCell>[
           cell('جمع · گرم: میانگین', bold: true),
-          cell(''),
           cell(''),
           cell(''),
           cell(''),

@@ -9,6 +9,7 @@ import 'form_layout.dart' show FormGrid;
 import 'lot_cartex_calc.dart';
 import 'processing_ui.dart' show ProcessingScreen;
 import 'returns_ui.dart' show ReturnsHelp;
+import 'fmt.dart' show Fmt; // v82
 import 'utils.dart';
 import 'warehouse_ui.dart' show StockApi, StockApiException;
 
@@ -45,6 +46,9 @@ class _LotCartexViewState extends State<LotCartexView> with SingleTickerProvider
   String? _err;
   int? _yearStart; // null = سال پسته‌ای جاری (پیش‌فرض سرور)
   String _q = '';
+  // v82: ستون اختیاری «بهای هر کیلو» (فقط وقتی سرور unit_costs می‌دهد = مجوز price.view)
+  static bool _showCost = false;
+  Map<int, double> _costs = <int, double>{};
 
   @override
   void initState() {
@@ -69,6 +73,12 @@ class _LotCartexViewState extends State<LotCartexView> with SingleTickerProvider
     try {
       final j = await StockApi.call('stock.lot_cartex', <String, dynamic>{if (_yearStart != null) 'year_start': _yearStart});
       r = LotCartexReport.fromJson(j);
+      final Object? uc = j['unit_costs'];
+      _costs = <int, double>{
+        if (uc is Map)
+          for (final MapEntry<dynamic, dynamic> e in uc.entries)
+            if (int.tryParse('${e.key}') != null) int.parse('${e.key}'): double.tryParse('${e.value}') ?? 0,
+      };
       _lastMonth = r.month;
       _lastDay = r.day;
     } on StockApiException catch (e) {
@@ -173,6 +183,13 @@ class _LotCartexViewState extends State<LotCartexView> with SingleTickerProvider
           label: const Text('تنظیم بازه'),
         ),
         IconButton(tooltip: 'تازه‌سازی', onPressed: _loading ? null : _load, icon: const Icon(Icons.refresh)),
+        if (_costs.isNotEmpty)
+          FilterChip(
+            selected: _showCost,
+            label: const Text('نمایش بها'),
+            tooltip: 'ستون بهای تمام‌شدهٔ هر کیلو و ارزش مانده',
+            onSelected: (v) => setState(() => _showCost = v),
+          ),
         SizedBox(
           width: 240,
           child: TextField(
@@ -398,8 +415,21 @@ class _LotCartexViewState extends State<LotCartexView> with SingleTickerProvider
       );
 
   /// دید کلی: همهٔ لات‌ها با ستون «وضعیت» (موجود / وارد کوت / فراوری‌شده / ساخته‌شده از فراوری / فروش رفته).
+  /// v82: ستون‌های بها (فقط با «نمایش بها»).
+  List<DataColumn> get _costCols => _showCost && _costs.isNotEmpty
+      ? const <DataColumn>[DataColumn(label: Text('بهای هر کیلو'), numeric: true), DataColumn(label: Text('ارزش مانده'), numeric: true)]
+      : const <DataColumn>[];
+  List<DataCell> _costCells(LotCartexRow x) {
+    if (!_showCost || _costs.isEmpty) return const <DataCell>[];
+    final double? c = _costs[x.lotId];
+    return <DataCell>[
+      DataCell(Text(c == null ? '—' : Fmt.money(c, label: false))),
+      DataCell(Text(c == null || (x.remainingKg ?? 0) <= 0 ? '—' : Fmt.money(c * x.remainingKg!, label: false))),
+    ];
+  }
+
   Widget _overviewTable(List<LotCartexRow> rows) => _scrollTable(
-        const [
+        [
           DataColumn(label: Text('نام طرف')),
           DataColumn(label: Text('وزن خالص (کیلو)'), numeric: true),
           DataColumn(label: Text('مانده (کیلو)'), numeric: true),
@@ -407,6 +437,7 @@ class _LotCartexViewState extends State<LotCartexView> with SingleTickerProvider
           DataColumn(label: Text('گرم'), numeric: true),
           DataColumn(label: Text('تاریخ ورود')),
           DataColumn(label: Text('وضعیت')),
+          ..._costCols,
         ],
         [
           for (final x in rows)
@@ -418,6 +449,7 @@ class _LotCartexViewState extends State<LotCartexView> with SingleTickerProvider
               DataCell(Text(_og(x.gram))),
               DataCell(Text(_jd(x.entryDate))),
               DataCell(Text(x.exitLabel.isEmpty ? '—' : x.exitLabel)),
+              ..._costCells(x),
             ]),
         ],
         minWidth: 760,
@@ -425,7 +457,7 @@ class _LotCartexViewState extends State<LotCartexView> with SingleTickerProvider
 
   /// موجود در انبار: بدون نوع/تاریخ خروج (پسته هنوز در انبار است).
   Widget _stockTable(List<LotCartexRow> rows) => _scrollTable(
-        const [
+        [
           DataColumn(label: Text('نام طرف')),
           DataColumn(label: Text('وزن خالص (کیلو)'), numeric: true),
           DataColumn(label: Text('مانده (کیلو)'), numeric: true),
@@ -433,6 +465,7 @@ class _LotCartexViewState extends State<LotCartexView> with SingleTickerProvider
           DataColumn(label: Text('گرم'), numeric: true),
           DataColumn(label: Text('تاریخ ورود')),
           DataColumn(label: Text('فروخته (کیلو)'), numeric: true),
+          ..._costCols,
         ],
         [
           for (final x in rows)
@@ -444,6 +477,7 @@ class _LotCartexViewState extends State<LotCartexView> with SingleTickerProvider
               DataCell(Text(_og(x.gram))),
               DataCell(Text(_jd(x.entryDate))),
               DataCell(Text((x.soldKg ?? 0) > 0 ? faNum(x.soldKg!, dec: 3) : '—')),
+              ..._costCells(x),
             ]),
         ],
         minWidth: 640,

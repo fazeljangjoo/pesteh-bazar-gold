@@ -54,6 +54,7 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
   String _query = '';
   bool _showSold = false; // false = موجود | true = فروش رفته (مثل وب)
   bool _showMixed = false; // false = پسته‌های خریداری‌شده | true = مخلوط/جداسازی (ساخته‌شده از انبار خودمان)
+  bool _showCons = false; // v82: «موجودی انبار امانی» (is_mix=3، مال دیگران) — جدا از موجودی و ارزش انبار خودمان
   int? _groupFilter; // T3b: کلید گروه مخلوطِ انتخاب‌شده (null = همه)
 
   Future<void> _showMixDetails(BuildContext context, Map<String, dynamic> l) async {
@@ -264,11 +265,15 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
             if (all.isEmpty) return const Center(child: Text('انبار خالی است'));
 
             // انبار دو دسته است: پسته‌های خریداری‌شده | مخلوط/جداسازی‌شده (ساخته‌شده از انبار خودمان)
-            bool isMixRow(Map<String, dynamic> p) => ((p['is_mix'] as num?) ?? 0) >= 1; // 1 = mix, 2 = separation output (S07)
-            final boughtAll = all.where((p) => !isMixRow(p)).toList();
+            // v82: لات امانی (is_mix=3، فراوری امانی/امانی دریافتی) در موجودی ما نیست؛ فقط با فیلتر «موجودی انبار امانی».
+            bool isCons(Map<String, dynamic> p) => ((p['is_mix'] as num?) ?? 0).toInt() == 3;
+            bool isMixRow(Map<String, dynamic> p) => ((p['is_mix'] as num?) ?? 0) >= 1 && !isCons(p); // 1 = mix, 2 = separation output (S07)
+            final consAll = all.where(isCons).toList();
+            final boughtAll = all.where((p) => !isMixRow(p) && !isCons(p)).toList();
             final mixedAll = all.where(isMixRow).toList();
-            final kindItems = _showMixed ? mixedAll : boughtAll;
-            final otherKindItems = _showMixed ? boughtAll : mixedAll;
+            final kindItems = _showCons ? consAll : (_showMixed ? mixedAll : boughtAll);
+            final otherKindItems = _showCons ? <Map<String, dynamic>>[] : (_showMixed ? boughtAll : mixedAll);
+            final bool canCost = StaffPerms.I.can('price.view');
 
             // «موجود» مثل وب: هنوز وزنی از خودش مانده، یا مقداری از آن داخل مخلوطِ فروش‌نرفته است
             final available = kindItems.where(AppDb.isAvailable).toList();
@@ -297,7 +302,18 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
 
             final totalWaste = mixedAll.fold<double>(0, (a, p) => a + ((p['waste'] as num?) ?? 0).toDouble());
             final children = <Widget>[
-              SegmentedButton<bool>(
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: FilterChip(
+                  selected: _showCons,
+                  avatar: const Icon(Icons.swap_horiz, size: 18),
+                  label: Text('موجودی انبار امانی (${faNum(consAll.where(AppDb.isAvailable).length, dec: 0)})'),
+                  tooltip: 'پستهٔ امانی دیگران (فراوری امانی و امانی دریافتی)؛ در موجودی و ارزش انبار ما حساب نمی‌شود',
+                  onSelected: (v) => setState(() => _showCons = v),
+                ),
+              ),
+              const SizedBox(height: 8),
+              if (!_showCons) SegmentedButton<bool>(
                 segments: <ButtonSegment<bool>>[
                   ButtonSegment<bool>(
                       value: false,
@@ -340,7 +356,8 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
                   padding: const EdgeInsets.all(12),
                   child: Column(children: [
                     infoRow('مجموع موجودی (خالص)', '${faNum(totalKg)} کیلو'),
-                    infoRow('ارزش خرید موجودی', Fmt.money(totalValue)),
+                    if (!_showCons && canCost) infoRow('بهای تمام‌شدهٔ موجودی', Fmt.money(totalValue)),
+                    if (_showCons) infoRow('مالکیت', 'امانی دیگران — جزو موجودی و ارزش انبار ما نیست'),
                     infoRow('تعداد گونی کل', '${faNum(totalSmall + totalLarge)} عدد'),
                     infoRow('گونی کوچک', faNum(totalSmall)),
                     infoRow('گونی بزرگ', faNum(totalLarge)),
@@ -364,7 +381,7 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
                   child: Column(children: [
                     infoRow('تعداد خریدهای فروش‌رفته', '${faNum(soldOut.length, dec: 0)} بار'),
                     infoRow('مجموع وزن فروش‌رفته (خالص)', '${faNum(soldKg)} کیلو'),
-                    infoRow('ارزش خرید آن‌ها', Fmt.money(soldValue)),
+                    if (!_showCons && canCost) infoRow('بهای تمام‌شدهٔ آن‌ها', Fmt.money(soldValue)),
                     if (_showMixed && totalWaste > 0.0005)
                       infoRow('مجموع ضایعات ثبت‌شده', '${faNum(totalWaste)} کیلو'),
                   ]),
@@ -513,7 +530,7 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
 
   Widget _lotTile(BuildContext context, Map<String, dynamic> l) {
     final int mixKind = ((l['is_mix'] as num?) ?? 0).toInt(); // 0 buy, 1 mix, 2 separation output
-    final isMix = mixKind >= 1;
+    final isMix = mixKind == 1 || mixKind == 2; // v82: امانی (۳) مخلوط نیست
     final isSep = mixKind == 2;
     final net = (l['net_weight'] as num).toDouble();
     final rem = (l['remaining'] as num).toDouble();
@@ -522,7 +539,13 @@ class _InventoryScreenState extends State<InventoryScreen> with SingleTickerProv
     final sold = !AppDb.isAvailable(l);
     final lines = <String>[
       'کد پسته: ${l['code'] ?? '-'}',
-      'خرید ${jalaliDate(l['date'] as String)}  •  فی ${Fmt.money(l['price'] as num, label: false)}',
+      if (mixKind == 3)
+        'امانی ${(l['seller'] ?? '').toString().isEmpty ? '' : '(${l['seller']}) '}از ${jalaliDate(l['date'] as String)}'
+      else if (StaffPerms.I.can('price.view'))
+        '${mixKind == 0 ? 'خرید' : 'ساخت'} ${jalaliDate(l['date'] as String)}  •  بهای تمام‌شدهٔ هر کیلو ${Fmt.money(l['price'] as num, label: false)}'
+            '${rem > 1e-6 ? '  •  ارزش مانده ${Fmt.money(rem * (l['price'] as num).toDouble(), label: false)}' : ''}'
+      else
+        '${mixKind == 0 ? 'خرید' : 'ساخت'} ${jalaliDate(l['date'] as String)}',
       if (!sold && soldW > 1e-6) 'از ${faNum(net)} کیلو (خالص) خریداری‌شده، ${faNum(soldW)} کیلو (خالص) فروخته/مصرف شده',
       if (codes.isNotEmpty)
         '🔀 ${rem <= 1e-6 ? 'کل موجودی آن' : 'بخشی از آن'} داخل مخلوط/جداسازی ${codes.join('، ')} است (هنوز کامل فروش نرفته)',
